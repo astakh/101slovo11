@@ -105,7 +105,7 @@ async def chat(
     messages: list[dict[str, str]],
     *,
     temperature: float = 0.7,
-    max_tokens: int = 2048,
+    max_tokens: int = 5000,
     deadline_seconds: float = 45.0,
 ) -> dict:
     """Сырой вызов GigaChat API с ретраями."""
@@ -210,7 +210,7 @@ async def chat_json(
     messages: list[dict[str, str]],
     *,
     temperature: float = 0.7,
-    max_tokens: int = 2048,
+    max_tokens: int = 5000,
     deadline_seconds: float = 45.0,
     max_json_retries: int = 2,
 ) -> tuple[dict | list, int, int, int]:
