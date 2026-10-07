@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}{{ word.lemma }} — 101slovo{% endblock %}
+
+{% block content %}
+<div style="max-width: 700px; margin: 2rem auto;">
+    <p><a href="/vocabulary">← К словарю</a></p>
+
+    {# Информация о слове #}
+    <div style="background: var(--background-alt); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem;">
+        <h2 style="margin-top: 0;">
+            {{ word.lemma }}
+            {% if word.level %}<span class="badge badge-active">{{ word.level }}</span>{% endif %}
+        </h2>
+        <p><strong>Часть речи:</strong> {{ word.pos }}</p>
+        <p><strong>Переводы:</strong> {{ word.translations | join(', ') }}</p>
+        <p>
+            <strong>Словари:</strong>
+            {% if word.in_general %}<span class="badge badge-active">general</span>{% endif %}
+            {% if word.in_it %}<span class="badge badge-active">it</span>{% endif %}
+            {% if word.in_travel %}<span class="badge badge-active">travel</span>{% endif %}
+        </p>
+    </div>
+
+    {# Статус обучения #}
+    <div style="background: var(--background-alt); padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem;">
+        <h4 style="margin-top: 0;">Статус обучения</h4>
+        {% if user_word %}
+        <p><strong>Статус:</strong> <span class="badge badge-{{ user_word.status }}">{{ user_word.status }}</span></p>
+        <p><strong>Стадия:</strong> {{ user_word.stage }} / 6</p>
+        {% if user_word.status == 'active' and user_word.due_lesson_number is not none %}
+        <p><strong>Повторение:</strong>
+            {% if due_in_lessons == 0 %}
+            доступно сейчас
+            {% else %}
+            через {{ due_in_lessons }} уроков
+            {% endif %}
+        </p>
+        {% endif %}
+        {% if user_word.last_reviewed_at %}
+        <p><strong>Последнее повторение:</strong> {{ user_word.last_reviewed_at.strftime('%d.%m.%Y %H:%M') }}</p>
+        {% endif %}
+        <p><strong>Источник:</strong> {{ user_word.source }}</p>
+        {% else %}
+        <p style="color: var(--text-muted);">Это слово ещё не добавлено в ваш словарь.</p>
+        {% endif %}
+
+        {# Кнопки действий (обновляются через HTMX) #}
+        <div class="word-actions">
+            {% include "vocabulary/_word_actions.html" %}
+        </div>
+    </div>
+</div>
+{% endblock %}

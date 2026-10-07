@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Настройки — 101slovo{% endblock %}
+{% block content %}
+
+{% set selected_level = form.get('level', user.level) if form else user.level %}
+{% set selected_dictionary = form.get('dictionary_code', user.dictionary_code) if form else user.dictionary_code %}
+{% set selected_timezone = form.get('timezone', user.timezone) if form else user.timezone %}
+{% set words_value = form.get('words_per_lesson', user.words_per_lesson or 5) if form else (user.words_per_lesson or 5) %}
+{% set limit_value = form.get('daily_lesson_limit', user.daily_lesson_limit or 1) if form else (user.daily_lesson_limit or 1) %}
+{% set words_min = settings.WORDS_PER_LESSON_MIN if settings else 1 %}
+{% set words_max = settings.WORDS_PER_LESSON_MAX if settings else 10 %}
+{% set limit_max = settings.DAILY_LESSON_LIMIT_MAX if settings else 5 %}
+
+<div class="container--narrow" style="margin: 0 auto;">
+    
+    <!-- Заголовок -->
+    <div class="text-center mb-4">
+        <div style="font-size: 3.5rem; margin-bottom: 0.5rem;">⚙️</div>
+        <h1 style="margin: 0; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+            Настройки
+        </h1>
+        <p style="color: var(--text-muted); margin-top: 0.5rem; font-size: 1.0625rem;">
+            Настройте обучение под себя — изменения применятся к следующим урокам.
+        </p>
+    </div>
+    
+    {% if error %}
+        <div class="flash-error">
+            <i data-lucide="alert-circle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
+            <span>{{ error }}</span>
+        </div>
+    {% endif %}
+    
+    <form method="POST" action="/settings">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        
+        <!-- 1. Уровень -->
+        <div class="card mb-3" style="padding: 1.5rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
+                <i data-lucide="graduation-cap" style="width: 20px; height: 20px; color: var(--brand-primary);"></i>
+                <strong>1. Ваш уровень английского</strong>
+            </label>
+            <div class="grid grid-3" style="gap: 0.5rem;">
+                {% for lvl in levels %}
+                    <label class="level-option" 
+                           x-data="{ checked: '{{ selected_level }}' === '{{ lvl }}' }"
+                           :class="{ 'level-option--active': checked }"
+                           @click="checked = true; $el.querySelector('input').checked = true">
+                        <input type="radio" name="level" value="{{ lvl }}" required
+                               {% if selected_level == lvl %}checked{% endif %}
+                               style="position: absolute; opacity: 0; pointer-events: none;">
+                        <span style="font-weight: 700; font-size: 1.25rem;">{{ lvl }}</span>
+                    </label>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <!-- 2. Словарь -->
+        <div class="card mb-3" style="padding: 1.5rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
+                <i data-lucide="book" style="width: 20px; height: 20px; color: var(--brand-secondary);"></i>
+                <strong>2. Тематический словарь</strong>
+            </label>
+            <div class="grid grid-3" style="gap: 0.5rem;">
+                {% for dict in dictionaries %}
+                    <label class="dict-option"
+                           x-data="{ checked: '{{ selected_dictionary }}' === '{{ dict.code }}' }"
+                           :class="{ 'dict-option--active': checked }"
+                           @click="checked = true; $el.querySelector('input').checked = true">
+                        <input type="radio" name="dictionary_code" value="{{ dict.code }}" required
+                               {% if selected_dictionary == dict.code %}checked{% endif %}
+                               style="position: absolute; opacity: 0; pointer-events: none;">
+                        <span style="font-weight: 600;">{{ dict.name }}</span>
+                    </label>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <!-- 3. Часовой пояс -->
+        <div class="card mb-3" style="padding: 1.5rem;">
+            <label for="timezone" style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
+                <i data-lucide="globe" style="width: 20px; height: 20px; color: var(--brand-accent);"></i>
+                <strong>3. Часовой пояс</strong>
+            </label>
+            <select id="timezone" name="timezone" required>
+                {% for tz in timezones %}
+                    <option value="{{ tz }}" {% if selected_timezone == tz %}selected{% endif %}>{{ tz }}</option>
+                {% endfor %}
+            </select>
+            
+            {% if user.timezone_changed_at %}
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; padding: 0.625rem 0.875rem; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: var(--radius-md); font-size: 0.8125rem; color: #92400e;">
+                    <i data-lucide="info" style="width: 14px; height: 14px; flex-shrink: 0;"></i>
+                    <span>
+                        Последняя смена: <strong>{{ user.timezone_changed_at.strftime('%d.%m.%Y') }}</strong>. 
+                        Часовой пояс можно менять не чаще раза в 7 дней.
+                    </span>
+                </div>
+            {% endif %}
+        </div>
+        
+        <!-- 4. Слов в уроке -->
+        <div class="card mb-3" style="padding: 1.5rem;" x-data="{ val: {{ words_value }} }">
+            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
+                <i data-lucide="type" style="width: 20px; height: 20px; color: #10b981;"></i>
+                <strong>4. Слов в одном уроке:</strong>
+                <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.25rem; margin-left: 0.25rem;"></span>
+            </label>
+            <input type="range" name="words_per_lesson" 
+                   min="{{ words_min }}" max="{{ words_max }}" 
+                   value="{{ words_value }}" required 
+                   @input="val = $event.target.value" 
+                   style="width: 100%;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                <span>{{ words_min }}</span>
+                <span>{{ words_max }}</span>
+            </div>
+        </div>
+        
+        <!-- 5. Уроков в день -->
+        <div class="card mb-4" style="padding: 1.5rem;" x-data="{ val: {{ limit_value }} }">
+            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
+                <i data-lucide="calendar" style="width: 20px; height: 20px; color: #f59e0b;"></i>
+                <strong>5. Уроков в день:</strong>
+                <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.25rem; margin-left: 0.25rem;"></span>
+            </label>
+            <input type="range" name="daily_lesson_limit" 
+                   min="1" max="{{ limit_max }}" 
+                   value="{{ limit_value }}" required 
+                   @input="val = $event.target.value" 
+                   style="width: 100%;">
+        </div>
+        
+        <!-- Кнопка отправки -->
+        <button type="submit" class="btn-lg" style="width: 100%; padding: 1.125rem;">
+            <i data-lucide="save" style="width: 20px; height: 20px;"></i>
+            Сохранить настройки
+        </button>
+        
+    </form>
+</div>
+
+<style>
+    .level-option, .dict-option {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1rem;
+        background: var(--surface-50);
+        border: 2px solid var(--border-light);
+        border-radius: var(--radius-md);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+        text-align: center;
+        color: var(--text-secondary);
+    }
+    .level-option:hover, .dict-option:hover {
+        border-color: var(--brand-primary-light);
+        background: var(--surface-0);
+        transform: translateY(-1px);
+    }
+    .level-option--active, .dict-option--active {
+        border-color: var(--brand-primary) !important;
+        background: rgba(99, 102, 241, 0.08) !important;
+        color: var(--brand-primary) !important;
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    }
+</style>
+
+{% endblock %}

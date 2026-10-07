@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Дашборд — 101slovo{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+    
+    <!-- Hero -->
+    <div class="hero">
+        <p class="hero__greeting">Привет! 👋</p>
+        <h1 class="hero__title">Готов к уроку?</h1>
+    </div>
+    
+    <!-- Stats Grid -->
+    <div class="grid grid-3 mb-4">
+        <div class="stat-card">
+            <div class="stat-card__icon stat-card__icon--fire">🔥</div>
+            <div class="stat-card__value">{{ streak.current }}</div>
+            <div class="stat-card__label">Дней подряд</div>
+            <div class="stat-card__sublabel">Рекорд: {{ streak.longest }} дн.</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-card__icon stat-card__icon--book">📚</div>
+            <div class="stat-card__value">{{ word_summary.active }}</div>
+            <div class="stat-card__label">Активных слов</div>
+            <div class="stat-card__sublabel">
+                Изучено: {{ word_summary.mastered }} • Игнор: {{ word_summary.ignored }}
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-card__icon stat-card__icon--calendar">📅</div>
+            <div class="stat-card__value">{{ lessons_today }}/{{ daily_lesson_limit }}</div>
+            <div class="stat-card__label">Уроков сегодня</div>
+            <div class="stat-card__sublabel">
+                {% if lessons_today >= daily_lesson_limit %}
+                    Лимит достигнут ✓
+                {% else %}
+                    Осталось: {{ daily_lesson_limit - lessons_today }}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- CTA Section -->
+    {% if cta == 'resume' %}
+        <div class="cta-section" style="background: var(--gradient-warning);">
+            <h3>⏳ У вас есть незавершённый урок!</h3>
+            <p>Продолжайте с того места, где остановились</p>
+            <a href="/lesson/{{ cta_lesson_id }}" role="button">
+                Продолжить урок →
+            </a>
+        </div>
+    {% elif cta == 'limit_reached' %}
+        <div class="cta-section" style="background: var(--gradient-success);">
+            <h3>🎉 Отличная работа!</h3>
+            <p>Лимит уроков на сегодня исчерпан. Отдохните — завтра новые вызовы!</p>
+            <a href="/vocabulary" role="button">Повторить слова</a>
+        </div>
+    {% else %}
+        <div class="cta-section">
+            <h3>🚀 Начнём новый урок?</h3>
+            <p>Подберём слова специально для вашего уровня</p>
+            <a href="/lesson/preview" role="button">
+                Подготовиться к уроку
+            </a>
+        </div>
+    {% endif %}
+    
+    {% if in_progress_lesson %}
+        <div class="card mt-4" style="background: var(--surface-0);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h4 style="margin: 0 0 0.25rem 0;">📝 Незавершённый урок #{{ in_progress_lesson.lesson_number }}</h4>
+                    <p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">
+                        Начат {{ in_progress_lesson.started_at.strftime('%d.%m.%Y в %H:%M') }}
+                    </p>
+                </div>
+                <a href="/lesson/{{ in_progress_lesson.id }}" role="button" class="secondary">
+                    Продолжить
+                </a>
+            </div>
+        </div>
+    {% endif %}
+    
+</div>
+{% endblock %}

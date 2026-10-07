@@ -1,0 +1,8 @@
+{# Частичный шаблон для обновления карточки подсказки #}
+<div class="suggestion-card" style="padding: 0.5rem; border: 1px solid var(--border); border-radius: 4px; margin-bottom: 0.5rem;">
+    {% if word.state == 'added' %}
+    <span>✅ <strong>{{ word.lemma }}</strong> — {{ word.translation }} (добавлено)</span>
+    {% elif word.state == 'ignored' %}
+    <span>🚫 <strong>{{ word.lemma }}</strong> — {{ word.translation }} (пропущено)</span>
+    {% endif %}
+</div>
