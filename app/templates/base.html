@@ -1,3 +1,4 @@
+<!-- app/templates/base.html -->
 <!DOCTYPE html>
 <html lang="ru" data-theme="light">
 <head>
@@ -5,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#6366f1">
     <title>{% block title %}101slovo{% endblock %}</title>
-    
+
     <!-- Инициализация темы до рендера (предотвращает FOUC) -->
     <script>
         (function() {
@@ -13,31 +14,33 @@
             document.documentElement.setAttribute('data-theme', theme);
         })();
     </script>
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/light.css">
+
+    <!-- Preload шрифтов (критично для скорости!) -->
+    <link rel="preload" href="/static/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-500.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-800.woff2" as="font" type="font/woff2" crossorigin>
+
+    <!-- Локальный CSS (water.css удалён — всё перекрыто custom.css) -->
     <link rel="stylesheet" href="/static/css/custom.css">
-    
-    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-    
+
+    <!-- Локальные JS библиотеки -->
+    <script src="/static/vendor/htmx.min.js"></script>
+    <script defer src="/static/vendor/alpine.min.js"></script>
+    <script defer src="/static/vendor/lucide.min.js"></script>
+
     {% block head %}{% endblock %}
 </head>
 <body>
     {% include "partials/nav.html" %}
     {% include "partials/flash.html" %}
-    
     <main class="container fade-in-up" style="padding-top: 2rem; padding-bottom: 4rem;">
         {% block content %}{% endblock %}
     </main>
-    
     <footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;">
         <p>© 2026 101slovo • Учи английский умнее с ИИ</p>
     </footer>
-    
     <script>
         document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
         document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });

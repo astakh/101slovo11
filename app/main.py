@@ -1,3 +1,4 @@
+# app/main.py
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -15,10 +16,39 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="101slovo", lifespan=lifespan)
 
+
+# Middleware для защиты от ботов (HEAD/OPTIONS)
+# ВАЖНО: добавляем ПОСЛЕ AppMiddleware, чтобы он выполнялся ПЕРВЫМ
+@app.middleware("http")
+async def bot_protection_middleware(request: Request, call_next):
+    """
+    Быстро отвечает на HEAD и OPTIONS запросы, не нагружая бэкенд.
+    Боты (Ahrefs, Semrush, сканеры) постоянно долбят эти методы.
+    """
+    if request.method == "OPTIONS":
+        return Response(
+            status_code=204,
+            headers={
+                "Allow": "GET, POST, HEAD, OPTIONS",
+                "Cache-Control": "no-store",
+            },
+        )
+    if request.method == "HEAD":
+        # Для HEAD возвращаем 200 с пустым телом, не выполняя роуты.
+        # Исключение: /health — пусть FastAPI обработает сам (нужно для мониторинга).
+        if request.url.path == "/health":
+            return await call_next(request)
+        return Response(
+            status_code=200,
+            headers={"Cache-Control": "no-store"},
+        )
+    return await call_next(request)
+
+
 # Статика
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-# Middleware
+# Middleware (выполняется ВТОРЫМ, после bot_protection)
 app.add_middleware(AppMiddleware)
 
 # Роутеры
