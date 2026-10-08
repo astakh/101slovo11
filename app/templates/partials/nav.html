@@ -4,7 +4,7 @@
             <i data-lucide="book-open" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 4px;"></i>
             101slovo
         </a>
-        
+
         <div class="navbar-menu">
             {% if request.state.user %}
                 <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
@@ -16,12 +16,16 @@
                 <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
                     <i data-lucide="settings" style="width: 16px; height: 16px;"></i> Настройки
                 </a>
+
                 {% if request.state.user.is_admin %}
-                    <a href="/admin/prompts" class="nav-link nav-link--admin">
-                        <i data-lucide="shield" style="width: 16px; height: 16px;"></i> Админ
+                    <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
+                        <i data-lucide="shield" style="width: 16px; height: 16px;"></i> Промпты
+                    </a>
+                    <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
+                        <i data-lucide="bar-chart-3" style="width: 16px; height: 16px;"></i> Статистика
                     </a>
                 {% endif %}
-                
+
                 <!-- Переключатель темы -->
                 <button onclick="toggleTheme()" class="nav-link" style="border: none; background: transparent; cursor: pointer;" title="Сменить тему">
                     <i data-lucide="sun" class="theme-icon-sun" style="width: 18px; height: 18px; display: none;"></i>
@@ -47,27 +51,29 @@
 </nav>
 
 <script>
-    function toggleTheme() {
-        const html = document.documentElement;
-        const current = html.getAttribute('data-theme');
-        const next = current === 'dark' ? 'light' : 'dark';
-        html.setAttribute('data-theme', next);
-        localStorage.setItem('theme', next);
-        updateThemeIcons(next);
+function toggleTheme() {
+    const html = document.documentElement;
+    const current = html.getAttribute('data-theme');
+    const next = current === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+    updateThemeIcons(next);
+}
+
+function updateThemeIcons(theme) {
+    const suns = document.querySelectorAll('.theme-icon-sun');
+    const moons = document.querySelectorAll('.theme-icon-moon');
+    if (theme === 'dark') {
+        suns.forEach(el => el.style.display = 'block');
+        moons.forEach(el => el.style.display = 'none');
+    } else {
+        suns.forEach(el => el.style.display = 'none');
+        moons.forEach(el => el.style.display = 'block');
     }
-    function updateThemeIcons(theme) {
-        const suns = document.querySelectorAll('.theme-icon-sun');
-        const moons = document.querySelectorAll('.theme-icon-moon');
-        if (theme === 'dark') {
-            suns.forEach(el => el.style.display = 'block');
-            moons.forEach(el => el.style.display = 'none');
-        } else {
-            suns.forEach(el => el.style.display = 'none');
-            moons.forEach(el => el.style.display = 'block');
-        }
-    }
-    // Инициализация иконок при загрузке
-    document.addEventListener('DOMContentLoaded', () => {
-        updateThemeIcons(document.documentElement.getAttribute('data-theme'));
-    });
+}
+
+// Инициализация иконок при загрузке
+document.addEventListener('DOMContentLoaded', () => {
+    updateThemeIcons(document.documentElement.getAttribute('data-theme'));
+});
 </script>
