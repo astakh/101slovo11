@@ -1,0 +1,396 @@
+<!-- app/templates/vocabulary/_add_word_modal.html -->
+<div x-data="addWordModal()"
+     x-cloak
+     @open-add-word.window="openModal()"
+     @keydown.escape.window="closeModal()">
+
+    <!-- Overlay -->
+    <div x-show="isOpen"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="modal-overlay"
+         @click.self="closeModal()">
+
+        <!-- Panel -->
+        <div class="modal-panel" @click.stop>
+
+            <!-- Заголовок -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="plus-circle" style="width: 24px; height: 24px; color: var(--brand-primary);"></i>
+                    Добавить слово
+                </h3>
+                <button @click="closeModal()"
+                        style="background: transparent; border: none; cursor: pointer; padding: 0.25rem; box-shadow: none;">
+                    <i data-lucide="x" style="width: 20px; height: 20px; color: var(--text-muted);"></i>
+                </button>
+            </div>
+
+            <!-- Форма поиска -->
+            <form @submit.prevent="searchWord()">
+                <div style="display: flex; gap: 0.75rem; margin-bottom: 0.5rem;">
+                    <input type="text"
+                           x-model="lemma"
+                           placeholder="Введите слово (например: run, book, fast)..."
+                           required
+                           x-ref="lemmaInput"
+                           style="flex: 1;">
+                    <button type="submit" :disabled="!lemma.trim() || isLoading">
+                        <template x-if="!isLoading">
+                            <span style="display: inline-flex; align-items: center; gap: 0.375rem;">
+                                <i data-lucide="search" style="width: 16px; height: 16px;"></i>
+                                Найти
+                            </span>
+                        </template>
+                        <template x-if="isLoading">
+                            <span style="display: inline-flex; align-items: center; gap: 0.375rem;">
+                                <span class="spinner"></span>
+                                Поиск...
+                            </span>
+                        </template>
+                    </button>
+                </div>
+            </form>
+
+            <!-- Результаты -->
+            <div id="add-word-results" style="margin-top: 1.25rem;">
+                <template x-if="phase === 'idle'">
+                    <div class="text-center" style="padding: 2rem 0; color: var(--text-muted);">
+                        <i data-lucide="search" style="width: 32px; height: 32px; opacity: 0.3; margin-bottom: 0.5rem;"></i>
+                        <p style="margin: 0; font-size: 0.9375rem;">Введите слово и нажмите «Найти»</p>
+                    </div>
+                </template>
+
+                <template x-if="phase === 'loading'">
+                    <div class="text-center" style="padding: 2rem 0; color: var(--text-muted);">
+                        <span class="spinner" style="width: 24px; height: 24px; border-width: 3px;"></span>
+                        <p style="margin: 0.75rem 0 0 0;">Поиск...</p>
+                    </div>
+                </template>
+
+                <template x-if="phase === 'error'">
+                    <div class="flash-error" style="margin: 0;">
+                        <i data-lucide="alert-circle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
+                        <span x-text="errorMessage"></span>
+                    </div>
+                </template>
+
+                <!-- Найдено в базе -->
+                <template x-if="phase === 'found'">
+                    <div>
+                        <div class="flash-success" style="margin-bottom: 1rem;">
+                            <i data-lucide="check-circle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
+                            Слово найдено в базе! Выберите варианты:
+                        </div>
+                        <form @submit.prevent="submitSelected()">
+                            <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem;">
+                                <template x-for="w in foundWords" :key="w.id">
+                                    <label class="word-option-card">
+                                        <input type="checkbox" :value="w.id" x-model="selectedIds">
+                                        <div style="flex: 1;">
+                                            <div style="font-weight: 700; font-size: 1.0625rem;">
+                                                <span x-text="w.lemma"></span>
+                                                <span style="color: var(--text-muted); font-weight: 400; font-size: 0.875rem;"
+                                                      x-text="'(' + w.pos + ')'"></span>
+                                            </div>
+                                            <div style="color: var(--text-secondary); font-size: 0.9375rem; margin-top: 0.25rem;"
+                                                 x-text="w.translations.join(', ')"></div>
+                                            <div style="margin-top: 0.25rem;" x-show="w.level">
+                                                <span class="badge badge-active" x-text="w.level"></span>
+                                            </div>
+                                        </div>
+                                    </label>
+                                </template>
+                            </div>
+                            <button type="submit" style="width: 100%;" :disabled="selectedIds.length === 0 || isSubmitting">
+                                <template x-if="!isSubmitting">
+                                    <span style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                                        <i data-lucide="plus" style="width: 16px; height: 16px;"></i>
+                                        Добавить выбранные (<span x-text="selectedIds.length"></span>)
+                                    </span>
+                                </template>
+                                <template x-if="isSubmitting">
+                                    <span style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                                        <span class="spinner"></span>
+                                        Добавление...
+                                    </span>
+                                </template>
+                            </button>
+                        </form>
+                    </div>
+                </template>
+
+                <!-- Не найдено — предложить генерацию -->
+                <template x-if="phase === 'not_found'">
+                    <div class="text-center" style="padding: 1.5rem 0;">
+                        <div style="font-size: 3rem; margin-bottom: 0.75rem;">🤔</div>
+                        <p style="color: var(--text-secondary); margin-bottom: 1.25rem;">
+                            Слово <strong x-text="lemma"></strong> не найдено в базе.
+                        </p>
+                        <button @click="enrichWord()" style="width: 100%;">
+                            <span style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                                <i data-lucide="sparkles" style="width: 16px; height: 16px;"></i>
+                                Сгенерировать через ИИ
+                            </span>
+                        </button>
+                    </div>
+                </template>
+
+                <!-- Генерация через LLM -->
+                <template x-if="phase === 'enriching'">
+                    <div class="text-center" style="padding: 2rem 0; color: var(--text-muted);">
+                        <span class="spinner" style="width: 24px; height: 24px; border-width: 3px;"></span>
+                        <p style="margin: 0.75rem 0 0 0;">Генерация данных через ИИ...</p>
+                    </div>
+                </template>
+
+                <!-- Результат генерации -->
+                <template x-if="phase === 'enriched'">
+                    <div>
+                        <div class="flash-info" style="margin-bottom: 1rem;">
+                            <i data-lucide="sparkles" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
+                            Слово сгенерировано через ИИ. Выберите варианты:
+                        </div>
+                        <form @submit.prevent="submitEnriched()">
+                            <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem;">
+                                <template x-for="(v, idx) in enrichedVariants" :key="idx">
+                                    <label class="word-option-card">
+                                        <input type="checkbox" :value="idx" x-model="selectedEnriched">
+                                        <div style="flex: 1;">
+                                            <div style="font-weight: 700; font-size: 1.0625rem;">
+                                                <span x-text="v.lemma"></span>
+                                                <span style="color: var(--text-muted); font-weight: 400; font-size: 0.875rem;"
+                                                      x-text="'(' + v.pos + ')'"></span>
+                                            </div>
+                                            <div style="color: var(--text-secondary); font-size: 0.9375rem; margin-top: 0.25rem;"
+                                                 x-text="v.translations.join(', ')"></div>
+                                            <div style="margin-top: 0.25rem;">
+                                                <span class="badge badge-active" x-text="v.level"></span>
+                                            </div>
+                                        </div>
+                                    </label>
+                                </template>
+                            </div>
+                            <button type="submit" style="width: 100%;" :disabled="selectedEnriched.length === 0 || isSubmitting">
+                                <template x-if="!isSubmitting">
+                                    <span style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                                        <i data-lucide="plus" style="width: 16px; height: 16px;"></i>
+                                        Добавить выбранные (<span x-text="selectedEnriched.length"></span>)
+                                    </span>
+                                </template>
+                                <template x-if="isSubmitting">
+                                    <span style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                                        <span class="spinner"></span>
+                                        Добавление...
+                                    </span>
+                                </template>
+                            </button>
+                        </form>
+                    </div>
+                </template>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+function addWordModal() {
+    return {
+        isOpen: false,
+        lemma: '',
+        phase: 'idle', // idle | loading | found | not_found | enriching | enriched | error
+        foundWords: [],
+        enrichedVariants: [],
+        selectedIds: [],
+        selectedEnriched: [],
+        isLoading: false,
+        isSubmitting: false,
+        errorMessage: '',
+
+        openModal() {
+            this.isOpen = true;
+            this.reset();
+            this.$nextTick(() => {
+                if (this.$refs.lemmaInput) this.$refs.lemmaInput.focus();
+            });
+        },
+
+        closeModal() {
+            this.isOpen = false;
+            this.reset();
+        },
+
+        reset() {
+            this.lemma = '';
+            this.phase = 'idle';
+            this.foundWords = [];
+            this.enrichedVariants = [];
+            this.selectedIds = [];
+            this.selectedEnriched = [];
+            this.isLoading = false;
+            this.isSubmitting = false;
+            this.errorMessage = '';
+        },
+
+        async searchWord() {
+            const q = this.lemma.trim();
+            if (!q) return;
+
+            this.isLoading = true;
+            this.phase = 'loading';
+            this.errorMessage = '';
+
+            try {
+                const csrf = document.cookie
+                    .split('; ')
+                    .find(r => r.startsWith('csrf='))
+                    ?.split('=')[1] || '';
+
+                const formData = new FormData();
+                formData.append('lemma', q);
+                formData.append('csrf_token', csrf);
+
+                const resp = await fetch('/vocabulary/search', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!resp.ok) {
+                    throw new Error('Ошибка сервера: ' + resp.status);
+                }
+
+                const data = await resp.json();
+
+                if (data.found && data.words && data.words.length > 0) {
+                    this.foundWords = data.words;
+                    this.selectedIds = data.words.map(w => w.id);
+                    this.phase = 'found';
+                } else {
+                    this.phase = 'not_found';
+                }
+            } catch (e) {
+                this.phase = 'error';
+                this.errorMessage = e.message || 'Неизвестная ошибка';
+            } finally {
+                this.isLoading = false;
+            }
+        },
+
+        async enrichWord() {
+            const q = this.lemma.trim();
+            if (!q) return;
+
+            this.phase = 'enriching';
+            this.errorMessage = '';
+
+            try {
+                const csrf = document.cookie
+                    .split('; ')
+                    .find(r => r.startsWith('csrf='))
+                    ?.split('=')[1] || '';
+
+                const formData = new FormData();
+                formData.append('lemma', q);
+                formData.append('csrf_token', csrf);
+
+                const resp = await fetch('/vocabulary/enrich', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!resp.ok) {
+                    throw new Error('Ошибка генерации: ' + resp.status);
+                }
+
+                const data = await resp.json();
+
+                if (data.variants && data.variants.length > 0) {
+                    this.enrichedVariants = data.variants;
+                    this.selectedEnriched = data.variants.map((_, i) => i);
+                    this.phase = 'enriched';
+                } else {
+                    this.phase = 'error';
+                    this.errorMessage = 'ИИ не вернул данные для этого слова';
+                }
+            } catch (e) {
+                this.phase = 'error';
+                this.errorMessage = e.message || 'Ошибка генерации';
+            }
+        },
+
+        async submitSelected() {
+            if (this.selectedIds.length === 0) return;
+            this.isSubmitting = true;
+
+            try {
+                const csrf = document.cookie
+                    .split('; ')
+                    .find(r => r.startsWith('csrf='))
+                    ?.split('=')[1] || '';
+
+                const formData = new FormData();
+                formData.append('csrf_token', csrf);
+                this.selectedIds.forEach(id => formData.append('word_ids', id));
+
+                const resp = await fetch('/vocabulary/add-selected', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!resp.ok) {
+                    throw new Error('Ошибка добавления: ' + resp.status);
+                }
+
+                window.location.href = '/vocabulary';
+            } catch (e) {
+                this.isSubmitting = false;
+                this.phase = 'error';
+                this.errorMessage = e.message || 'Ошибка добавления';
+            }
+        },
+
+        async submitEnriched() {
+            if (this.selectedEnriched.length === 0) return;
+            this.isSubmitting = true;
+
+            try {
+                const csrf = document.cookie
+                    .split('; ')
+                    .find(r => r.startsWith('csrf='))
+                    ?.split('=')[1] || '';
+
+                const formData = new FormData();
+                formData.append('csrf_token', csrf);
+                formData.append('mode', 'enriched');
+                this.selectedEnriched.forEach(idx => {
+                    const v = this.enrichedVariants[idx];
+                    formData.append('variant_lemma', v.lemma);
+                    formData.append('variant_pos', v.pos);
+                    formData.append('variant_level', v.level);
+                    formData.append('variant_translations', v.translations.join(','));
+                });
+
+                const resp = await fetch('/vocabulary/add-enriched', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!resp.ok) {
+                    throw new Error('Ошибка добавления: ' + resp.status);
+                }
+
+                window.location.href = '/vocabulary';
+            } catch (e) {
+                this.isSubmitting = false;
+                this.phase = 'error';
+                this.errorMessage = e.message || 'Ошибка добавления';
+            }
+        },
+    };
+}
+</script>

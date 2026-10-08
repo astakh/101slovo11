@@ -35,16 +35,29 @@
 <body>
     {% include "partials/nav.html" %}
     {% include "partials/flash.html" %}
+    
     <main class="container fade-in-up" style="padding-top: 2rem; padding-bottom: 4rem;">
         {% block content %}{% endblock %}
     </main>
+    
     <footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;">
         <p>© 2026 101slovo • Учи английский умнее с ИИ</p>
     </footer>
+    
     <script>
         document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
         document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
+        
+        // Глобальный Alpine store для модалок
+        document.addEventListener('alpine:init', () => {
+            Alpine.store('addWordModal', {
+                isOpen: false,
+                open() { this.isOpen = true; },
+                close() { this.isOpen = false; }
+            });
+        });
     </script>
+    
     {% block scripts %}{% endblock %}
 </body>
 </html>

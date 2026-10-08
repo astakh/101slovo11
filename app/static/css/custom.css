@@ -797,3 +797,60 @@ tbody tr:last-child td { border-bottom: none; }
 .skeleton-loader {
     display: none;
 }
+ 
+
+/* === ADD WORD MODAL === */
+[x-cloak] {
+    display: none !important;
+}
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 10vh 1rem 2rem 1rem;
+}
+
+.modal-panel {
+    width: 100%;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
+    background: var(--surface-0);
+    border-radius: var(--radius-xl);
+    padding: 2rem;
+    box-shadow: var(--shadow-xl);
+    animation: fadeInUp 0.25s ease-out;
+}
+
+.word-option-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
+    background: var(--surface-50);
+    border: 1.5px solid var(--border-light);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.word-option-card:hover {
+    border-color: var(--brand-primary-light);
+    background: var(--surface-0);
+    box-shadow: var(--shadow-sm);
+}
+
+.word-option-card input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    margin-top: 2px;
+    accent-color: var(--brand-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+}

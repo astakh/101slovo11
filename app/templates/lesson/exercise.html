@@ -1,69 +1,80 @@
 {% extends "base.html" %}
 {% block title %}Урок #{{ lesson.lesson_number }} — 101slovo{% endblock %}
+
+{% block head %}
+<style>
+  button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none !important;
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="container--narrow" style="margin: 0 auto;">
-    
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-        <div>
-            <h2 style="margin: 0;">Урок #{{ lesson.lesson_number }}</h2>
-            <p style="margin: 0.25rem 0 0 0; color: var(--text-muted);">
-                Упражнение {{ exercise.order_index + 1 }}
-            </p>
-        </div>
-        <a href="/dashboard" class="secondary" style="padding: 0.5rem 1rem;">
-            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
-            Завершить
-        </a>
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+    <div>
+      <h2 style="margin: 0;">Урок #{{ lesson.lesson_number }}</h2>
+      <p style="margin: 0.25rem 0 0 0; color: var(--text-muted);">
+        Упражнение {{ exercise.order_index + 1 }}
+      </p>
     </div>
-    
-    <div id="exercise-container">
-        <div class="exercise-card">
-            <div style="margin-bottom: 0.5rem;">
-                <span class="badge badge-active">
-                    <i data-lucide="message-circle" style="width: 12px; height: 12px;"></i>
-                    Предложение
-                </span>
-            </div>
-            
-            <p class="exercise-sentence">{{ exercise.target_sentence }}</p>
-            
-            <div class="exercise-words">
-                {% for tw in exercise.target_words %}
-                    <span class="badge badge-active">
-                        <strong>{{ tw.lemma }}</strong>
-                        <span style="opacity: 0.7; font-weight: 400;">({{ tw.pos }})</span>
-                    </span>
-                {% endfor %}
-            </div>
-            
-            <form hx-post="/lesson/evaluate"
-                  hx-target="#exercise-container"
-                  hx-swap="innerHTML"
-                  hx-indicator="#eval-spinner">
-                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-                <input type="hidden" name="exercise_id" value="{{ exercise.id }}">
-                
-                <label for="user_translation" style="display: flex; align-items: center; gap: 0.5rem;">
-                    <i data-lucide="pen-line" style="width: 16px; height: 16px;"></i>
-                    Ваш перевод на русский
-                </label>
-                <textarea id="user_translation"
-                          name="user_translation"
-                          rows="4"
-                          required
-                          placeholder="Введите перевод предложения..."
-                          autofocus></textarea>
-                
-                <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 1rem;">
-                    <button type="submit" style="flex: 1;">
-                        <i data-lucide="check" style="width: 16px; height: 16px;"></i>
-                        Проверить перевод
-                    </button>
-                    {% include "partials/spinner.html" %}
-                </div>
-            </form>
+    <a href="/dashboard" class="secondary" style="padding: 0.5rem 1rem;">
+      <i data-lucide="x" style="width: 16px; height: 16px;"></i>
+      Завершить
+    </a>
+  </div>
+
+  <div id="exercise-container">
+    <div class="exercise-card">
+      <div style="margin-bottom: 0.5rem;">
+        <span class="badge badge-active">
+          <i data-lucide="message-circle" style="width: 12px; height: 12px;"></i>
+          Предложение
+        </span>
+      </div>
+
+      <p class="exercise-sentence">{{ exercise.target_sentence }}</p>
+
+      <div class="exercise-words">
+        {% for tw in exercise.target_words %}
+          <span class="badge badge-active">
+            <strong>{{ tw.lemma }}</strong>
+            <span style="opacity: 0.7; font-weight: 400;">({{ tw.pos }})</span>
+          </span>
+        {% endfor %}
+      </div>
+
+      <form hx-post="/lesson/evaluate"
+            hx-target="#exercise-container"
+            hx-swap="innerHTML"
+            hx-indicator="#eval-spinner">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <input type="hidden" name="exercise_id" value="{{ exercise.id }}">
+
+        <label for="user_translation" style="display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="pen-line" style="width: 16px; height: 16px;"></i>
+          Ваш перевод на русский
+        </label>
+        <textarea id="user_translation"
+                  name="user_translation"
+                  rows="4"
+                  required
+                  placeholder="Введите перевод предложения..."
+                  autofocus></textarea>
+
+        <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 1rem;">
+          <button type="submit" style="flex: 1;" hx-disabled-elt="this">
+            <i data-lucide="check" style="width: 16px; height: 16px;"></i>
+            Проверить перевод
+          </button>
+          {% set spinner_id = "eval-spinner" %}
+          {% include "partials/spinner.html" %}
         </div>
+      </form>
     </div>
-    
+  </div>
 </div>
 {% endblock %}

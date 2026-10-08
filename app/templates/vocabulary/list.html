@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Словарь — 101slovo{% endblock %}
 {% block content %}
-<div class="container--medium" style="margin: 0 auto;">
-    
+<div class="container--medium" style="margin: 0 auto;"
+     x-data="vocabPage()">
+
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
         <div>
             <h2 style="margin: 0;">📖 Мой словарь</h2>
@@ -10,8 +11,13 @@
                 Всего слов: {{ total }}
             </p>
         </div>
+        <button @click="openModal()"
+                style="display: inline-flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="plus" style="width: 16px; height: 16px;"></i>
+            Добавить слово
+        </button>
     </div>
-    
+
     <!-- Filters -->
     <form method="GET" action="/vocabulary" class="card" style="margin-bottom: 1.5rem;">
         <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 0.75rem; align-items: end;">
@@ -31,52 +37,279 @@
             <button type="submit">Применить</button>
         </div>
     </form>
-    
+
     {% if not items %}
-        <div class="card text-center" style="padding: 4rem 2rem;">
-            <div style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;">📭</div>
-            <h3 style="margin: 0 0 0.5rem 0;">Слов не найдено</h3>
-            <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
-                {% if q or status %}
-                    Попробуйте изменить фильтры
-                {% else %}
-                    Начните урок, чтобы добавить первые слова!
-                {% endif %}
-            </p>
-            <a href="/lesson/preview" role="button">Начать урок</a>
-        </div>
+    <div class="card text-center" style="padding: 4rem 2rem;">
+        <div style="font-size: 3rem; opacity: 0.3; margin-bottom: 1rem;">📭</div>
+        <h3 style="margin: 0 0 0.5rem 0;">Слов не найдено</h3>
+        <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+            {% if q or status %}
+                Попробуйте изменить фильтры
+            {% else %}
+                Начните урок, чтобы добавить первые слова!
+            {% endif %}
+        </p>
+        <a href="/lesson/preview" role="button">Начать урок</a>
+    </div>
     {% else %}
-        <div>
-            {% for item in items %}
-                <a href="/vocabulary/{{ item.word_id }}" class="word-item">
-                    <div class="word-item__main">
-                        <div>
-                            <div class="word-item__lemma">{{ item.lemma }}</div>
-                            <div class="word-item__translation">{{ item.translations | join(', ') }}</div>
-                        </div>
-                    </div>
-                    <div class="word-item__meta">
-                        {% if item.level %}
-                            <span class="badge badge-active">{{ item.level }}</span>
-                        {% endif %}
-                        <span class="badge badge-{{ item.status }}">{{ item.status }}</span>
-                        {% if item.status == 'active' %}
-                            <span class="word-item__due">
-                                {% if item.due_in_lessons == 0 %}
-                                    сейчас
-                                {% else %}
-                                    через {{ item.due_in_lessons }} ур.
-                                {% endif %}
-                            </span>
-                        {% endif %}
-                        <i data-lucide="chevron-right" style="width: 18px; height: 18px; color: var(--text-muted);"></i>
-                    </div>
-                </a>
-            {% endfor %}
-        </div>
-        
-        {% include "partials/pagination.html" %}
+    <div>
+        {% for item in items %}
+        <a href="/vocabulary/{{ item.word_id }}" class="word-item">
+            <div class="word-item__main">
+                <div>
+                    <div class="word-item__lemma">{{ item.lemma }}</div>
+                    <div class="word-item__translation">{{ item.translations | join(', ') }}</div>
+                </div>
+            </div>
+            <div class="word-item__meta">
+                {% if item.level %}
+                <span class="badge badge-active">{{ item.level }}</span>
+                {% endif %}
+                <span class="badge badge-{{ item.status }}">{{ item.status }}</span>
+                {% if item.status == 'active' %}
+                <span class="word-item__due">
+                    {% if item.due_in_lessons == 0 %}
+                        сейчас
+                    {% else %}
+                        через {{ item.due_in_lessons }} ур.
+                    {% endif %}
+                </span>
+                {% endif %}
+                <i data-lucide="chevron-right" style="width: 18px; height: 18px; color: var(--text-muted);"></i>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% include "partials/pagination.html" %}
     {% endif %}
-    
+
+    <!-- ==================== МОДАЛКА ==================== -->
+    <div x-show="showModal"
+         x-cloak
+         @keydown.escape.window="closeModal()"
+         class="modal-overlay"
+         @click.self="closeModal()">
+
+        <div class="modal-panel" @click.stop>
+
+            <!-- Заголовок -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h3 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="plus-circle" style="width: 24px; height: 24px; color: var(--brand-primary);"></i>
+                    Добавить слово
+                </h3>
+                <button @click="closeModal()"
+                        style="background: transparent; border: none; cursor: pointer; padding: 0.25rem; box-shadow: none;">
+                    <i data-lucide="x" style="width: 20px; height: 20px; color: var(--text-muted);"></i>
+                </button>
+            </div>
+
+            <!-- Форма поиска -->
+            <form @submit.prevent="searchWord()">
+                <div style="display: flex; gap: 0.75rem;">
+                    <input type="text"
+                           x-model="lemma"
+                           placeholder="Введите слово (например: run, book)..."
+                           required
+                           x-ref="lemmaInput"
+                           style="flex: 1;">
+                    <button type="submit" :disabled="!lemma.trim() || phase === 'loading'">
+                        <span x-show="phase !== 'loading'"
+                              style="display: inline-flex; align-items: center; gap: 0.375rem;">
+                            <i data-lucide="search" style="width: 16px; height: 16px;"></i>
+                            Найти
+                        </span>
+                        <span x-show="phase === 'loading'"
+                              style="display: inline-flex; align-items: center; gap: 0.375rem;">
+                            <span class="spinner"></span>
+                        </span>
+                    </button>
+                </div>
+            </form>
+
+            <!-- Результаты -->
+            <div style="margin-top: 1.25rem;">
+
+                <!-- Ошибка -->
+                <template x-if="phase === 'error'">
+                    <div class="flash-error" style="margin: 0;">
+                        <i data-lucide="alert-circle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
+                        <span x-text="errorMessage"></span>
+                    </div>
+                </template>
+
+                <!-- Загрузка -->
+                <template x-if="phase === 'loading'">
+                    <div class="text-center" style="padding: 2rem 0; color: var(--text-muted);">
+                        <span class="spinner" style="width: 24px; height: 24px; border-width: 3px;"></span>
+                        <p style="margin: 0.75rem 0 0 0;">Поиск в базе и генерация...</p>
+                    </div>
+                </template>
+
+                <!-- Результаты найдены -->
+                <template x-if="phase === 'results'">
+                    <div>
+                        <!-- Заголовок результата -->
+                        <div x-show="source === 'db'" class="flash-success" style="margin-bottom: 1rem;">
+                            <i data-lucide="check-circle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
+                            Слово найдено в базе! Выберите варианты:
+                        </div>
+                        <div x-show="source === 'generated'" class="flash-info" style="margin-bottom: 1rem;">
+                            <i data-lucide="sparkles" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
+                            Слово сгенерировано через ИИ и добавлено в общую базу. Выберите варианты:
+                        </div>
+
+                        <!-- Список слов -->
+                        <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem;">
+                            <template x-for="w in foundWords" :key="w.id">
+                                <label class="word-option-card">
+                                    <input type="checkbox" :value="w.id" x-model="selectedIds">
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 700; font-size: 1.0625rem;">
+                                            <span x-text="w.lemma"></span>
+                                            <span style="color: var(--text-muted); font-weight: 400; font-size: 0.875rem;"
+                                                  x-text="'(' + w.pos + ')'"></span>
+                                        </div>
+                                        <div style="color: var(--text-secondary); font-size: 0.9375rem; margin-top: 0.25rem;"
+                                             x-text="w.translations.join(', ')"></div>
+                                        <div style="margin-top: 0.25rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                                            <span class="badge badge-active" x-show="w.level" x-text="w.level"></span>
+                                            <template x-for="d in w.dictionaries" :key="d">
+                                                <span class="badge badge-review" x-text="d"></span>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </label>
+                            </template>
+                        </div>
+
+                        <!-- Кнопка добавления -->
+                        <button @click="submitSelected()"
+                                style="width: 100%;"
+                                :disabled="selectedIds.length === 0 || phase === 'submitting'">
+                            <span x-show="phase !== 'submitting'" style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                                <i data-lucide="plus" style="width: 16px; height: 16px;"></i>
+                                Добавить выбранные (<span x-text="selectedIds.length"></span>)
+                            </span>
+                            <span x-show="phase === 'submitting'" style="display: inline-flex; align-items: center; gap: 0.5rem;">
+                                <span class="spinner"></span> Добавление...
+                            </span>
+                        </button>
+                    </div>
+                </template>
+
+                <!-- Ничего не найдено -->
+                <template x-if="phase === 'empty'">
+                    <div class="text-center" style="padding: 2rem 0;">
+                        <div style="font-size: 3rem; margin-bottom: 0.75rem;">🤔</div>
+                        <p style="color: var(--text-secondary); margin: 0;">
+                            Не удалось найти или сгенерировать данные для слова
+                            <strong x-text="lemma"></strong>.
+                        </p>
+                        <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.5rem;">
+                            Проверьте написание или попробуйте другое слово.
+                        </p>
+                    </div>
+                </template>
+
+            </div>
+        </div>
+    </div>
 </div>
+
+<script>
+function vocabPage() {
+    return {
+        showModal: false,
+        lemma: '',
+        phase: 'idle', // idle | loading | results | empty | error | submitting
+        source: '',    // 'db' | 'generated'
+        foundWords: [],
+        selectedIds: [],
+        errorMessage: '',
+
+        openModal() {
+            this.showModal = true;
+            this.resetState();
+            this.$nextTick(() => {
+                if (this.$refs.lemmaInput) this.$refs.lemmaInput.focus();
+            });
+        },
+
+        closeModal() {
+            this.showModal = false;
+            this.resetState();
+        },
+
+        resetState() {
+            this.lemma = '';
+            this.phase = 'idle';
+            this.source = '';
+            this.foundWords = [];
+            this.selectedIds = [];
+            this.errorMessage = '';
+        },
+
+        getCsrf() {
+            const m = document.cookie.match(/(?:^|;\s*)csrf=([^;]*)/);
+            return m ? decodeURIComponent(m[1]) : '';
+        },
+
+        async searchWord() {
+            const q = this.lemma.trim();
+            if (!q) return;
+            this.phase = 'loading';
+            this.errorMessage = '';
+
+            try {
+                const fd = new FormData();
+                fd.append('lemma', q);
+                fd.append('csrf_token', this.getCsrf());
+
+                const resp = await fetch('/vocabulary/search', { method: 'POST', body: fd });
+
+                if (!resp.ok) {
+                    const errData = await resp.json().catch(() => ({}));
+                    throw new Error(errData.error || 'Ошибка сервера: ' + resp.status);
+                }
+
+                const data = await resp.json();
+
+                if (data.words && data.words.length > 0) {
+                    this.foundWords = data.words;
+                    this.source = data.source || 'db';
+                    // По умолчанию выбираем все варианты
+                    this.selectedIds = data.words.map(w => w.id);
+                    this.phase = 'results';
+                } else {
+                    this.phase = 'empty';
+                }
+            } catch (e) {
+                this.phase = 'error';
+                this.errorMessage = e.message;
+            }
+        },
+
+        async submitSelected() {
+            if (this.selectedIds.length === 0) return;
+            this.phase = 'submitting';
+
+            try {
+                const fd = new FormData();
+                fd.append('csrf_token', this.getCsrf());
+                this.selectedIds.forEach(id => fd.append('word_ids', id));
+
+                const resp = await fetch('/vocabulary/add-selected', { method: 'POST', body: fd });
+
+                if (!resp.ok) throw new Error('Ошибка добавления: ' + resp.status);
+
+                window.location.href = '/vocabulary';
+            } catch (e) {
+                this.phase = 'error';
+                this.errorMessage = e.message;
+            }
+        },
+    };
+}
+</script>
 {% endblock %}

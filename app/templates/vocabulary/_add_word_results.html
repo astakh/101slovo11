@@ -1,0 +1,124 @@
+<!-- app/templates/vocabulary/_add_word_results.html -->
+{% if error %}
+<div class="flash-error" style="margin: 0;">
+    <i data-lucide="alert-circle" style="width: 18px; height: 18px;"></i>
+    {{ error }}
+</div>
+
+{% elif found_in_db %}
+<!-- Найдено в базе -->
+<div>
+    <div class="flash-success" style="margin-bottom: 1rem;">
+        <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
+        Слово найдено в базе! Выберите варианты для добавления:
+    </div>
+    
+    <form hx-post="/vocabulary/add-selected"
+          hx-target="body"
+          hx-swap="innerHTML">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        
+        <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem;">
+            {% for word in words %}
+            <label style="display: flex; align-items: center; gap: 1rem; padding: 1rem; background: var(--surface-50); border: 1px solid var(--border-light); border-radius: var(--radius-md); cursor: pointer; transition: all 0.2s;">
+                <input type="checkbox" name="word_ids" value="{{ word.id }}" 
+                       style="width: 20px; height: 20px; cursor: pointer;">
+                <div style="flex: 1;">
+                    <div style="font-weight: 700; font-size: 1.0625rem;">
+                        {{ word.lemma }}
+                        <span style="color: var(--text-muted); font-weight: 400; font-size: 0.875rem;">({{ word.pos }})</span>
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 0.9375rem; margin-top: 0.25rem;">
+                        {{ word.translations | join(', ') }}
+                    </div>
+                    {% if word.level %}
+                    <div style="margin-top: 0.25rem;">
+                        <span class="badge badge-active">{{ word.level }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </label>
+            {% endfor %}
+        </div>
+        
+        <button type="submit" style="width: 100%;">
+            <i data-lucide="plus" style="width: 16px; height: 16px;"></i>
+            Добавить выбранные в словарь
+        </button>
+    </form>
+</div>
+
+{% elif enriched %}
+<!-- Обогащено через LLM -->
+<div>
+    <div class="flash-info" style="margin-bottom: 1rem;">
+        <i data-lucide="sparkles" style="width: 18px; height: 18px;"></i>
+        Слово сгенерировано через ИИ. Выберите варианты для добавления:
+    </div>
+    
+    <form hx-post="/vocabulary/add-selected"
+          hx-target="body"
+          hx-swap="innerHTML">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        
+        <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem;">
+            {% for variant in variants %}
+            <label style="display: flex; align-items: center; gap: 1rem; padding: 1rem; background: var(--surface-50); border: 1px solid var(--border-light); border-radius: var(--radius-md); cursor: pointer; transition: all 0.2s;">
+                <input type="checkbox" name="word_ids" value="{{ loop.index }}" 
+                       style="width: 20px; height: 20px; cursor: pointer;">
+                <!-- Скрытые поля для передачи данных -->
+                <input type="hidden" name="lemma_{{ loop.index }}" value="{{ variant.lemma }}">
+                <input type="hidden" name="pos_{{ loop.index }}" value="{{ variant.pos }}">
+                <input type="hidden" name="level_{{ loop.index }}" value="{{ variant.level }}">
+                <input type="hidden" name="translations_{{ loop.index }}" value="{{ variant.translations | join(',') }}">
+                
+                <div style="flex: 1;">
+                    <div style="font-weight: 700; font-size: 1.0625rem;">
+                        {{ variant.lemma }}
+                        <span style="color: var(--text-muted); font-weight: 400; font-size: 0.875rem;">({{ variant.pos }})</span>
+                    </div>
+                    <div style="color: var(--text-secondary); font-size: 0.9375rem; margin-top: 0.25rem;">
+                        {{ variant.translations | join(', ') }}
+                    </div>
+                    <div style="margin-top: 0.25rem;">
+                        <span class="badge badge-active">{{ variant.level }}</span>
+                    </div>
+                </div>
+            </label>
+            {% endfor %}
+        </div>
+        
+        <button type="submit" style="width: 100%;">
+            <i data-lucide="plus" style="width: 16px; height: 16px;"></i>
+            Добавить выбранные в словарь
+        </button>
+    </form>
+</div>
+
+{% else %}
+<!-- Не найдено — предлагаем сгенерировать -->
+<div class="text-center" style="padding: 2rem;">
+    <div style="font-size: 3rem; margin-bottom: 1rem;">🤔</div>
+    <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+        Слово <strong>"{{ lemma }}"</strong> не найдено в базе.
+    </p>
+    
+    <form hx-post="/vocabulary/enrich"
+          hx-target="#add-word-results"
+          hx-swap="innerHTML"
+          hx-indicator="#enrich-spinner">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <input type="hidden" name="lemma" value="{{ lemma }}">
+        
+        <button type="submit" style="width: 100%;">
+            <i data-lucide="sparkles" style="width: 16px; height: 16px;"></i>
+            Сгенерировать через ИИ
+        </button>
+        
+        <span class="htmx-indicator" id="enrich-spinner" style="display: none; margin-top: 1rem; align-items: center; gap: 0.5rem; color: var(--text-muted); font-size: 0.875rem;">
+            <span class="spinner"></span>
+            <span>Генерация данных через ИИ...</span>
+        </span>
+    </form>
+</div>
+{% endif %}

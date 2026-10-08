@@ -4,12 +4,15 @@ import logging
 from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
+
 from app.models.user import User
 from app.models.lesson import Lesson
 from app.models.lesson_exercise import LessonExercise
 from app.models.user_word import UserWord
 from app.models.word import Word
 from app.models.event import Event
+
 from app.utils.srs import srs_update
 from app.utils.text_validation import validate_user_translation, compute_lemma_key
 from app.llm.helpers import evaluate_translation as llm_evaluate
@@ -20,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 class LessonEvaluateError(Exception):
     """Ошибка при оценке перевода."""
+
     def __init__(self, message: str, code: str = "evaluate_error"):
         super().__init__(message)
         self.code = code
@@ -39,10 +43,12 @@ async def _find_user_word(
         return None
 
     lemma_key = compute_lemma_key(lemma)
+
     stmt_word = select(Word).where(Word.lemma_key == lemma_key)
     if pos:
         stmt_word = stmt_word.where(Word.pos == pos)
     stmt_word = stmt_word.limit(1)
+
     word = (await db.execute(stmt_word)).scalar_one_or_none()
 
     if not word and pos:
@@ -72,12 +78,14 @@ async def evaluate_exercise(
     stmt_ex = select(LessonExercise).where(LessonExercise.id == exercise_id)
     result_ex = await db.execute(stmt_ex)
     exercise = result_ex.scalar_one_or_none()
+
     if not exercise:
         raise LessonEvaluateError("Упражнение не найдено", code="not_found")
 
     stmt_lesson = select(Lesson).where(Lesson.id == exercise.lesson_id)
     result_lesson = await db.execute(stmt_lesson)
     lesson = result_lesson.scalar_one_or_none()
+
     if not lesson or lesson.user_id != user.id:
         raise LessonEvaluateError("Доступ запрещён", code="forbidden")
 
@@ -98,6 +106,7 @@ async def evaluate_exercise(
     )
     result_fp = await db.execute(stmt_first_pending)
     first_pending = result_fp.scalar_one_or_none()
+
     if not first_pending or first_pending.id != exercise.id:
         raise LessonEvaluateError("Нарушена последовательность упражнений", code="order_violation")
 
@@ -136,10 +145,12 @@ async def evaluate_exercise(
     eval_map = {e["lemma"].casefold(): e for e in evaluations}
 
     updated_target_words = []
+
     for tw in target_words:
         lemma = tw.get("lemma", "")
         pos = tw.get("pos")
         lemma_key = lemma.casefold()
+
         eval_item = eval_map.get(lemma_key, {})
         word_status = eval_item.get("status", "learning")
 
@@ -172,6 +183,7 @@ async def evaluate_exercise(
         updated_target_words.append(updated_tw)
 
     locked_exercise.target_words = updated_target_words
+    flag_modified(locked_exercise, "target_words")
 
     # 🔥 ЛОГИРОВАНИЕ: Обработка suggested_words
     suggested = evaluation.get("suggested_words", [])
@@ -182,7 +194,9 @@ async def evaluate_exercise(
         for s in suggested
     ]
     logger.info(f"[SERVICE EVAL] Processed suggested_with_state: {suggested_with_state}")
+
     locked_exercise.suggested_words = suggested_with_state
+    flag_modified(locked_exercise, "suggested_words")
 
     stmt_remaining = (
         select(LessonExercise)
