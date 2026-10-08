@@ -42,3 +42,4 @@ class EvaluateResponse(BaseModel):
 class LlmUsage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    total_tokens: int = 0

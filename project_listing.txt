@@ -720,6 +720,7 @@ class LlmUsage(BaseModel):
 ### end of app/llm/validation.py ########################################################################
 
 ### app/main.py ########################################################################
+# app/main.py
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -737,10 +738,39 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="101slovo", lifespan=lifespan)
 
+
+# Middleware для защиты от ботов (HEAD/OPTIONS)
+# ВАЖНО: добавляем ПОСЛЕ AppMiddleware, чтобы он выполнялся ПЕРВЫМ
+@app.middleware("http")
+async def bot_protection_middleware(request: Request, call_next):
+    """
+    Быстро отвечает на HEAD и OPTIONS запросы, не нагружая бэкенд.
+    Боты (Ahrefs, Semrush, сканеры) постоянно долбят эти методы.
+    """
+    if request.method == "OPTIONS":
+        return Response(
+            status_code=204,
+            headers={
+                "Allow": "GET, POST, HEAD, OPTIONS",
+                "Cache-Control": "no-store",
+            },
+        )
+    if request.method == "HEAD":
+        # Для HEAD возвращаем 200 с пустым телом, не выполняя роуты.
+        # Исключение: /health — пусть FastAPI обработает сам (нужно для мониторинга).
+        if request.url.path == "/health":
+            return await call_next(request)
+        return Response(
+            status_code=200,
+            headers={"Cache-Control": "no-store"},
+        )
+    return await call_next(request)
+
+
 # Статика
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-# Middleware
+# Middleware (выполняется ВТОРЫМ, после bot_protection)
 app.add_middleware(AppMiddleware)
 
 # Роутеры
@@ -3536,88 +3566,139 @@ async def change_word_status(
 ### end of app/services/vocabulary.py ########################################################################
 
 ### app/static/css/custom.css ########################################################################
+/* app/static/css/custom.css */
+
+/* ============================================
+   Локальные шрифты (Inter woff2)
+   ============================================ */
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('/static/fonts/inter-400.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('/static/fonts/inter-500.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('/static/fonts/inter-600.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('/static/fonts/inter-700.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+    src: url('/static/fonts/inter-800.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 /* ============================================
    101slovo — Modern UI Design System
    ============================================ */
-
 :root {
-  /* Brand */
-  --brand-primary: #6366f1;
-  --brand-primary-dark: #4f46e5;
-  --brand-primary-light: #818cf8;
-  --brand-secondary: #ec4899;
-  --brand-accent: #06b6d4;
-  
-  /* Gradients */
-  --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  --gradient-success: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-  --gradient-warning: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-  --gradient-info: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  --gradient-fire: linear-gradient(135deg, #f12711 0%, #f5af19 100%);
-  
-  /* Surfaces */
-  --surface-0: #ffffff;
-  --surface-50: #f8fafc;
-  --surface-100: #f1f5f9;
-  --surface-200: #e2e8f0;
-  --surface-300: #cbd5e1;
-  
-  /* Text */
-  --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #94a3b8;
-  --text-inverse: #ffffff;
-  
-  /* Borders & Shadows */
-  --border-light: #e2e8f0;
-  --border-medium: #cbd5e1;
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.05);
-  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.05);
-  --shadow-glow: 0 0 20px rgb(99 102 241 / 0.3);
-  
-  /* Radius */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
-  --radius-full: 9999px;
-  
-  /* Transitions */
-  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+    /* Brand */
+    --brand-primary: #6366f1;
+    --brand-primary-dark: #4f46e5;
+    --brand-primary-light: #818cf8;
+    --brand-secondary: #ec4899;
+    --brand-accent: #06b6d4;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --gradient-success: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+    --gradient-warning: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    --gradient-info: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    --gradient-fire: linear-gradient(135deg, #f12711 0%, #f5af19 100%);
+
+    /* Surfaces */
+    --surface-0: #ffffff;
+    --surface-50: #f8fafc;
+    --surface-100: #f1f5f9;
+    --surface-200: #e2e8f0;
+    --surface-300: #cbd5e1;
+
+    /* Text */
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+    --text-inverse: #ffffff;
+
+    /* Borders & Shadows */
+    --border-light: #e2e8f0;
+    --border-medium: #cbd5e1;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+    --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.05);
+    --shadow-glow: 0 0 20px rgb(99 102 241 / 0.3);
+
+    /* Radius */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+    --radius-full: 9999px;
+
+    /* Transitions */
+    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 [data-theme="dark"] {
-  --surface-0: #0f172a;
-  --surface-50: #1e293b;
-  --surface-100: #334155;
-  --surface-200: #475569;
-  --surface-300: #64748b;
-  --text-primary: #f1f5f9;
-  --text-secondary: #cbd5e1;
-  --text-muted: #64748b;
-  --border-light: #334155;
-  --border-medium: #475569;
+    --surface-0: #0f172a;
+    --surface-50: #1e293b;
+    --surface-100: #334155;
+    --surface-200: #475569;
+    --surface-300: #64748b;
+    --text-primary: #f1f5f9;
+    --text-secondary: #cbd5e1;
+    --text-muted: #64748b;
+    --border-light: #334155;
+    --border-medium: #475569;
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  font-feature-settings: 'cv11', 'ss01';
-  color: var(--text-primary);
-  background: var(--surface-50);
-  line-height: 1.6;
-  letter-spacing: -0.011em;
-  -webkit-font-smoothing: antialiased;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-feature-settings: 'cv11', 'ss01';
+    color: var(--text-primary);
+    background: var(--surface-50);
+    line-height: 1.6;
+    letter-spacing: -0.011em;
+    -webkit-font-smoothing: antialiased;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-weight: 700;
-  letter-spacing: -0.025em;
-  line-height: 1.2;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.2;
 }
+
 h1 { font-size: 2.5rem; }
 h2 { font-size: 2rem; }
 h3 { font-size: 1.5rem; }
@@ -3625,211 +3706,236 @@ h4 { font-size: 1.25rem; }
 
 /* === NAVBAR === */
 .navbar {
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: saturate(180%) blur(12px);
-  -webkit-backdrop-filter: saturate(180%) blur(12px);
-  border-bottom: 1px solid var(--border-light);
-  padding: 0.875rem 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: saturate(180%) blur(12px);
+    -webkit-backdrop-filter: saturate(180%) blur(12px);
+    border-bottom: 1px solid var(--border-light);
+    padding: 0.875rem 0;
 }
+
 .navbar-inner {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0 1.5rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 2rem;
 }
+
 .navbar-brand {
-  font-weight: 800;
-  font-size: 1.25rem;
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  text-decoration: none;
-  letter-spacing: -0.03em;
+    font-weight: 800;
+    font-size: 1.25rem;
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-decoration: none;
+    letter-spacing: -0.03em;
 }
+
 .navbar-menu {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
 }
+
 .nav-link {
-  padding: 0.5rem 0.875rem;
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-weight: 500;
-  font-size: 0.925rem;
-  border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
+    padding: 0.5rem 0.875rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 0.925rem;
+    border-radius: var(--radius-md);
+    transition: all var(--transition-fast);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
 }
+
 .nav-link:hover {
-  color: var(--brand-primary);
-  background: rgba(99, 102, 241, 0.08);
+    color: var(--brand-primary);
+    background: rgba(99, 102, 241, 0.08);
 }
+
 .nav-link--admin { color: var(--brand-secondary); }
 .nav-link--admin:hover { background: rgba(236, 72, 153, 0.08); }
+
 .navbar-logout {
-  padding: 0.375rem 0.75rem;
-  font-size: 0.875rem;
-  background: transparent;
-  color: var(--text-muted);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  font-family: inherit;
-  font-weight: 500;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    font-family: inherit;
+    font-weight: 500;
 }
+
 .navbar-logout:hover {
-  color: #dc2626;
-  border-color: #fca5a5;
-  background: rgba(239, 68, 68, 0.05);
+    color: #dc2626;
+    border-color: #fca5a5;
+    background: rgba(239, 68, 68, 0.05);
 }
 
 /* === BUTTONS === */
 button, .button, [role="button"], input[type="submit"] {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.625rem 1.25rem;
-  font-weight: 600;
-  font-size: 0.925rem;
-  border-radius: var(--radius-md);
-  border: none;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  text-decoration: none;
-  white-space: nowrap;
-  font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    font-weight: 600;
+    font-size: 0.925rem;
+    border-radius: var(--radius-md);
+    border: none;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    text-decoration: none;
+    white-space: nowrap;
+    font-family: inherit;
 }
+
 button:not(.secondary):not(.outline), .button:not(.secondary):not(.outline),
 [role="button"]:not(.secondary):not(.outline), input[type="submit"] {
-  background: var(--brand-primary);
-  color: var(--text-inverse);
-  box-shadow: var(--shadow-sm), 0 1px 2px rgba(99, 102, 241, 0.2);
+    background: var(--brand-primary);
+    color: var(--text-inverse);
+    box-shadow: var(--shadow-sm), 0 1px 2px rgba(99, 102, 241, 0.2);
 }
+
 button:not(.secondary):not(.outline):hover, .button:not(.secondary):not(.outline):hover,
 [role="button"]:not(.secondary):not(.outline):hover, input[type="submit"]:hover {
-  background: var(--brand-primary-dark);
-  box-shadow: var(--shadow-md), 0 4px 12px rgba(99, 102, 241, 0.25);
-  transform: translateY(-1px);
+    background: var(--brand-primary-dark);
+    box-shadow: var(--shadow-md), 0 4px 12px rgba(99, 102, 241, 0.25);
+    transform: translateY(-1px);
 }
+
 button:active, .button:active, [role="button"]:active { transform: translateY(0); }
+
 .secondary, [role="button"].secondary {
-  background: var(--surface-100);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-light);
+    background: var(--surface-100);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-light);
 }
+
 .secondary:hover, [role="button"].secondary:hover {
-  background: var(--surface-200);
-  color: var(--text-primary);
+    background: var(--surface-200);
+    color: var(--text-primary);
 }
+
 .btn-lg, [role="button"][style*="font-size: 1.2rem"],
 [role="button"][style*="padding: 1rem 2rem"] {
-  padding: 1rem 2rem;
-  font-size: 1.1rem;
-  border-radius: var(--radius-lg);
+    padding: 1rem 2rem;
+    font-size: 1.1rem;
+    border-radius: var(--radius-lg);
 }
 
 /* === FORMS === */
 input[type="text"], input[type="email"], input[type="password"],
 input[type="number"], input[type="search"], textarea, select {
-  padding: 0.75rem 1rem;
-  border: 1.5px solid var(--border-light);
-  border-radius: var(--radius-md);
-  background: var(--surface-0);
-  color: var(--text-primary);
-  font-size: 0.95rem;
-  font-family: inherit;
-  transition: all var(--transition-fast);
-  width: 100%;
-  box-sizing: border-box;
+    padding: 0.75rem 1rem;
+    border: 1.5px solid var(--border-light);
+    border-radius: var(--radius-md);
+    background: var(--surface-0);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-family: inherit;
+    transition: all var(--transition-fast);
+    width: 100%;
+    box-sizing: border-box;
 }
+
 input:focus, textarea:focus, select:focus {
-  outline: none;
-  border-color: var(--brand-primary);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+    outline: none;
+    border-color: var(--brand-primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
 }
+
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
+
 textarea { resize: vertical; min-height: 100px; line-height: 1.6; }
+
 label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: 600;
-  font-size: 0.875rem;
-  color: var(--text-secondary);
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
 }
+
 fieldset {
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);
-  padding: 1.25rem;
-  margin-bottom: 1.25rem;
-  background: var(--surface-50);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem;
+    margin-bottom: 1.25rem;
+    background: var(--surface-50);
 }
+
 legend { font-weight: 600; padding: 0 0.5rem; font-size: 0.95rem; }
 
 input[type="range"] {
-  height: 6px;
-  background: var(--surface-200);
-  border-radius: var(--radius-full);
-  border: none;
-  padding: 0;
-  appearance: none;
-  -webkit-appearance: none;
+    height: 6px;
+    background: var(--surface-200);
+    border-radius: var(--radius-full);
+    border: none;
+    padding: 0;
+    appearance: none;
+    -webkit-appearance: none;
 }
+
 input[type="range"]::-webkit-slider-thumb {
-  appearance: none;
-  width: 22px;
-  height: 22px;
-  background: var(--brand-primary);
-  border-radius: 50%;
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.4);
-  transition: all var(--transition-fast);
+    appearance: none;
+    width: 22px;
+    height: 22px;
+    background: var(--brand-primary);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(99, 102, 241, 0.4);
+    transition: all var(--transition-fast);
 }
+
 input[type="range"]::-webkit-slider-thumb:hover {
-  transform: scale(1.15);
+    transform: scale(1.15);
 }
 
 /* === BADGES === */
 .badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.625rem;
-  border-radius: var(--radius-full);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.625rem;
+    border-radius: var(--radius-full);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
 }
+
 .badge-active { background: rgba(99, 102, 241, 0.12); color: var(--brand-primary-dark); }
 .badge-mastered { background: rgba(16, 185, 129, 0.12); color: #059669; }
 .badge-ignored { background: rgba(239, 68, 68, 0.12); color: #dc2626; }
 .badge-new { background: rgba(236, 72, 153, 0.12); color: #db2777; }
+.badge-review { background: rgba(6, 182, 212, 0.12); color: #0891b2; }
 
 /* === FLASH === */
 .flash-success, .flash-error, .flash-info, .flash-warning {
-  padding: 1rem 1.25rem;
-  border-radius: var(--radius-lg);
-  margin-bottom: 1.25rem;
-  font-weight: 500;
-  font-size: 0.925rem;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  border: 1px solid transparent;
-  animation: slideInDown 0.3s ease-out;
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius-lg);
+    margin-bottom: 1.25rem;
+    font-weight: 500;
+    font-size: 0.925rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border: 1px solid transparent;
+    animation: slideInDown 0.3s ease-out;
 }
+
 .flash-success { background: rgba(16, 185, 129, 0.08); border-color: rgba(16, 185, 129, 0.2); color: #065f46; }
 .flash-error { background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.2); color: #991b1b; }
 .flash-info { background: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.2); color: #1e40af; }
@@ -3837,324 +3943,373 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 /* === TABLES === */
 table {
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  background: var(--surface-0);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--border-light);
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--surface-0);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-light);
 }
+
 thead { background: var(--surface-50); }
+
 th {
-  padding: 0.875rem 1rem;
-  text-align: left;
-  font-weight: 600;
-  font-size: 0.8125rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--border-light);
+    padding: 0.875rem 1rem;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-light);
 }
+
 td {
-  padding: 1rem;
-  border-bottom: 1px solid var(--border-light);
-  font-size: 0.925rem;
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-light);
+    font-size: 0.925rem;
 }
+
 tbody tr { transition: background var(--transition-fast); }
 tbody tr:hover { background: var(--surface-50); }
 tbody tr:last-child td { border-bottom: none; }
 
 /* === STAT CARDS === */
 .stat-card {
-  position: relative;
-  overflow: hidden;
-  padding: 1.5rem;
-  background: var(--surface-0);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  transition: all var(--transition-base);
+    position: relative;
+    overflow: hidden;
+    padding: 1.5rem;
+    background: var(--surface-0);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    transition: all var(--transition-base);
 }
+
 .stat-card::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 3px;
-  background: var(--gradient-primary);
-  opacity: 0;
-  transition: opacity var(--transition-base);
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--gradient-primary);
+    opacity: 0;
+    transition: opacity var(--transition-base);
 }
+
 .stat-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-lg);
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
 }
+
 .stat-card:hover::before { opacity: 1; }
+
 .stat-card__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px; height: 48px;
-  border-radius: var(--radius-md);
-  background: rgba(99, 102, 241, 0.1);
-  color: var(--brand-primary);
-  margin-bottom: 1rem;
-  font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px; height: 48px;
+    border-radius: var(--radius-md);
+    background: rgba(99, 102, 241, 0.1);
+    color: var(--brand-primary);
+    margin-bottom: 1rem;
+    font-size: 1.5rem;
 }
+
 .stat-card__icon--fire { background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
 .stat-card__icon--book { background: rgba(16, 185, 129, 0.1); color: #10b981; }
 .stat-card__icon--calendar { background: rgba(59, 130, 246, 0.1); color: #3b82f6; }
+
 .stat-card__value {
-  font-size: 2.5rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  line-height: 1;
-  margin-bottom: 0.25rem;
+    font-size: 2.5rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    margin-bottom: 0.25rem;
 }
+
 .stat-card__label {
-  font-size: 0.875rem;
-  color: var(--text-muted);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
+
 .stat-card__sublabel {
-  font-size: 0.8125rem;
-  color: var(--text-muted);
-  margin-top: 0.25rem;
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+/* === CARD (общий класс, который был от water.css) === */
+.card {
+    background: var(--surface-0);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    box-shadow: var(--shadow-sm);
 }
 
 /* === EXERCISE === */
 .exercise-card {
-  background: var(--surface-0);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-xl);
-  padding: 2rem;
-  box-shadow: var(--shadow-md);
-  margin-bottom: 1.5rem;
+    background: var(--surface-0);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-xl);
+    padding: 2rem;
+    box-shadow: var(--shadow-md);
+    margin-bottom: 1.5rem;
 }
+
 .exercise-sentence {
-  font-size: 1.5rem;
-  font-weight: 600;
-  line-height: 1.4;
-  margin-bottom: 1rem;
-  letter-spacing: -0.01em;
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.4;
+    margin-bottom: 1rem;
+    letter-spacing: -0.01em;
 }
+
 .exercise-words {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
 }
 
 /* === SUGGESTION === */
 .suggestion-card {
-  padding: 1rem 1.25rem;
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  margin-bottom: 0.75rem;
-  background: var(--surface-50);
-  transition: all var(--transition-fast);
+    padding: 1rem 1.25rem;
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    margin-bottom: 0.75rem;
+    background: var(--surface-50);
+    transition: all var(--transition-fast);
 }
+
 .suggestion-card:hover {
-  border-color: var(--brand-primary-light);
-  background: var(--surface-0);
-  box-shadow: var(--shadow-sm);
+    border-color: var(--brand-primary-light);
+    background: var(--surface-0);
+    box-shadow: var(--shadow-sm);
 }
+
 .suggestion-card--added {
-  background: rgba(16, 185, 129, 0.05);
-  border-color: rgba(16, 185, 129, 0.2);
+    background: rgba(16, 185, 129, 0.05);
+    border-color: rgba(16, 185, 129, 0.2);
 }
+
 .suggestion-card--ignored {
-  background: rgba(148, 163, 184, 0.05);
-  border-color: rgba(148, 163, 184, 0.2);
-  opacity: 0.7;
+    background: rgba(148, 163, 184, 0.05);
+    border-color: rgba(148, 163, 184, 0.2);
+    opacity: 0.7;
 }
 
 /* === SPINNER === */
 .htmx-indicator {
-  display: none;
-  align-items: center;
-  gap: 0.5rem;
-  color: var(--text-muted);
-  font-size: 0.875rem;
-  font-style: normal;
+    display: none;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    font-style: normal;
 }
+
 .htmx-request .htmx-indicator, .htmx-indicator.htmx-request {
-  display: inline-flex;
+    display: inline-flex;
 }
+
 .spinner {
-  display: inline-block;
-  width: 16px; height: 16px;
-  border: 2px solid var(--surface-200);
-  border-top-color: var(--brand-primary);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 2px solid var(--surface-200);
+    border-top-color: var(--brand-primary);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
 }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* === PAGINATION === */
 .pagination {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 2rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 2rem;
 }
+
 .pagination a {
-  min-width: 36px; height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-md);
-  background: var(--surface-0);
-  border: 1px solid var(--border-light);
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-weight: 500;
-  transition: all var(--transition-fast);
+    min-width: 36px; height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-md);
+    background: var(--surface-0);
+    border: 1px solid var(--border-light);
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-weight: 500;
+    transition: all var(--transition-fast);
 }
+
 .pagination a:hover {
-  background: var(--brand-primary);
-  color: var(--text-inverse);
-  border-color: var(--brand-primary);
+    background: var(--brand-primary);
+    color: var(--text-inverse);
+    border-color: var(--brand-primary);
 }
 
 /* === WORD ITEM (vocabulary) === */
 .word-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1rem 1.25rem;
-  background: var(--surface-0);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  margin-bottom: 0.5rem;
-  transition: all var(--transition-fast);
-  text-decoration: none;
-  color: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    background: var(--surface-0);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    margin-bottom: 0.5rem;
+    transition: all var(--transition-fast);
+    text-decoration: none;
+    color: inherit;
 }
+
 .word-item:hover {
-  border-color: var(--brand-primary-light);
-  box-shadow: var(--shadow-sm);
-  transform: translateX(4px);
+    border-color: var(--brand-primary-light);
+    box-shadow: var(--shadow-sm);
+    transform: translateX(4px);
 }
+
 .word-item__main {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex: 1;
 }
+
 .word-item__lemma {
-  font-weight: 700;
-  font-size: 1.0625rem;
+    font-weight: 700;
+    font-size: 1.0625rem;
 }
+
 .word-item__pos {
-  font-size: 0.8125rem;
-  color: var(--text-muted);
-  padding: 0.125rem 0.5rem;
-  background: var(--surface-100);
-  border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    padding: 0.125rem 0.5rem;
+    background: var(--surface-100);
+    border-radius: var(--radius-sm);
 }
+
 .word-item__translation {
-  color: var(--text-secondary);
-  font-size: 0.925rem;
+    color: var(--text-secondary);
+    font-size: 0.925rem;
 }
+
 .word-item__meta {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
 }
+
 .word-item__due {
-  font-size: 0.8125rem;
-  color: var(--text-muted);
-  padding: 0.25rem 0.625rem;
-  background: var(--surface-100);
-  border-radius: var(--radius-full);
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    padding: 0.25rem 0.625rem;
+    background: var(--surface-100);
+    border-radius: var(--radius-full);
 }
 
 /* === CTA SECTION === */
 .cta-section {
-  text-align: center;
-  padding: 3rem 2rem;
-  background: var(--gradient-primary);
-  border-radius: var(--radius-xl);
-  color: var(--text-inverse);
-  margin: 2rem 0;
-  box-shadow: var(--shadow-lg), 0 8px 32px rgba(99, 102, 241, 0.25);
+    text-align: center;
+    padding: 3rem 2rem;
+    background: var(--gradient-primary);
+    border-radius: var(--radius-xl);
+    color: var(--text-inverse);
+    margin: 2rem 0;
+    box-shadow: var(--shadow-lg), 0 8px 32px rgba(99, 102, 241, 0.25);
 }
+
 .cta-section h3 { color: var(--text-inverse); font-size: 1.75rem; margin-bottom: 0.5rem; }
 .cta-section p { opacity: 0.9; margin-bottom: 1.5rem; }
+
 .cta-section .button, .cta-section [role="button"] {
-  background: var(--surface-0);
-  color: var(--brand-primary);
-  border: none;
-  padding: 1rem 2.5rem;
-  font-size: 1.1rem;
-  font-weight: 700;
-  box-shadow: var(--shadow-lg);
+    background: var(--surface-0);
+    color: var(--brand-primary);
+    border: none;
+    padding: 1rem 2.5rem;
+    font-size: 1.1rem;
+    font-weight: 700;
+    box-shadow: var(--shadow-lg);
 }
+
 .cta-section .button:hover, .cta-section [role="button"]:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-xl);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-xl);
 }
 
 /* === HERO === */
 .hero {
-  padding: 2rem 0;
-  margin-bottom: 2rem;
+    padding: 2rem 0;
+    margin-bottom: 2rem;
 }
+
 .hero__greeting {
-  font-size: 1.125rem;
-  color: var(--text-muted);
-  font-weight: 500;
-  margin-bottom: 0.25rem;
+    font-size: 1.125rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-bottom: 0.25rem;
 }
+
 .hero__title {
-  font-size: 2.5rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  margin: 0;
-  background: var(--gradient-primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+    font-size: 2.5rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    margin: 0;
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 /* === UTILS === */
 .container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
 .container--narrow { max-width: 720px; }
 .container--medium { max-width: 960px; }
+
 .text-center { text-align: center; }
+
 .mt-1 { margin-top: 0.5rem; }
 .mt-2 { margin-top: 1rem; }
 .mt-3 { margin-top: 1.5rem; }
 .mt-4 { margin-top: 2rem; }
+
 .mb-2 { margin-bottom: 1rem; }
 .mb-3 { margin-bottom: 1.5rem; }
 .mb-4 { margin-bottom: 2rem; }
+
 .grid { display: grid; gap: 1rem; }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
+
 @media (max-width: 768px) {
-  .grid-3, .grid-4 { grid-template-columns: 1fr; }
-  h1 { font-size: 2rem; }
-  h2 { font-size: 1.5rem; }
-  .stat-card__value { font-size: 2rem; }
-  .navbar-menu { gap: 0; }
-  .nav-link { padding: 0.5rem 0.625rem; font-size: 0.85rem; }
+    .grid-3, .grid-4 { grid-template-columns: 1fr; }
+    h1 { font-size: 2rem; }
+    h2 { font-size: 1.5rem; }
+    .stat-card__value { font-size: 2rem; }
+    .navbar-menu { gap: 0; }
+    .nav-link { padding: 0.5rem 0.625rem; font-size: 0.85rem; }
 }
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 @keyframes slideInDown {
-  from { opacity: 0; transform: translateY(-10px); }
-  to { opacity: 1; transform: translateY(0); }
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
+
 .fade-in { animation: fadeIn 0.4s ease-out; }
 .fade-in-up { animation: fadeInUp 0.5s ease-out; }
 
@@ -4189,9 +4344,9 @@ tbody tr:last-child td { border-bottom: none; }
     margin-bottom: 0.5rem;
     width: 100%;
 }
+
 .skeleton-text.short { width: 60%; }
 .skeleton-text.title { height: 1.5rem; width: 40%; margin-bottom: 1rem; }
-
 .skeleton-card {
     height: 120px;
     width: 100%;
@@ -4202,9 +4357,11 @@ tbody tr:last-child td { border-bottom: none; }
     opacity: 0.5;
     pointer-events: none;
 }
+
 .htmx-skeleton-wrapper.htmx-request .skeleton-loader {
     display: block !important;
 }
+
 .skeleton-loader {
     display: none;
 }
@@ -4336,6 +4493,7 @@ tbody tr:last-child td { border-bottom: none; }
 ### end of app/templates/auth/register.html ########################################################################
 
 ### app/templates/base.html ########################################################################
+<!-- app/templates/base.html -->
 <!DOCTYPE html>
 <html lang="ru" data-theme="light">
 <head>
@@ -4343,7 +4501,7 @@ tbody tr:last-child td { border-bottom: none; }
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#6366f1">
     <title>{% block title %}101slovo{% endblock %}</title>
-    
+
     <!-- Инициализация темы до рендера (предотвращает FOUC) -->
     <script>
         (function() {
@@ -4351,31 +4509,33 @@ tbody tr:last-child td { border-bottom: none; }
             document.documentElement.setAttribute('data-theme', theme);
         })();
     </script>
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/light.css">
+
+    <!-- Preload шрифтов (критично для скорости!) -->
+    <link rel="preload" href="/static/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-500.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-800.woff2" as="font" type="font/woff2" crossorigin>
+
+    <!-- Локальный CSS (water.css удалён — всё перекрыто custom.css) -->
     <link rel="stylesheet" href="/static/css/custom.css">
-    
-    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-    
+
+    <!-- Локальные JS библиотеки -->
+    <script src="/static/vendor/htmx.min.js"></script>
+    <script defer src="/static/vendor/alpine.min.js"></script>
+    <script defer src="/static/vendor/lucide.min.js"></script>
+
     {% block head %}{% endblock %}
 </head>
 <body>
     {% include "partials/nav.html" %}
     {% include "partials/flash.html" %}
-    
     <main class="container fade-in-up" style="padding-top: 2rem; padding-bottom: 4rem;">
         {% block content %}{% endblock %}
     </main>
-    
     <footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;">
         <p>© 2026 101slovo • Учи английский умнее с ИИ</p>
     </footer>
-    
     <script>
         document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
         document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
@@ -6308,6 +6468,428 @@ def is_valid_timezone(name: str | None) -> bool:
         return False
 ### end of app/utils/timezones.py ########################################################################
 
+### docs/DEPLOY.md ########################################################################
+# Сводка по деплою проекта 101slovo
+
+> **Последнее обновление:** 2026-10-08
+> **Версия конфига:** 2.0 (локализация статики, фикс ботов, оптимизация Nginx)
+
+---
+
+## 1. Общая информация
+
+| Параметр | Значение |
+|----------|----------|
+| Проект | 101slovo — веб-приложение для изучения английских слов в контексте через LLM (GigaChat) |
+| Домен | `101slovo.ru` + `www.101slovo.ru` |
+| Стек | FastAPI + SQLAlchemy (async) + Alembic + Jinja2 + HTMX + Alpine.js + Nginx |
+| ОС сервера | Ubuntu 24.04 LTS |
+| Деплой | От `root`, без SSH-ключей, репозиторий в `/opt/101slovo` |
+| Сертификат | Let's Encrypt через Certbot (`--nginx`), автообновление через `certbot.timer` |
+
+---
+
+## 2. Сервер
+
+| Параметр | Значение |
+|----------|----------|
+| IP сервера | не зафиксирован (используется DNS `101slovo.ru`) |
+| SSH-доступ | root по паролю, порт 22 (без смены) |
+| Часовой пояс | `Europe/Moscow` |
+| Локаль | `en_US.UTF-8`, `ru_RU.UTF-8` |
+| Swap | 2 GB (если RAM < 2 GB) |
+| Хостер | не указан |
+
+---
+
+## 3. Файрвол и защита
+
+| Компонент | Настройка |
+|-----------|-----------|
+| ufw | `OpenSSH` (22/tcp) + `Nginx Full` (80,443/tcp) |
+| fail2ban | активен, jail `sshd`: `maxretry=5`, `bantime=3600s` |
+| PostgreSQL | слушает `0.0.0.0:5432` (открыт наружу) |
+| pg_hba.conf | `scram-sha-256` для внешних подключений |
+| HSTS | **не включён** |
+| OCSP Stapling | **не включён** |
+| HTTP → HTTPS | редирект включён (Certbot `--redirect`) |
+
+> ⚠️ PostgreSQL открыт наружу. Рекомендуется ограничить `pg_hba.conf` конкретными IP или добавить fail2ban jail для PostgreSQL.
+
+---
+
+## 4. PostgreSQL 18
+
+| Параметр | Значение |
+|----------|----------|
+| Версия | 18.6 (PGDG) |
+| Порт | 5432 |
+| Слушает | `0.0.0.0` + `[::]` |
+| БД | `101slovo` |
+| Пользователь | `slovo` |
+| Аутентификация | `scram-sha-256` |
+| Кодировка | UTF8, `en_US.UTF-8` |
+| Схема `public` | владелец — `slovo` |
+| Миграции | Alembic: `e415bc2a09fb` → `4ff3f0ad8020` |
+| Промпты | загружены через `scripts/seed.py` (2 шт.) |
+| Слова | загружены через `scripts/import_words.py` (`words1.json`, `words2.json`) |
+| Бэкапы | **не настроены** (cron + pg_dump) |
+
+---
+
+## 5. Приложение
+
+| Параметр | Значение |
+|----------|----------|
+| Путь | `/opt/101slovo` |
+| Владелец | `root:root` |
+| venv | `/opt/101slovo/.venv` (Python 3.12.3) |
+| Зависимости | `requirements.txt` + `gunicorn==23.0.0` |
+| `.env` | `/opt/101slovo/.env`, права `600`, владелец `root` |
+| Режим | `ENV=production` |
+| `DATABASE_URL` | `postgresql+asyncpg://slovo:***@127.0.0.1:5432/101slovo` |
+| `SESSION_SECRET` | сгенерирован через `secrets.token_urlsafe(48)` |
+| `GIGACHAT_VERIFY_SSL` | `True` (при проблемах — `False`) |
+| Порт приложения | `127.0.0.1:8000` |
+| Репозиторий | GitHub, `git clone` в `/opt/101slovo` |
+| Способ обновления | **не автоматизирован** (`git pull` вручную) |
+| Защита от ботов | ✅ `bot_protection_middleware` (HEAD → 200, OPTIONS → 204) |
+
+---
+
+## 6. Gunicorn + systemd
+
+| Параметр | Значение |
+|----------|----------|
+| Unit-файл | `/etc/systemd/system/101slovo.service` |
+| User / Group | `root:root` |
+| WorkingDirectory | `/opt/101slovo` |
+| EnvironmentFile | `/opt/101slovo/.env` |
+| ExecStart | `gunicorn app.main:app` |
+| Worker class | `uvicorn.workers.UvicornWorker` |
+| Workers | `2` |
+| Bind | `127.0.0.1:8000` |
+| Timeout | `90s` (graceful `30s`) |
+| `--forwarded-allow-ips` | `127.0.0.1` |
+| `--preload` | ✅ **включён** (общая память, экономия ~50–100 МБ) |
+| Restart | `on-failure`, `RestartSec=5` |
+| Автозапуск | `systemctl enable 101slovo` |
+| Логи | journald (`journalctl -u 101slovo`) |
+
+---
+
+## 7. Nginx
+
+| Параметр | Значение |
+|----------|----------|
+| Конфиг | `/etc/nginx/sites-available/101slovo` |
+| Симлинк | `/etc/nginx/sites-enabled/101slovo` |
+| Дефолтный сайт | удалён |
+| `server_name` | `101slovo.ru www.101slovo.ru` |
+| Порт 80 | редирект на HTTPS |
+| Порт 443 | HTTPS, SSL от Let's Encrypt |
+| HTTP/2 | ✅ **включён** (`listen 443 ssl http2`) |
+| Upstream | `keepalive 32`, `proxy_http_version 1.1`, `Connection ""` |
+| Статика | `/static/` → `alias /opt/101slovo/app/static/` |
+| Кэш статики | `expires 30d`, `Cache-Control: public, immutable`, `access_log off` |
+| `client_max_body_size` | `5M` |
+| Проксирование | `proxy_pass http://app_server` (upstream) |
+| Заголовки | `Host`, `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host` |
+| Таймауты | `connect 15s`, `read 120s`, `send 120s` |
+| gzip | ✅ **включён** (уровень 5, все текстовые типы + SVG) |
+| Буферизация | `proxy_buffering on`, `proxy_buffers 8 4k` |
+| Логи | `/var/log/nginx/101slovo.access.log`, `.error.log` |
+
+---
+
+## 8. TLS / HTTPS
+
+| Параметр | Значение |
+|----------|----------|
+| Провайдер | Let's Encrypt |
+| Certbot | `certbot --nginx -d 101slovo.ru -d www.101slovo.ru --redirect` |
+| Email | `astavimana@yandex.ru` |
+| Сертификат | `/etc/letsencrypt/live/101slovo.ru/fullchain.pem` |
+| Ключ | `/etc/letsencrypt/live/101slovo.ru/privkey.pem` |
+| Срок действия | ~90 дней |
+| Автообновление | `certbot.timer` (2 раза в день), dry-run успешен |
+| TLS-протоколы | TLS 1.2 + 1.3 (Certbot defaults) |
+| HSTS | **не включён** |
+| OCSP Stapling | **не включён** |
+
+---
+
+## 9. DNS
+
+| Запись | Значение |
+|--------|----------|
+| A `101slovo.ru` | IP сервера |
+| A `www.101slovo.ru` | IP сервера |
+| AAAA (IPv6) | **не настроена** |
+
+---
+
+## 10. Статика и клиентские ресурсы
+
+| Ресурс | Путь | Источник |
+|--------|------|----------|
+| htmx 2.0.4 | `/static/vendor/htmx.min.js` | unpkg.com |
+| Alpine.js 3.14.1 | `/static/vendor/alpine.min.js` | cdn.jsdelivr.net |
+| Lucide 0.453.0 | `/static/vendor/lucide.min.js` | unpkg.com |
+| Inter 400 | `/static/fonts/inter-400.woff2` | Google Fonts |
+| Inter 500 | `/static/fonts/inter-500.woff2` | Google Fonts |
+| Inter 600 | `/static/fonts/inter-600.woff2` | Google Fonts |
+| Inter 700 | `/static/fonts/inter-700.woff2` | Google Fonts |
+| Inter 800 | `/static/fonts/inter-800.woff2` | Google Fonts |
+| custom.css | `/static/css/custom.css` | локальный |
+| water.css | **удалён** (заменён на `custom.css`) | — |
+
+Все ресурсы локальные. Внешние CDN-запросы **полностью исключены**.
+
+Скрипт обновления статики: `scripts/download_static.sh`
+
+---
+
+## 11. Ресурсы и производительность
+
+| Метрика | Значение |
+|---------|----------|
+| `/health` (напрямую) | `0.013s` |
+| `/` (напрямую) | `0.010s` |
+| `/static/css/custom.css` (напрямую) | `0.022s` |
+| `/health` (через HTTPS) | `0.055s` |
+| `/` (через HTTPS) | `0.021s` |
+| Внешние CDN | ✅ **устранены** |
+| Ожидаемое время загрузки | ~300–500 мс (было ~1.5 с) |
+
+---
+
+## 12. Безопасность — что сделано и что нет
+
+### Сделано
+- ✅ ufw (только 22, 80, 443)
+- ✅ fail2ban для SSH
+- ✅ HTTPS с Let's Encrypt + редирект
+- ✅ CSRF-токены в приложении
+- ✅ Сессии в HttpOnly cookie
+- ✅ `SESSION_SECRET` сгенерирован
+- ✅ `.env` с правами `600`
+- ✅ pg_hba `scram-sha-256`
+- ✅ Автообновление сертификата
+- ✅ **Защита от ботов** (HEAD → 200, OPTIONS → 204, без нагрузки на БД)
+- ✅ **Локальная статика** (нет зависимостей от третьих сторон)
+
+### Не сделано / отложено
+- ❌ HSTS
+- ❌ OCSP Stapling
+- ❌ Ограничение PostgreSQL по IP (открыт `0.0.0.0/0`)
+- ❌ fail2ban для PostgreSQL
+- ❌ Смена SSH-порта
+- ❌ SSH по ключам (только пароль)
+- ❌ Бэкапы PostgreSQL
+- ❌ Мониторинг / алерты
+- ❌ Ротация логов Nginx (logrotate из коробки — надо проверить)
+
+---
+
+## 13. Что нужно доделать (приоритеты)
+
+### Высокий приоритет
+1. **Бэкапы PostgreSQL** — cron + `pg_dump`, ротация 14 дней.
+2. **Ограничить PostgreSQL по IP** в `pg_hba.conf` (если не нужен доступ отовсюду).
+3. **Первый админ** — `UPDATE users SET is_admin = true WHERE email = '...'`.
+4. **Проверка LLM** — тестовый урок, разбор ошибок GigaChat.
+
+### Средний приоритет
+5. **Скрипт обновления** `deploy.sh` — `git pull` + миграции + рестарт.
+6. **fail2ban для PostgreSQL** — защита от брутфорса БД.
+7. **Проверка шрифта 800** — убедиться, что `inter-800.woff2` скачался (была 404).
+
+### Низкий приоритет
+8. HSTS (когда убедитесь в стабильности HTTPS).
+9. OCSP Stapling.
+10. Мониторинг (UptimeRobot, healthcheck).
+11. Смена SSH-порта + ключи.
+12. Cloudflare (бесплатный CDN, защита от DDoS, HTTP/3).
+
+---
+
+## 14. Ключевые пути
+/opt/101slovo/ — корень проекта
+/opt/101slovo/.env — переменные окружения (600)
+/opt/101slovo/.venv/ — виртуальное окружение
+/opt/101slovo/app/ — код приложения
+/opt/101slovo/app/static/ — статика
+/opt/101slovo/app/static/vendor/ — JS-библиотеки (локальные)
+/opt/101slovo/app/static/fonts/ — шрифты (локальные)
+/opt/101slovo/app/static/css/custom.css — основной CSS
+/opt/101slovo/migrations/ — Alembic-миграции
+/opt/101slovo/scripts/ — seed, import_words, download_static
+/opt/101slovo/scripts/download_static.sh — скрипт обновления статики
+/opt/101slovo/docs/DEPLOYMENT.md — этот файл
+/etc/systemd/system/101slovo.service — systemd unit
+/etc/nginx/sites-available/101slovo — конфиг Nginx
+/etc/nginx/sites-enabled/101slovo — симлинк
+/etc/letsencrypt/live/101slovo.ru/ — сертификаты
+/etc/postgresql/18/main/postgresql.conf — конфиг PG
+/etc/postgresql/18/main/pg_hba.conf — доступ PG
+/var/log/nginx/101slovo.access.log — access-лог
+/var/log/nginx/101slovo.error.log — error-лог
+/var/log/postgresql/postgresql-18-main.log — лог PG
+
+
+---
+
+## 15. Ключевые команды обслуживания
+
+```bash
+# Статус всех сервисов
+systemctl status 101slovo nginx postgresql --no-pager
+
+# Логи приложения
+journalctl -u 101slovo -f
+journalctl -u 101slovo -n 100 --no-pager
+
+# Логи Nginx
+tail -f /var/log/nginx/101slovo.error.log
+tail -f /var/log/nginx/101slovo.access.log
+
+# Логи PostgreSQL
+tail -f /var/log/postgresql/postgresql-18-main.log
+
+# Перезапуск приложения
+systemctl restart 101slovo
+
+# Перезагрузка Nginx (без разрыва соединений)
+systemctl reload nginx
+
+# Проверка конфига Nginx
+nginx -t
+
+# Обновление кода
+cd /opt/101slovo && git pull
+source .venv/bin/activate
+pip install -r requirements.txt
+alembic upgrade head
+systemctl restart 101slovo
+
+# Обновление статики (если нужны новые версии библиотек)
+cd /opt/101slovo && ./scripts/download_static.sh
+
+# Проверка сертификата
+certbot certificates
+certbot renew --dry-run
+
+# Подключение к БД
+PGPASSWORD='***' psql -h 127.0.0.1 -U slovo -d 101slovo
+
+# Сделать пользователя админом
+PGPASSWORD='***' psql -h 127.0.0.1 -U slovo -d 101slovo -c \
+  "UPDATE users SET is_admin = true WHERE email = 'ваш@email.com';"
+
+# Health
+curl -s https://101slovo.ru/health
+
+# Проверка статики
+curl -sI https://101slovo.ru/static/vendor/htmx.min.js | head -5
+curl -sI https://101slovo.ru/static/fonts/inter-400.woff2 | head -5
+
+# Проверка HEAD/OPTIONS (должно быть 200/204)
+curl -sI -X HEAD https://101slovo.ru/ | head -3
+curl -s -X OPTIONS -o /dev/null -w "%{http_code}" https://101slovo.ru/
+
+16. Известные проблемы
+Проблема
+Статус
+Решение
+Медленная загрузка в браузере
+✅ решена
+Локальный хостинг всех ресурсов
+HEAD / → 500, OPTIONS / → 500
+✅ решено
+bot_protection_middleware
+inter-800.woff2 → 404
+🟡 проверить
+Докачать через scripts/download_static.sh или удалить вес 800
+GigaChat URL api.giga.chat — не официальный Сбер
+⚠️ под вопросом
+Проверить на тестовом уроке
+GIGACHAT_VERIFY_SSL=True может падать
+⚠️ под вопросом
+При SSLError — временно False
+Бэкапы не настроены
+🔴 открыта
+Cron + pg_dump
+PostgreSQL открыт наружу
+🟡 риск
+Ограничить pg_hba.conf по IP
+17. Итоговая оценка
+Аспект
+Оценка
+Функциональность
+✅ работает
+HTTPS
+✅ настроен, автообновление
+Производительность бэкенда
+✅ отличная (10–55 мс)
+Производительность клиента
+✅ отличная (локальная статика)
+Безопасность
+🟡 базовая (нет HSTS, PG открыт)
+Надёжность
+🟡 нет бэкапов
+Мониторинг
+🔴 отсутствует
+Автоматизация деплоя
+🔴 ручная
+Готовность к продакшену: ~85%. Критичные пробелы — бэкапы, ограничение PostgreSQL по IP, проверка шрифта 800. Остальное — «nice to have».
+18. История изменений
+Дата
+Что сделано
+2026-10-07
+Первичный деплой, миграции, seed, импорт слов
+2026-10-08
+Фикс ботов: bot_protection_middleware (HEAD → 200, OPTIONS → 204)
+2026-10-08
+Локализация статики: все CDN-ресурсы скачаны локально
+2026-10-08
+Удалён water.css: полностью заменён на custom.css
+2026-10-08
+Добавлены @font-face для Inter (400–800) в custom.css
+2026-10-08
+Nginx: HTTP/2, gzip, upstream keepalive, Connection ""
+2026-10-08
+Gunicorn: добавлен --preload
+2026-10-08
+Создан scripts/download_static.sh для обновления статики
+2026-10-08
+Создан docs/DEPLOY.md (этот файл)
+
+
+---
+
+## Итого: что изменилось по сравнению с версией 1.0
+
+| Было (1.0) | Стало (2.0) |
+|-------------|-------------|
+| ❌ `HEAD /` → 500 | ✅ → 200 (middleware) |
+| ❌ `OPTIONS /` → 500 | ✅ → 204 (middleware) |
+| ❌ 5 внешних CDN-запросов | ✅ 0 внешних запросов |
+| ❌ `water.css` из интернета | ✅ удалён, всё в `custom.css` |
+| ❌ Google Fonts из интернета | ✅ локальные `@font-face` |
+| ❌ HTTP/1.1 | ✅ HTTP/2 |
+| ❌ gzip выключен | ✅ включён |
+| ❌ без `--preload` | ✅ с `--preload` |
+| ❌ без upstream keepalive | ✅ `keepalive 32` |
+| Готовность ~75% | Готовность ~85% |
+
+После сохранения файла не забудьте закоммитить:
+```bash
+git add docs/DEPLOYMENT.md
+git commit -m "docs: обновлена сводка деплоя до версии 2.0"
+git push
+### end of docs/DEPLOY.md ########################################################################
+
 ### migrations/env.py ########################################################################
 import asyncio
 from logging.config import fileConfig
@@ -6618,6 +7200,57 @@ bcrypt==4.2.0
 itsdangerous==2.2.0
 tzdata==2024.2
 ### end of requirements.txt ########################################################################
+
+### scripts/download_static.sh ########################################################################
+#!/usr/bin/env bash
+# scripts/download_static.sh
+# Скачивает все внешние ресурсы в локальные директории для ускорения загрузки.
+
+set -e
+
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+STATIC_DIR="$PROJECT_ROOT/app/static"
+VENDOR_DIR="$STATIC_DIR/vendor"
+FONTS_DIR="$STATIC_DIR/fonts"
+
+echo "📁 Создание директорий..."
+mkdir -p "$VENDOR_DIR" "$FONTS_DIR"
+
+# Версии (фиксированные, чтобы не было сюрпризов при деплое)
+HTMX_VERSION="2.0.4"
+ALPINE_VERSION="3.14.1"
+LUCIDE_VERSION="0.453.0"
+
+echo "⬇️  Скачивание htmx ${HTMX_VERSION}..."
+curl -fsSL "https://unpkg.com/htmx.org@${HTMX_VERSION}/dist/htmx.min.js" -o "$VENDOR_DIR/htmx.min.js"
+
+echo "⬇️  Скачивание Alpine.js ${ALPINE_VERSION}..."
+curl -fsSL "https://cdn.jsdelivr.net/npm/alpinejs@${ALPINE_VERSION}/dist/cdn.min.js" -o "$VENDOR_DIR/alpine.min.js"
+
+echo "⬇️  Скачивание Lucide ${LUCIDE_VERSION}..."
+curl -fsSL "https://unpkg.com/lucide@${LUCIDE_VERSION}/dist/umd/lucide.min.js" -o "$VENDOR_DIR/lucide.min.js"
+
+echo "⬇️  Скачивание шрифта Inter (woff2)..."
+# Inter v18 от Google Fonts (woff2, latin subset)
+BASE="https://fonts.gstatic.com/s/inter/v18/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmME"
+
+curl -fsSL "${BASE}VuLyfAZ9hiA.woff2" -o "$FONTS_DIR/inter-400.woff2"
+curl -fsSL "${BASE}VuI6fAZ9hiA.woff2" -o "$FONTS_DIR/inter-500.woff2"
+curl -fsSL "${BASE}VuGKYAZ9hiA.woff2" -o "$FONTS_DIR/inter-600.woff2"
+curl -fsSL "${BASE}VuFuYAZ9hiA.woff2" -o "$FONTS_DIR/inter-700.woff2"
+curl -fsSL "${BASE}VuD2YAZ9hiA.woff2" -o "$FONTS_DIR/inter-800.woff2"
+
+echo ""
+echo "✅ Готово! Файлы скачаны:"
+echo "   $VENDOR_DIR/htmx.min.js    ($(wc -c < "$VENDOR_DIR/htmx.min.js") bytes)"
+echo "   $VENDOR_DIR/alpine.min.js  ($(wc -c < "$VENDOR_DIR/alpine.min.js") bytes)"
+echo "   $VENDOR_DIR/lucide.min.js  ($(wc -c < "$VENDOR_DIR/lucide.min.js") bytes)"
+echo "   $FONTS_DIR/inter-*.woff2   (5 файлов)"
+echo ""
+echo "Не забудь закоммитить:"
+echo "   git add app/static/vendor app/static/fonts"
+echo "   git commit -m 'feat: localize static assets (htmx, alpine, lucide, inter font)'"
+### end of scripts/download_static.sh ########################################################################
 
 ### scripts/import_words.py ########################################################################
 """
@@ -6989,620 +7622,6 @@ async def seed_prompts():
 if __name__ == "__main__":
     asyncio.run(seed_prompts())
 ### end of scripts/seed.py ########################################################################
-
-### scripts/words1.json ########################################################################
-{
-  "words": [
-    {"lemma": "apple", "pos": "noun", "level": "A1", "translations": ["яблоко"], "dictionaries": ["general"]},
-    {"lemma": "book", "pos": "noun", "level": "A1", "translations": ["книга"], "dictionaries": ["general"]},
-    {"lemma": "car", "pos": "noun", "level": "A1", "translations": ["машина", "автомобиль"], "dictionaries": ["general", "travel"]},
-    {"lemma": "dog", "pos": "noun", "level": "A1", "translations": ["собака", "пес"], "dictionaries": ["general"]},
-    {"lemma": "water", "pos": "noun", "level": "A1", "translations": ["вода"], "dictionaries": ["general", "travel"]},
-    {"lemma": "food", "pos": "noun", "level": "A1", "translations": ["еда", "пища"], "dictionaries": ["general", "travel"]},
-    {"lemma": "house", "pos": "noun", "level": "A1", "translations": ["дом", "жилище"], "dictionaries": ["general"]},
-    {"lemma": "man", "pos": "noun", "level": "A1", "translations": ["мужчина", "человек"], "dictionaries": ["general"]},
-    {"lemma": "woman", "pos": "noun", "level": "A1", "translations": ["женщина"], "dictionaries": ["general"]},
-    {"lemma": "child", "pos": "noun", "level": "A1", "translations": ["ребенок", "дитя"], "dictionaries": ["general"]},
-    {"lemma": "time", "pos": "noun", "level": "A1", "translations": ["время"], "dictionaries": ["general"]},
-    {"lemma": "day", "pos": "noun", "level": "A1", "translations": ["день", "сутки"], "dictionaries": ["general"]},
-    {"lemma": "year", "pos": "noun", "level": "A1", "translations": ["год"], "dictionaries": ["general"]},
-    {"lemma": "people", "pos": "noun", "level": "A1", "translations": ["люди", "народ"], "dictionaries": ["general"]},
-    {"lemma": "way", "pos": "noun", "level": "A1", "translations": ["путь", "способ", "дорога"], "dictionaries": ["general"]},
-    {"lemma": "thing", "pos": "noun", "level": "A1", "translations": ["вещь", "предмет"], "dictionaries": ["general"]},
-    {"lemma": "school", "pos": "noun", "level": "A1", "translations": ["школа"], "dictionaries": ["general"]},
-    {"lemma": "student", "pos": "noun", "level": "A1", "translations": ["студент", "ученик"], "dictionaries": ["general"]},
-    {"lemma": "teacher", "pos": "noun", "level": "A1", "translations": ["учитель", "преподаватель"], "dictionaries": ["general"]},
-    {"lemma": "friend", "pos": "noun", "level": "A1", "translations": ["друг", "подруга"], "dictionaries": ["general"]},
-    {"lemma": "family", "pos": "noun", "level": "A1", "translations": ["семья", "семейство"], "dictionaries": ["general"]},
-    {"lemma": "country", "pos": "noun", "level": "A1", "translations": ["страна", "родина"], "dictionaries": ["general", "travel"]},
-    {"lemma": "city", "pos": "noun", "level": "A1", "translations": ["город"], "dictionaries": ["general", "travel"]},
-    {"lemma": "street", "pos": "noun", "level": "A1", "translations": ["улица"], "dictionaries": ["general", "travel"]},
-    {"lemma": "road", "pos": "noun", "level": "A1", "translations": ["дорога", "шоссе"], "dictionaries": ["general", "travel"]},
-    {"lemma": "money", "pos": "noun", "level": "A1", "translations": ["деньги"], "dictionaries": ["general"]},
-    {"lemma": "job", "pos": "noun", "level": "A1", "translations": ["работа", "должность"], "dictionaries": ["general"]},
-    {"lemma": "work", "pos": "noun", "level": "A1", "translations": ["работа", "труд"], "dictionaries": ["general"]},
-    {"lemma": "name", "pos": "noun", "level": "A1", "translations": ["имя", "название"], "dictionaries": ["general"]},
-    {"lemma": "word", "pos": "noun", "level": "A1", "translations": ["слово"], "dictionaries": ["general"]},
-    {"lemma": "go", "pos": "verb", "level": "A1", "translations": ["идти", "ехать", "уходить"], "dictionaries": ["general", "travel"]},
-    {"lemma": "come", "pos": "verb", "level": "A1", "translations": ["приходить", "приезжать"], "dictionaries": ["general"]},
-    {"lemma": "see", "pos": "verb", "level": "A1", "translations": ["видеть", "смотреть"], "dictionaries": ["general"]},
-    {"lemma": "look", "pos": "verb", "level": "A1", "translations": ["смотреть", "выглядеть"], "dictionaries": ["general"]},
-    {"lemma": "use", "pos": "verb", "level": "A1", "translations": ["использовать", "применять"], "dictionaries": ["general"]},
-    {"lemma": "find", "pos": "verb", "level": "A1", "translations": ["находить", "искать"], "dictionaries": ["general"]},
-    {"lemma": "give", "pos": "verb", "level": "A1", "translations": ["давать", "дарить"], "dictionaries": ["general"]},
-    {"lemma": "tell", "pos": "verb", "level": "A1", "translations": ["рассказывать", "говорить"], "dictionaries": ["general"]},
-    {"lemma": "earn", "pos": "verb", "level": "A1", "translations": ["зарабатывать"], "dictionaries": ["general"]},
-    {"lemma": "call", "pos": "verb", "level": "A1", "translations": ["звонить", "называть"], "dictionaries": ["general"]},
-    {"lemma": "try", "pos": "verb", "level": "A1", "translations": ["пытаться", "пробовать"], "dictionaries": ["general"]},
-    {"lemma": "ask", "pos": "verb", "level": "A1", "translations": ["спрашивать", "просить"], "dictionaries": ["general"]},
-    {"lemma": "need", "pos": "verb", "level": "A1", "translations": ["нуждаться", "требоваться"], "dictionaries": ["general"]},
-    {"lemma": "feel", "pos": "verb", "level": "A1", "translations": ["чувствовать", "ощущать"], "dictionaries": ["general"]},
-    {"lemma": "become", "pos": "verb", "level": "A1", "translations": ["становиться"], "dictionaries": ["general"]},
-    {"lemma": "leave", "pos": "verb", "level": "A1", "translations": ["уходить", "уезжать", "покидать"], "dictionaries": ["general", "travel"]},
-    {"lemma": "put", "pos": "verb", "level": "A1", "translations": ["класть", "ставить"], "dictionaries": ["general"]},
-    {"lemma": "mean", "pos": "verb", "level": "A1", "translations": ["значить", "означать"], "dictionaries": ["general"]},
-    {"lemma": "keep", "pos": "verb", "level": "A1", "translations": ["держать", "хранить"], "dictionaries": ["general"]},
-    {"lemma": "let", "pos": "verb", "level": "A1", "translations": ["позволять", "пускать"], "dictionaries": ["general"]},
-    {"lemma": "good", "pos": "adjective", "level": "A1", "translations": ["хороший", "добрый"], "dictionaries": ["general"]},
-    {"lemma": "new", "pos": "adjective", "level": "A1", "translations": ["новый"], "dictionaries": ["general"]},
-    {"lemma": "first", "pos": "adjective", "level": "A1", "translations": ["первый", "начальный"], "dictionaries": ["general"]},
-    {"lemma": "last", "pos": "adjective", "level": "A1", "translations": ["последний", "прошлый"], "dictionaries": ["general"]},
-    {"lemma": "long", "pos": "adjective", "level": "A1", "translations": ["длинный", "долгий"], "dictionaries": ["general"]},
-    {"lemma": "great", "pos": "adjective", "level": "A1", "translations": ["великий", "отличный"], "dictionaries": ["general"]},
-    {"lemma": "little", "pos": "adjective", "level": "A1", "translations": ["маленький", "небольшой"], "dictionaries": ["general"]},
-    {"lemma": "own", "pos": "adjective", "level": "A1", "translations": ["собственный"], "dictionaries": ["general"]},
-    {"lemma": "other", "pos": "adjective", "level": "A1", "translations": ["другой", "иной"], "dictionaries": ["general"]},
-    {"lemma": "old", "pos": "adjective", "level": "A1", "translations": ["старый", "древний"], "dictionaries": ["general"]},
-    {"lemma": "right", "pos": "adjective", "level": "A1", "translations": ["правильный", "правый"], "dictionaries": ["general"]},
-    {"lemma": "big", "pos": "adjective", "level": "A1", "translations": ["большой", "крупный"], "dictionaries": ["general"]},
-    {"lemma": "high", "pos": "adjective", "level": "A1", "translations": ["высокий"], "dictionaries": ["general"]},
-    {"lemma": "different", "pos": "adjective", "level": "A1", "translations": ["разный", "отличный"], "dictionaries": ["general"]},
-    {"lemma": "small", "pos": "adjective", "level": "A1", "translations": ["маленький", "мелкий"], "dictionaries": ["general"]},
-    {"lemma": "large", "pos": "adjective", "level": "A1", "translations": ["большой", "обширный"], "dictionaries": ["general"]},
-    {"lemma": "next", "pos": "adjective", "level": "A1", "translations": ["следующий", "ближайший"], "dictionaries": ["general"]},
-    {"lemma": "early", "pos": "adjective", "level": "A1", "translations": ["ранний"], "dictionaries": ["general"]},
-    {"lemma": "young", "pos": "adjective", "level": "A1", "translations": ["молодой", "юный"], "dictionaries": ["general"]},
-    {"lemma": "important", "pos": "adjective", "level": "A1", "translations": ["важный", "значимый"], "dictionaries": ["general"]},
-    {"lemma": "I", "pos": "pronoun", "level": "A1", "translations": ["я"], "dictionaries": ["general"]},
-    {"lemma": "you", "pos": "pronoun", "level": "A1", "translations": ["ты", "вы"], "dictionaries": ["general"]},
-    {"lemma": "he", "pos": "pronoun", "level": "A1", "translations": ["он"], "dictionaries": ["general"]},
-    {"lemma": "she", "pos": "pronoun", "level": "A1", "translations": ["она"], "dictionaries": ["general"]},
-    {"lemma": "it", "pos": "pronoun", "level": "A1", "translations": ["это", "он", "она"], "dictionaries": ["general"]},
-    {"lemma": "we", "pos": "pronoun", "level": "A1", "translations": ["мы"], "dictionaries": ["general"]},
-    {"lemma": "they", "pos": "pronoun", "level": "A1", "translations": ["они"], "dictionaries": ["general"]},
-    {"lemma": "in", "pos": "preposition", "level": "A1", "translations": ["в", "через"], "dictionaries": ["general"]},
-    {"lemma": "on", "pos": "preposition", "level": "A1", "translations": ["на"], "dictionaries": ["general"]},
-    {"lemma": "at", "pos": "preposition", "level": "A1", "translations": ["у", "в", "при"], "dictionaries": ["general"]},
-    {"lemma": "to", "pos": "preposition", "level": "A1", "translations": ["к", "до", "в"], "dictionaries": ["general"]},
-    {"lemma": "for", "pos": "preposition", "level": "A1", "translations": ["для", "за"], "dictionaries": ["general"]},
-    {"lemma": "with", "pos": "preposition", "level": "A1", "translations": ["с", "вместе"], "dictionaries": ["general"]},
-    {"lemma": "and", "pos": "conjunction", "level": "A1", "translations": ["и", "а"], "dictionaries": ["general"]},
-    {"lemma": "but", "pos": "conjunction", "level": "A1", "translations": ["но", "однако"], "dictionaries": ["general"]},
-    {"lemma": "or", "pos": "conjunction", "level": "A1", "translations": ["или", "либо"], "dictionaries": ["general"]},
-    {"lemma": "yes", "pos": "interjection", "level": "A1", "translations": ["да"], "dictionaries": ["general"]},
-    {"lemma": "no", "pos": "interjection", "level": "A1", "translations": ["нет"], "dictionaries": ["general"]},
-    {"lemma": "hello", "pos": "interjection", "level": "A1", "translations": ["привет", "здравствуйте"], "dictionaries": ["general"]},
-    {"lemma": "bye", "pos": "interjection", "level": "A1", "translations": ["пока", "до свидания"], "dictionaries": ["general"]},
-    {"lemma": "taxi", "pos": "noun", "level": "A1", "translations": ["такси"], "dictionaries": ["general", "travel"]},
-    {"lemma": "train", "pos": "noun", "level": "A1", "translations": ["поезд"], "dictionaries": ["general", "travel"]},
-    {"lemma": "bus", "pos": "noun", "level": "A1", "translations": ["автобус"], "dictionaries": ["general", "travel"]},
-    {"lemma": "plane", "pos": "noun", "level": "A1", "translations": ["самолет"], "dictionaries": ["general", "travel"]},
-    {"lemma": "ticket", "pos": "noun", "level": "A1", "translations": ["билет"], "dictionaries": ["general", "travel"]},
-    {"lemma": "hotel", "pos": "noun", "level": "A1", "translations": ["отель", "гостиница"], "dictionaries": ["travel"]},
-    {"lemma": "room", "pos": "noun", "level": "A1", "translations": ["комната", "номер"], "dictionaries": ["general", "travel"]},
-    {"lemma": "key", "pos": "noun", "level": "A1", "translations": ["ключ"], "dictionaries": ["general", "travel"]},
-    {"lemma": "airport", "pos": "noun", "level": "A1", "translations": ["аэропорт"], "dictionaries": ["travel"]},
-    {"lemma": "passport", "pos": "noun", "level": "A1", "translations": ["паспорт"], "dictionaries": ["travel"]},
-    {"lemma": "computer", "pos": "noun", "level": "A2", "translations": ["компьютер"], "dictionaries": ["general", "it"]},
-    {"lemma": "internet", "pos": "noun", "level": "A2", "translations": ["интернет"], "dictionaries": ["general", "it"]},
-    {"lemma": "website", "pos": "noun", "level": "A2", "translations": ["сайт", "веб-сайт"], "dictionaries": ["general", "it"]},
-    {"lemma": "email", "pos": "noun", "level": "A2", "translations": ["электронная почта", "письмо"], "dictionaries": ["general", "it"]},
-    {"lemma": "screen", "pos": "noun", "level": "A2", "translations": ["экран"], "dictionaries": ["general", "it"]},
-    {"lemma": "keyboard", "pos": "noun", "level": "A2", "translations": ["клавиатура"], "dictionaries": ["it"]},
-    {"lemma": "mouse", "pos": "noun", "level": "A2", "translations": ["мышь", "мышка"], "dictionaries": ["it"]},
-    {"lemma": "file", "pos": "noun", "level": "A2", "translations": ["файл", "документ"], "dictionaries": ["it"]},
-    {"lemma": "folder", "pos": "noun", "level": "A2", "translations": ["папка", "каталог"], "dictionaries": ["it"]},
-    {"lemma": "password", "pos": "noun", "level": "A2", "translations": ["пароль"], "dictionaries": ["it"]},
-    {"lemma": "download", "pos": "verb", "level": "A2", "translations": ["скачивать", "загружать"], "dictionaries": ["it"]},
-    {"lemma": "upload", "pos": "verb", "level": "A2", "translations": ["загружать", "выгружать"], "dictionaries": ["it"]},
-    {"lemma": "click", "pos": "verb", "level": "A2", "translations": ["нажимать", "кликать"], "dictionaries": ["it"]},
-    {"lemma": "save", "pos": "verb", "level": "A2", "translations": ["сохранять", "спасать"], "dictionaries": ["it"]},
-    {"lemma": "delete", "pos": "verb", "level": "A2", "translations": ["удалять", "стирать"], "dictionaries": ["it"]},
-    {"lemma": "connect", "pos": "verb", "level": "A2", "translations": ["подключаться", "соединять"], "dictionaries": ["it"]},
-    {"lemma": "print", "pos": "verb", "level": "A2", "translations": ["печатать", "распечатывать"], "dictionaries": ["it"]},
-    {"lemma": "search", "pos": "verb", "level": "A2", "translations": ["искать", "выполнять поиск"], "dictionaries": ["it", "general"]},
-    {"lemma": "share", "pos": "verb", "level": "A2", "translations": ["делиться", "распространять"], "dictionaries": ["it", "general"]},
-    {"lemma": "update", "pos": "verb", "level": "A2", "translations": ["обновлять", "модернизировать"], "dictionaries": ["it"]},
-    {"lemma": "restaurant", "pos": "noun", "level": "A2", "translations": ["ресторан"], "dictionaries": ["general", "travel"]},
-    {"lemma": "menu", "pos": "noun", "level": "A2", "translations": ["меню"], "dictionaries": ["travel"]},
-    {"lemma": "bill", "pos": "noun", "level": "A2", "translations": ["счет", "чек"], "dictionaries": ["general", "travel"]},
-    {"lemma": "tip", "pos": "noun", "level": "A2", "translations": ["чаевые", "совет"], "dictionaries": ["travel"]},
-    {"lemma": "waiter", "pos": "noun", "level": "A2", "translations": ["официант"], "dictionaries": ["travel"]},
-    {"lemma": "breakfast", "pos": "noun", "level": "A2", "translations": ["завтрак"], "dictionaries": ["general", "travel"]},
-    {"lemma": "lunch", "pos": "noun", "level": "A2", "translations": ["обед"], "dictionaries": ["general", "travel"]},
-    {"lemma": "dinner", "pos": "noun", "level": "A2", "translations": ["ужин"], "dictionaries": ["general", "travel"]},
-    {"lemma": "meal", "pos": "noun", "level": "A2", "translations": ["прием пищи", "еда"], "dictionaries": ["general", "travel"]},
-    {"lemma": "drink", "pos": "noun", "level": "A2", "translations": ["напиток"], "dictionaries": ["general", "travel"]},
-    {"lemma": "coffee", "pos": "noun", "level": "A2", "translations": ["кофе"], "dictionaries": ["general", "travel"]},
-    {"lemma": "tea", "pos": "noun", "level": "A2", "translations": ["чай"], "dictionaries": ["general", "travel"]},
-    {"lemma": "juice", "pos": "noun", "level": "A2", "translations": ["сок"], "dictionaries": ["general", "travel"]},
-    {"lemma": "wine", "pos": "noun", "level": "A2", "translations": ["вино"], "dictionaries": ["general", "travel"]},
-    {"lemma": "beer", "pos": "noun", "level": "A2", "translations": ["пиво"], "dictionaries": ["general", "travel"]},
-    {"lemma": "meat", "pos": "noun", "level": "A2", "translations": ["мясо"], "dictionaries": ["general", "travel"]},
-    {"lemma": "fish", "pos": "noun", "level": "A2", "translations": ["рыба"], "dictionaries": ["general", "travel"]},
-    {"lemma": "chicken", "pos": "noun", "level": "A2", "translations": ["курица", "цыпленок"], "dictionaries": ["general", "travel"]},
-    {"lemma": "cheese", "pos": "noun", "level": "A2", "translations": ["сыр"], "dictionaries": ["general", "travel"]},
-    {"lemma": "bread", "pos": "noun", "level": "A2", "translations": ["хлеб"], "dictionaries": ["general", "travel"]},
-    {"lemma": "delicious", "pos": "adjective", "level": "A2", "translations": ["вкусный", "восхитительный"], "dictionaries": ["general", "travel"]},
-    {"lemma": "hungry", "pos": "adjective", "level": "A2", "translations": ["голодный"], "dictionaries": ["general"]},
-    {"lemma": "thirsty", "pos": "adjective", "level": "A2", "translations": ["испытывающий жажду"], "dictionaries": ["general"]},
-    {"lemma": "cheap", "pos": "adjective", "level": "A2", "translations": ["дешевый", "недорогой"], "dictionaries": ["general", "travel"]},
-    {"lemma": "expensive", "pos": "adjective", "level": "A2", "translations": ["дорогой", "затратный"], "dictionaries": ["general", "travel"]},
-    {"lemma": "fast", "pos": "adjective", "level": "A2", "translations": ["быстрый", "скорый"], "dictionaries": ["general", "travel"]},
-    {"lemma": "slow", "pos": "adjective", "level": "A2", "translations": ["медленный"], "dictionaries": ["general", "travel"]},
-    {"lemma": "safe", "pos": "adjective", "level": "A2", "translations": ["безопасный", "надежный"], "dictionaries": ["general", "travel"]},
-    {"lemma": "dangerous", "pos": "adjective", "level": "A2", "translations": ["опасный"], "dictionaries": ["general", "travel"]},
-    {"lemma": "comfortable", "pos": "adjective", "level": "A2", "translations": ["удобный", "комфортный"], "dictionaries": ["general", "travel"]},
-    {"lemma": "software", "pos": "noun", "level": "B1", "translations": ["программное обеспечение", "софт"], "dictionaries": ["it"]},
-    {"lemma": "hardware", "pos": "noun", "level": "B1", "translations": ["аппаратное обеспечение", "железо"], "dictionaries": ["it"]},
-    {"lemma": "database", "pos": "noun", "level": "B1", "translations": ["база данных"], "dictionaries": ["it"]},
-    {"lemma": "server", "pos": "noun", "level": "B1", "translations": ["сервер"], "dictionaries": ["it"]},
-    {"lemma": "network", "pos": "noun", "level": "B1", "translations": ["сеть"], "dictionaries": ["it"]},
-    {"lemma": "router", "pos": "noun", "level": "B1", "translations": ["маршрутизатор", "роутер"], "dictionaries": ["it"]},
-    {"lemma": "cable", "pos": "noun", "level": "B1", "translations": ["кабель", "провод"], "dictionaries": ["it"]},
-    {"lemma": "wireless", "pos": "adjective", "level": "B1", "translations": ["беспроводной"], "dictionaries": ["it"]},
-    {"lemma": "bluetooth", "pos": "noun", "level": "B1", "translations": ["блютуз"], "dictionaries": ["it"]},
-    {"lemma": "device", "pos": "noun", "level": "B1", "translations": ["устройство", "прибор"], "dictionaries": ["it", "general"]},
-    {"lemma": "laptop", "pos": "noun", "level": "B1", "translations": ["ноутбук"], "dictionaries": ["it", "general"]},
-    {"lemma": "tablet", "pos": "noun", "level": "B1", "translations": ["планшет"], "dictionaries": ["it", "general"]},
-    {"lemma": "smartphone", "pos": "noun", "level": "B1", "translations": ["смартфон"], "dictionaries": ["it", "general"]},
-    {"lemma": "application", "pos": "noun", "level": "B1", "translations": ["приложение", "заявка"], "dictionaries": ["it"]},
-    {"lemma": "interface", "pos": "noun", "level": "B1", "translations": ["интерфейс"], "dictionaries": ["it"]},
-    {"lemma": "install", "pos": "verb", "level": "B1", "translations": ["устанавливать", "инсталлировать"], "dictionaries": ["it"]},
-    {"lemma": "uninstall", "pos": "verb", "level": "B1", "translations": ["удалять", "деинсталлировать"], "dictionaries": ["it"]},
-    {"lemma": "reboot", "pos": "verb", "level": "B1", "translations": ["перезагружать"], "dictionaries": ["it"]},
-    {"lemma": "configure", "pos": "verb", "level": "B1", "translations": ["настраивать", "конфигурировать"], "dictionaries": ["it"]},
-    {"lemma": "troubleshoot", "pos": "verb", "level": "B1", "translations": ["устранять неполадки"], "dictionaries": ["it"]},
-    {"lemma": "flight", "pos": "noun", "level": "B1", "translations": ["рейс", "полет"], "dictionaries": ["travel"]},
-    {"lemma": "boarding", "pos": "noun", "level": "B1", "translations": ["посадка"], "dictionaries": ["travel"]},
-    {"lemma": "luggage", "pos": "noun", "level": "B1", "translations": ["багаж"], "dictionaries": ["travel"]},
-    {"lemma": "suitcase", "pos": "noun", "level": "B1", "translations": ["чемодан"], "dictionaries": ["travel"]},
-    {"lemma": "delay", "pos": "noun", "level": "B1", "translations": ["задержка", "опоздание"], "dictionaries": ["travel"]},
-    {"lemma": "cancel", "pos": "verb", "level": "B1", "translations": ["отменять", "аннулировать"], "dictionaries": ["travel", "general"]},
-    {"lemma": "reserve", "pos": "verb", "level": "B1", "translations": ["бронировать", "резервировать"], "dictionaries": ["travel"]},
-    {"lemma": "check", "pos": "verb", "level": "B1", "translations": ["проверять", "регистрироваться"], "dictionaries": ["general", "it"]},
-    {"lemma": "arrive", "pos": "verb", "level": "B1", "translations": ["прибывать", "приезжать"], "dictionaries": ["travel", "general"]},
-    {"lemma": "depart", "pos": "verb", "level": "B1", "translations": ["отправляться", "уезжать"], "dictionaries": ["travel", "general"]},
-    {"lemma": "destination", "pos": "noun", "level": "B1", "translations": ["пункт назначения", "цель"], "dictionaries": ["travel"]},
-    {"lemma": "journey", "pos": "noun", "level": "B1", "translations": ["путешествие", "поездка"], "dictionaries": ["travel"]},
-    {"lemma": "trip", "pos": "noun", "level": "B1", "translations": ["поездка", "путешествие"], "dictionaries": ["travel"]},
-    {"lemma": "tour", "pos": "noun", "level": "B1", "translations": ["тур", "экскурсия"], "dictionaries": ["travel"]},
-    {"lemma": "guide", "pos": "noun", "level": "B1", "translations": ["гид", "путеводитель"], "dictionaries": ["travel"]},
-    {"lemma": "map", "pos": "noun", "level": "B1", "translations": ["карта", "схема"], "dictionaries": ["travel"]},
-    {"lemma": "compass", "pos": "noun", "level": "B1", "translations": ["компас"], "dictionaries": ["travel"]},
-    {"lemma": "tent", "pos": "noun", "level": "B1", "translations": ["палатка", "тент"], "dictionaries": ["travel"]},
-    {"lemma": "backpack", "pos": "noun", "level": "B1", "translations": ["рюкзак"], "dictionaries": ["travel"]},
-    {"lemma": "hiking", "pos": "noun", "level": "B1", "translations": ["пеший туризм", "хайкинг"], "dictionaries": ["travel"]},
-    {"lemma": "mountain", "pos": "noun", "level": "B1", "translations": ["гора"], "dictionaries": ["general", "travel"]},
-    {"lemma": "beach", "pos": "noun", "level": "B1", "translations": ["пляж"], "dictionaries": ["general", "travel"]},
-    {"lemma": "forest", "pos": "noun", "level": "B1", "translations": ["лес"], "dictionaries": ["general", "travel"]},
-    {"lemma": "river", "pos": "noun", "level": "B1", "translations": ["река"], "dictionaries": ["general", "travel"]},
-    {"lemma": "lake", "pos": "noun", "level": "B1", "translations": ["озеро"], "dictionaries": ["general", "travel"]},
-    {"lemma": "island", "pos": "noun", "level": "B1", "translations": ["остров"], "dictionaries": ["general", "travel"]},
-    {"lemma": "desert", "pos": "noun", "level": "B1", "translations": ["пустыня"], "dictionaries": ["general", "travel"]},
-    {"lemma": "valley", "pos": "noun", "level": "B1", "translations": ["долина"], "dictionaries": ["general", "travel"]},
-    {"lemma": "cliff", "pos": "noun", "level": "B1", "translations": ["утес", "скала"], "dictionaries": ["general", "travel"]},
-    {"lemma": "cave", "pos": "noun", "level": "B1", "translations": ["пещера"], "dictionaries": ["general", "travel"]},
-    {"lemma": "algorithm", "pos": "noun", "level": "B2", "translations": ["алгоритм"], "dictionaries": ["it"]},
-    {"lemma": "variable", "pos": "noun", "level": "B2", "translations": ["переменная"], "dictionaries": ["it"]},
-    {"lemma": "function", "pos": "noun", "level": "B2", "translations": ["функция"], "dictionaries": ["it"]},
-    {"lemma": "loop", "pos": "noun", "level": "B2", "translations": ["цикл", "петля"], "dictionaries": ["it"]},
-    {"lemma": "array", "pos": "noun", "level": "B2", "translations": ["массив"], "dictionaries": ["it"]},
-    {"lemma": "object", "pos": "noun", "level": "B2", "translations": ["объект"], "dictionaries": ["it", "general"]},
-    {"lemma": "class", "pos": "noun", "level": "B2", "translations": ["класс"], "dictionaries": ["it", "general"]},
-    {"lemma": "method", "pos": "noun", "level": "B2", "translations": ["метод"], "dictionaries": ["it", "general"]},
-    {"lemma": "syntax", "pos": "noun", "level": "B2", "translations": ["синтаксис"], "dictionaries": ["it"]},
-    {"lemma": "compiler", "pos": "noun", "level": "B2", "translations": ["компилятор"], "dictionaries": ["it"]},
-    {"lemma": "interpreter", "pos": "noun", "level": "B2", "translations": ["интерпретатор", "переводчик"], "dictionaries": ["it"]},
-    {"lemma": "debug", "pos": "verb", "level": "B2", "translations": ["отлаживать", "искать ошибки"], "dictionaries": ["it"]},
-    {"lemma": "compile", "pos": "verb", "level": "B2", "translations": ["компилировать"], "dictionaries": ["it"]},
-    {"lemma": "execute", "pos": "verb", "level": "B2", "translations": ["выполнять", "запускать"], "dictionaries": ["it"]},
-    {"lemma": "iterate", "pos": "verb", "level": "B2", "translations": ["итерировать", "повторять"], "dictionaries": ["it"]},
-    {"lemma": "instantiate", "pos": "verb", "level": "B2", "translations": ["создавать экземпляр"], "dictionaries": ["it"]},
-    {"lemma": "encapsulate", "pos": "verb", "level": "B2", "translations": ["инкапсулировать"], "dictionaries": ["it"]},
-    {"lemma": "inherit", "pos": "verb", "level": "B2", "translations": ["наследовать"], "dictionaries": ["it"]},
-    {"lemma": "override", "pos": "verb", "level": "B2", "translations": ["переопределять", "перекрывать"], "dictionaries": ["it"]},
-    {"lemma": "implement", "pos": "verb", "level": "B2", "translations": ["реализовывать", "внедрять"], "dictionaries": ["it", "general"]},
-    {"lemma": "accommodation", "pos": "noun", "level": "B2", "translations": ["жилье", "размещение"], "dictionaries": ["travel"]},
-    {"lemma": "itinerary", "pos": "noun", "level": "B2", "translations": ["маршрут", "план поездки"], "dictionaries": ["travel"]},
-    {"lemma": "voucher", "pos": "noun", "level": "B2", "translations": ["ваучер", "купон"], "dictionaries": ["travel"]},
-    {"lemma": "excursion", "pos": "noun", "level": "B2", "translations": ["экскурсия"], "dictionaries": ["travel"]},
-    {"lemma": "landmark", "pos": "noun", "level": "B2", "translations": ["достопримечательность", "ориентир"], "dictionaries": ["travel"]},
-    {"lemma": "souvenir", "pos": "noun", "level": "B2", "translations": ["сувенир"], "dictionaries": ["travel"]},
-    {"lemma": "currency", "pos": "noun", "level": "B2", "translations": ["валюта"], "dictionaries": ["general", "travel"]},
-    {"lemma": "exchange", "pos": "noun", "level": "B2", "translations": ["обмен", "биржа"], "dictionaries": ["general", "travel"]},
-    {"lemma": "customs", "pos": "noun", "level": "B2", "translations": ["таможня"], "dictionaries": ["travel"]},
-    {"lemma": "visa", "pos": "noun", "level": "B2", "translations": ["виза"], "dictionaries": ["travel"]},
-    {"lemma": "embassy", "pos": "noun", "level": "B2", "translations": ["посольство"], "dictionaries": ["travel"]},
-    {"lemma": "consulate", "pos": "noun", "level": "B2", "translations": ["консульство"], "dictionaries": ["travel"]},
-    {"lemma": "immigration", "pos": "noun", "level": "B2", "translations": ["иммиграция", "миграционный контроль"], "dictionaries": ["travel"]},
-    {"lemma": "quarantine", "pos": "noun", "level": "B2", "translations": ["карантин"], "dictionaries": ["travel"]},
-    {"lemma": "vaccination", "pos": "noun", "level": "B2", "translations": ["вакцинация", "прививка"], "dictionaries": ["travel"]},
-    {"lemma": "insurance", "pos": "noun", "level": "B2", "translations": ["страховка", "страхование"], "dictionaries": ["general", "travel"]},
-    {"lemma": "refund", "pos": "noun", "level": "B2", "translations": ["возврат средств", "возмещение"], "dictionaries": ["general", "travel"]},
-    {"lemma": "receipt", "pos": "noun", "level": "B2", "translations": ["чек", "квитанция"], "dictionaries": ["general", "travel"]},
-    {"lemma": "invoice", "pos": "noun", "level": "B2", "translations": ["счет-фактура", "инвойс"], "dictionaries": ["general", "it"]},
-    {"lemma": "estimate", "pos": "noun", "level": "B2", "translations": ["смета", "оценка"], "dictionaries": ["general", "travel"]},
-    {"lemma": "bandwidth", "pos": "noun", "level": "C1", "translations": ["пропускная способность", "ширина полосы"], "dictionaries": ["it"]},
-    {"lemma": "latency", "pos": "noun", "level": "C1", "translations": ["задержка", "латентность"], "dictionaries": ["it"]},
-    {"lemma": "throughput", "pos": "noun", "level": "C1", "translations": ["пропускная способность", "производительность"], "dictionaries": ["it"]},
-    {"lemma": "scalability", "pos": "noun", "level": "C1", "translations": ["масштабируемость"], "dictionaries": ["it"]},
-    {"lemma": "redundancy", "pos": "noun", "level": "C1", "translations": ["избыточность", "резервирование"], "dictionaries": ["it"]},
-    {"lemma": "middleware", "pos": "noun", "level": "C1", "translations": ["промежуточное ПО"], "dictionaries": ["it"]},
-    {"lemma": "microservice", "pos": "noun", "level": "C1", "translations": ["микросервис"], "dictionaries": ["it"]},
-    {"lemma": "repository", "pos": "noun", "level": "C1", "translations": ["репозиторий", "хранилище"], "dictionaries": ["it"]},
-    {"lemma": "framework", "pos": "noun", "level": "C1", "translations": ["фреймворк", "каркас"], "dictionaries": ["it"]},
-    {"lemma": "dependency", "pos": "noun", "level": "C1", "translations": ["зависимость"], "dictionaries": ["it", "general"]},
-    {"lemma": "authenticate", "pos": "verb", "level": "C1", "translations": ["аутентифицировать", "подтверждать"], "dictionaries": ["it"]},
-    {"lemma": "authorize", "pos": "verb", "level": "C1", "translations": ["авторизовать", "уполномочивать"], "dictionaries": ["it"]},
-    {"lemma": "encrypt", "pos": "verb", "level": "C1", "translations": ["шифровать", "кодировать"], "dictionaries": ["it"]},
-    {"lemma": "decrypt", "pos": "verb", "level": "C1", "translations": ["расшифровывать", "декодировать"], "dictionaries": ["it"]},
-    {"lemma": "parse", "pos": "verb", "level": "C1", "translations": ["парсить", "анализировать"], "dictionaries": ["it"]},
-    {"lemma": "serialize", "pos": "verb", "level": "C1", "translations": ["сериализовать"], "dictionaries": ["it"]},
-    {"lemma": "deserialize", "pos": "verb", "level": "C1", "translations": ["десериализовать"], "dictionaries": ["it"]},
-    {"lemma": "refactor", "pos": "verb", "level": "C1", "translations": ["рефакторить", "улучшать код"], "dictionaries": ["it"]},
-    {"lemma": "deprecate", "pos": "verb", "level": "C1", "translations": ["объявлять устаревшим", "не рекомендовать"], "dictionaries": ["it"]},
-    {"lemma": "deploy", "pos": "verb", "level": "C1", "translations": ["развертывать", "выкладывать"], "dictionaries": ["it"]},
-    {"lemma": "layover", "pos": "noun", "level": "C1", "translations": ["пересадка", "короткая остановка"], "dictionaries": ["travel"]},
-    {"lemma": "stopover", "pos": "noun", "level": "C1", "translations": ["остановка в пути"], "dictionaries": ["travel"]},
-    {"lemma": "tarmac", "pos": "noun", "level": "C1", "translations": ["взлетная полоса", "перрон"], "dictionaries": ["travel"]},
-    {"lemma": "fuselage", "pos": "noun", "level": "C1", "translations": ["фюзеляж"], "dictionaries": ["travel"]},
-    {"lemma": "cockpit", "pos": "noun", "level": "C1", "translations": ["кабина пилота"], "dictionaries": ["travel"]},
-    {"lemma": "carousel", "pos": "noun", "level": "C1", "translations": ["лента выдачи багажа", "карусель"], "dictionaries": ["travel"]},
-    {"lemma": "concierge", "pos": "noun", "level": "C1", "translations": ["консьерж", "портье"], "dictionaries": ["travel"]},
-    {"lemma": "gratuity", "pos": "noun", "level": "C1", "translations": ["чаевые", "вознаграждение"], "dictionaries": ["travel"]},
-    {"lemma": "amenity", "pos": "noun", "level": "C1", "translations": ["удобство", "комфорт"], "dictionaries": ["travel"]},
-    {"lemma": "excursionist", "pos": "noun", "level": "C1", "translations": ["экскурсант"], "dictionaries": ["travel"]},
-    {"lemma": "globetrotter", "pos": "noun", "level": "C1", "translations": ["путешественник", "глобтроттер"], "dictionaries": ["travel"]},
-    {"lemma": "waypoint", "pos": "noun", "level": "C1", "translations": ["путевая точка", "ориентир"], "dictionaries": ["travel"]},
-    {"lemma": "embark", "pos": "verb", "level": "C1", "translations": ["садиться на борт", "отправляться"], "dictionaries": ["travel"]},
-    {"lemma": "disembark", "pos": "verb", "level": "C1", "translations": ["сходить с борта", "высаживаться"], "dictionaries": ["travel"]},
-    {"lemma": "meander", "pos": "verb", "level": "C1", "translations": ["петлять", "блуждать"], "dictionaries": ["travel"]},
-    {"lemma": "traverse", "pos": "verb", "level": "C1", "translations": ["пересекать", "проходить"], "dictionaries": ["travel"]},
-    {"lemma": "navigate", "pos": "verb", "level": "C1", "translations": ["ориентироваться", "управлять курсом"], "dictionaries": ["travel"]},
-    {"lemma": "acclimatize", "pos": "verb", "level": "C1", "translations": ["акклиматизироваться", "привыкать"], "dictionaries": ["travel"]},
-    {"lemma": "circumnavigate", "pos": "verb", "level": "C1", "translations": ["совершать кругосветное плавание"], "dictionaries": ["travel"]},
-    {"lemma": "sojourn", "pos": "verb", "level": "C1", "translations": ["пребывать", "гостить"], "dictionaries": ["travel"]},
-    {"lemma": "polymorphism", "pos": "noun", "level": "C2", "translations": ["полиморфизм"], "dictionaries": ["it"]},
-    {"lemma": "idempotence", "pos": "noun", "level": "C2", "translations": ["идемпотентность"], "dictionaries": ["it"]},
-    {"lemma": "heuristic", "pos": "noun", "level": "C2", "translations": ["эвристика"], "dictionaries": ["it"]},
-    {"lemma": "recursion", "pos": "noun", "level": "C2", "translations": ["рекурсия"], "dictionaries": ["it"]},
-    {"lemma": "memoization", "pos": "noun", "level": "C2", "translations": ["мемоизация"], "dictionaries": ["it"]},
-    {"lemma": "concurrency", "pos": "noun", "level": "C2", "translations": ["конкурентность", "параллелизм"], "dictionaries": ["it"]},
-    {"lemma": "multithreading", "pos": "noun", "level": "C2", "translations": ["многопоточность"], "dictionaries": ["it"]},
-    {"lemma": "asynchronous", "pos": "adjective", "level": "C2", "translations": ["асинхронный"], "dictionaries": ["it"]},
-    {"lemma": "synchronous", "pos": "adjective", "level": "C2", "translations": ["синхронный"], "dictionaries": ["it"]},
-    {"lemma": "immutable", "pos": "adjective", "level": "C2", "translations": ["неизменяемый"], "dictionaries": ["it"]},
-    {"lemma": "mutable", "pos": "adjective", "level": "C2", "translations": ["изменяемый"], "dictionaries": ["it"]},
-    {"lemma": "volatile", "pos": "adjective", "level": "C2", "translations": ["энергозависимый", "изменчивый"], "dictionaries": ["it"]},
-    {"lemma": "ubiquitous", "pos": "adjective", "level": "C2", "translations": ["вездесущий", "повсеместный"], "dictionaries": ["it", "general"]},
-    {"lemma": "ephemeral", "pos": "adjective", "level": "C2", "translations": ["эфемерный", "мимолетный"], "dictionaries": ["it"]},
-    {"lemma": "verbose", "pos": "adjective", "level": "C2", "translations": ["многословный", "подробный"], "dictionaries": ["it"]},
-    {"lemma": "terse", "pos": "adjective", "level": "C2", "translations": ["лаконичный", "краткий"], "dictionaries": ["it"]},
-    {"lemma": "obfuscate", "pos": "verb", "level": "C2", "translations": ["запутывать", "обфусцировать"], "dictionaries": ["it"]},
-    {"lemma": "bottleneck", "pos": "verb", "level": "C2", "translations": ["создавать узкое место", "тормозить"], "dictionaries": ["it"]},
-    {"lemma": "paginate", "pos": "verb", "level": "C2", "translations": ["разбивать на страницы", "пагинировать"], "dictionaries": ["it"]},
-    {"lemma": "orchestrate", "pos": "verb", "level": "C2", "translations": ["оркестрировать", "координировать"], "dictionaries": ["it"]}
-  ]
-}
-### end of scripts/words1.json ########################################################################
-
-### scripts/words2.json ########################################################################
-{
-  "words": [
-    {"lemma": "cat", "pos": "noun", "level": "A1", "translations": ["кот", "кошка"], "dictionaries": ["general"]},
-    {"lemma": "bird", "pos": "noun", "level": "A1", "translations": ["птица"], "dictionaries": ["general"]},
-    {"lemma": "tree", "pos": "noun", "level": "A1", "translations": ["дерево"], "dictionaries": ["general"]},
-    {"lemma": "flower", "pos": "noun", "level": "A1", "translations": ["цветок"], "dictionaries": ["general"]},
-    {"lemma": "sun", "pos": "noun", "level": "A1", "translations": ["солнце"], "dictionaries": ["general"]},
-    {"lemma": "moon", "pos": "noun", "level": "A1", "translations": ["луна"], "dictionaries": ["general"]},
-    {"lemma": "star", "pos": "noun", "level": "A1", "translations": ["звезда"], "dictionaries": ["general"]},
-    {"lemma": "rain", "pos": "noun", "level": "A1", "translations": ["дождь"], "dictionaries": ["general", "travel"]},
-    {"lemma": "snow", "pos": "noun", "level": "A1", "translations": ["снег"], "dictionaries": ["general", "travel"]},
-    {"lemma": "wind", "pos": "noun", "level": "A1", "translations": ["ветер"], "dictionaries": ["general", "travel"]},
-    {"lemma": "cold", "pos": "adjective", "level": "A1", "translations": ["холодный"], "dictionaries": ["general"]},
-    {"lemma": "hot", "pos": "adjective", "level": "A1", "translations": ["горячий", "жаркий"], "dictionaries": ["general"]},
-    {"lemma": "happy", "pos": "adjective", "level": "A1", "translations": ["счастливый", "радостный"], "dictionaries": ["general"]},
-    {"lemma": "sad", "pos": "adjective", "level": "A1", "translations": ["грустный", "печальный"], "dictionaries": ["general"]},
-    {"lemma": "tired", "pos": "adjective", "level": "A1", "translations": ["уставший"], "dictionaries": ["general"]},
-    {"lemma": "eat", "pos": "verb", "level": "A1", "translations": ["есть", "кушать"], "dictionaries": ["general"]},
-    {"lemma": "bite", "pos": "verb", "level": "A1", "translations": ["кусать", "грызть"], "dictionaries": ["general"]},
-    {"lemma": "sleep", "pos": "verb", "level": "A1", "translations": ["спать"], "dictionaries": ["general"]},
-    {"lemma": "wake", "pos": "verb", "level": "A1", "translations": ["просыпаться", "будить"], "dictionaries": ["general"]},
-    {"lemma": "walk", "pos": "verb", "level": "A1", "translations": ["гулять", "ходить"], "dictionaries": ["general", "travel"]},
-    {"lemma": "jump", "pos": "verb", "level": "A1", "translations": ["прыгать"], "dictionaries": ["general"]},
-    {"lemma": "sit", "pos": "verb", "level": "A1", "translations": ["сидеть", "садиться"], "dictionaries": ["general"]},
-    {"lemma": "stand", "pos": "verb", "level": "A1", "translations": ["стоять", "вставать"], "dictionaries": ["general"]},
-    {"lemma": "read", "pos": "verb", "level": "A1", "translations": ["читать"], "dictionaries": ["general"]},
-    {"lemma": "write", "pos": "verb", "level": "A1", "translations": ["писать"], "dictionaries": ["general"]},
-    {"lemma": "red", "pos": "adjective", "level": "A1", "translations": ["красный"], "dictionaries": ["general"]},
-    {"lemma": "blue", "pos": "adjective", "level": "A1", "translations": ["синий", "голубой"], "dictionaries": ["general"]},
-    {"lemma": "green", "pos": "adjective", "level": "A1", "translations": ["зеленый"], "dictionaries": ["general"]},
-    {"lemma": "black", "pos": "adjective", "level": "A1", "translations": ["черный"], "dictionaries": ["general"]},
-    {"lemma": "white", "pos": "adjective", "level": "A1", "translations": ["белый"], "dictionaries": ["general"]},
-    {"lemma": "head", "pos": "noun", "level": "A1", "translations": ["голова"], "dictionaries": ["general"]},
-    {"lemma": "hand", "pos": "noun", "level": "A1", "translations": ["рука", "кисть"], "dictionaries": ["general"]},
-    {"lemma": "eye", "pos": "noun", "level": "A1", "translations": ["глаз", "око"], "dictionaries": ["general"]},
-    {"lemma": "ear", "pos": "noun", "level": "A1", "translations": ["ухо"], "dictionaries": ["general"]},
-    {"lemma": "mouth", "pos": "noun", "level": "A1", "translations": ["рот"], "dictionaries": ["general"]},
-    {"lemma": "shirt", "pos": "noun", "level": "A1", "translations": ["рубашка"], "dictionaries": ["general", "travel"]},
-    {"lemma": "shoe", "pos": "noun", "level": "A1", "translations": ["туфля", "ботинок"], "dictionaries": ["general", "travel"]},
-    {"lemma": "hat", "pos": "noun", "level": "A1", "translations": ["шляпа", "шапка"], "dictionaries": ["general", "travel"]},
-    {"lemma": "bed", "pos": "noun", "level": "A1", "translations": ["кровать", "постель"], "dictionaries": ["general", "travel"]},
-    {"lemma": "door", "pos": "noun", "level": "A1", "translations": ["дверь"], "dictionaries": ["general"]},
-    {"lemma": "window", "pos": "noun", "level": "A1", "translations": ["окно"], "dictionaries": ["general"]},
-    {"lemma": "table", "pos": "noun", "level": "A1", "translations": ["стол"], "dictionaries": ["general"]},
-    {"lemma": "chair", "pos": "noun", "level": "A1", "translations": ["стул"], "dictionaries": ["general"]},
-    {"lemma": "pen", "pos": "noun", "level": "A1", "translations": ["ручка"], "dictionaries": ["general"]},
-    {"lemma": "paper", "pos": "noun", "level": "A1", "translations": ["бумага"], "dictionaries": ["general"]},
-    {"lemma": "bag", "pos": "noun", "level": "A1", "translations": ["сумка", "пакет"], "dictionaries": ["general", "travel"]},
-    {"lemma": "box", "pos": "noun", "level": "A1", "translations": ["коробка", "ящик"], "dictionaries": ["general"]},
-    {"lemma": "cup", "pos": "noun", "level": "A1", "translations": ["чашка", "кружка"], "dictionaries": ["general", "travel"]},
-    {"lemma": "plate", "pos": "noun", "level": "A1", "translations": ["тарелка"], "dictionaries": ["general", "travel"]},
-    {"lemma": "spoon", "pos": "noun", "level": "A1", "translations": ["ложка"], "dictionaries": ["general", "travel"]},
-    {"lemma": "weather", "pos": "noun", "level": "A2", "translations": ["погода"], "dictionaries": ["general", "travel"]},
-    {"lemma": "cloud", "pos": "noun", "level": "A2", "translations": ["облако", "туча"], "dictionaries": ["general"]},
-    {"lemma": "storm", "pos": "noun", "level": "A2", "translations": ["буря", "шторм"], "dictionaries": ["general", "travel"]},
-    {"lemma": "umbrella", "pos": "noun", "level": "A2", "translations": ["зонт"], "dictionaries": ["general", "travel"]},
-    {"lemma": "coat", "pos": "noun", "level": "A2", "translations": ["пальто"], "dictionaries": ["general", "travel"]},
-    {"lemma": "jacket", "pos": "noun", "level": "A2", "translations": ["куртка", "пиджак"], "dictionaries": ["general", "travel"]},
-    {"lemma": "buy", "pos": "verb", "level": "A2", "translations": ["покупать"], "dictionaries": ["general", "travel"]},
-    {"lemma": "sell", "pos": "verb", "level": "A2", "translations": ["продавать"], "dictionaries": ["general"]},
-    {"lemma": "pay", "pos": "verb", "level": "A2", "translations": ["платить"], "dictionaries": ["general", "travel"]},
-    {"lemma": "cost", "pos": "verb", "level": "A2", "translations": ["стоить"], "dictionaries": ["general", "travel"]},
-    {"lemma": "shop", "pos": "noun", "level": "A2", "translations": ["магазин"], "dictionaries": ["general", "travel"]},
-    {"lemma": "market", "pos": "noun", "level": "A2", "translations": ["рынок"], "dictionaries": ["general", "travel"]},
-    {"lemma": "price", "pos": "noun", "level": "A2", "translations": ["цена"], "dictionaries": ["general", "travel"]},
-    {"lemma": "sale", "pos": "noun", "level": "A2", "translations": ["распродажа", "продажа"], "dictionaries": ["general"]},
-    {"lemma": "customer", "pos": "noun", "level": "A2", "translations": ["клиент", "покупатель"], "dictionaries": ["general"]},
-    {"lemma": "smile", "pos": "verb", "level": "A2", "translations": ["улыбаться"], "dictionaries": ["general"]},
-    {"lemma": "laugh", "pos": "verb", "level": "A2", "translations": ["смеяться"], "dictionaries": ["general"]},
-    {"lemma": "cry", "pos": "verb", "level": "A2", "translations": ["плакать"], "dictionaries": ["general"]},
-    {"lemma": "shout", "pos": "verb", "level": "A2", "translations": ["кричать"], "dictionaries": ["general"]},
-    {"lemma": "whisper", "pos": "verb", "level": "A2", "translations": ["шептать"], "dictionaries": ["general"]},
-    {"lemma": "angry", "pos": "adjective", "level": "A2", "translations": ["злой", "рассерженный"], "dictionaries": ["general"]},
-    {"lemma": "afraid", "pos": "adjective", "level": "A2", "translations": ["испуганный"], "dictionaries": ["general"]},
-    {"lemma": "surprised", "pos": "adjective", "level": "A2", "translations": ["удивленный"], "dictionaries": ["general"]},
-    {"lemma": "bored", "pos": "adjective", "level": "A2", "translations": ["скучающий"], "dictionaries": ["general"]},
-    {"lemma": "excited", "pos": "adjective", "level": "A2", "translations": ["взволнованный", "возбужденный"], "dictionaries": ["general"]},
-    {"lemma": "hospital", "pos": "noun", "level": "A2", "translations": ["больница", "госпиталь"], "dictionaries": ["general", "travel"]},
-    {"lemma": "doctor", "pos": "noun", "level": "A2", "translations": ["врач", "доктор"], "dictionaries": ["general"]},
-    {"lemma": "nurse", "pos": "noun", "level": "A2", "translations": ["медсестра"], "dictionaries": ["general"]},
-    {"lemma": "medicine", "pos": "noun", "level": "A2", "translations": ["лекарство", "медицина"], "dictionaries": ["general", "travel"]},
-    {"lemma": "pain", "pos": "noun", "level": "A2", "translations": ["боль"], "dictionaries": ["general"]},
-    {"lemma": "sick", "pos": "adjective", "level": "A2", "translations": ["больной"], "dictionaries": ["general"]},
-    {"lemma": "healthy", "pos": "adjective", "level": "A2", "translations": ["здоровый"], "dictionaries": ["general"]},
-    {"lemma": "exercise", "pos": "noun", "level": "A2", "translations": ["упражнение", "тренировка"], "dictionaries": ["general"]},
-    {"lemma": "sport", "pos": "noun", "level": "A2", "translations": ["спорт"], "dictionaries": ["general"]},
-    {"lemma": "game", "pos": "noun", "level": "A2", "translations": ["игра"], "dictionaries": ["general"]},
-    {"lemma": "win", "pos": "verb", "level": "A2", "translations": ["выигрывать", "побеждать"], "dictionaries": ["general"]},
-    {"lemma": "lose", "pos": "verb", "level": "A2", "translations": ["проигрывать", "терять"], "dictionaries": ["general"]},
-    {"lemma": "draw", "pos": "verb", "level": "A2", "translations": ["рисовать", "чертить"], "dictionaries": ["general"]},
-    {"lemma": "score", "pos": "noun", "level": "A2", "translations": ["счет", "гол"], "dictionaries": ["general"]},
-    {"lemma": "team", "pos": "noun", "level": "A2", "translations": ["команда"], "dictionaries": ["general"]},
-    {"lemma": "camera", "pos": "noun", "level": "A2", "translations": ["камера", "фотоаппарат"], "dictionaries": ["general", "travel"]},
-    {"lemma": "photo", "pos": "noun", "level": "A2", "translations": ["фотография", "снимок"], "dictionaries": ["general", "travel"]},
-    {"lemma": "picture", "pos": "noun", "level": "A2", "translations": ["картина", "изображение"], "dictionaries": ["general"]},
-    {"lemma": "movie", "pos": "noun", "level": "A2", "translations": ["фильм", "кино"], "dictionaries": ["general"]},
-    {"lemma": "song", "pos": "noun", "level": "A2", "translations": ["песня"], "dictionaries": ["general"]},
-    {"lemma": "music", "pos": "noun", "level": "A2", "translations": ["музыка"], "dictionaries": ["general"]},
-    {"lemma": "dance", "pos": "verb", "level": "A2", "translations": ["танцевать"], "dictionaries": ["general"]},
-    {"lemma": "sing", "pos": "verb", "level": "A2", "translations": ["петь"], "dictionaries": ["general"]},
-    {"lemma": "play", "pos": "verb", "level": "A2", "translations": ["играть"], "dictionaries": ["general"]},
-    {"lemma": "instrument", "pos": "noun", "level": "A2", "translations": ["инструмент"], "dictionaries": ["general"]},
-    {"lemma": "degree", "pos": "noun", "level": "B1", "translations": ["степень", "диплом"], "dictionaries": ["general"]},
-    {"lemma": "university", "pos": "noun", "level": "B1", "translations": ["университет"], "dictionaries": ["general"]},
-    {"lemma": "college", "pos": "noun", "level": "B1", "translations": ["колледж"], "dictionaries": ["general"]},
-    {"lemma": "exam", "pos": "noun", "level": "B1", "translations": ["экзамен"], "dictionaries": ["general"]},
-    {"lemma": "test", "pos": "noun", "level": "B1", "translations": ["тест", "проверка"], "dictionaries": ["general"]},
-    {"lemma": "grade", "pos": "noun", "level": "B1", "translations": ["оценка", "класс"], "dictionaries": ["general"]},
-    {"lemma": "pass", "pos": "verb", "level": "B1", "translations": ["сдавать", "проходить"], "dictionaries": ["general"]},
-    {"lemma": "fail", "pos": "verb", "level": "B1", "translations": ["проваливать", "терпеть неудачу"], "dictionaries": ["general"]},
-    {"lemma": "study", "pos": "verb", "level": "B1", "translations": ["учиться", "изучать"], "dictionaries": ["general"]},
-    {"lemma": "learn", "pos": "verb", "level": "B1", "translations": ["учить", "узнавать"], "dictionaries": ["general"]},
-    {"lemma": "teach", "pos": "verb", "level": "B1", "translations": ["преподавать", "учить"], "dictionaries": ["general"]},
-    {"lemma": "manager", "pos": "noun", "level": "B1", "translations": ["менеджер", "управляющий"], "dictionaries": ["general"]},
-    {"lemma": "boss", "pos": "noun", "level": "B1", "translations": ["начальник", "босс"], "dictionaries": ["general"]},
-    {"lemma": "employee", "pos": "noun", "level": "B1", "translations": ["сотрудник", "работник"], "dictionaries": ["general"]},
-    {"lemma": "employer", "pos": "noun", "level": "B1", "translations": ["работодатель"], "dictionaries": ["general"]},
-    {"lemma": "salary", "pos": "noun", "level": "B1", "translations": ["зарплата", "оклад"], "dictionaries": ["general"]},
-    {"lemma": "wage", "pos": "noun", "level": "B1", "translations": ["заработная плата"], "dictionaries": ["general"]},
-    {"lemma": "interview", "pos": "noun", "level": "B1", "translations": ["интервью", "собеседование"], "dictionaries": ["general"]},
-    {"lemma": "hire", "pos": "verb", "level": "B1", "translations": ["нанимать"], "dictionaries": ["general"]},
-    {"lemma": "fire", "pos": "verb", "level": "B1", "translations": ["увольнять"], "dictionaries": ["general"]},
-    {"lemma": "quit", "pos": "verb", "level": "B1", "translations": ["увольняться", "бросать"], "dictionaries": ["general"]},
-    {"lemma": "promote", "pos": "verb", "level": "B1", "translations": ["продвигать", "повышать"], "dictionaries": ["general"]},
-    {"lemma": "career", "pos": "noun", "level": "B1", "translations": ["карьера"], "dictionaries": ["general"]},
-    {"lemma": "profession", "pos": "noun", "level": "B1", "translations": ["профессия"], "dictionaries": ["general"]},
-    {"lemma": "office", "pos": "noun", "level": "B1", "translations": ["офис", "кабинет"], "dictionaries": ["general"]},
-    {"lemma": "meeting", "pos": "noun", "level": "B1", "translations": ["встреча", "собрание"], "dictionaries": ["general"]},
-    {"lemma": "project", "pos": "noun", "level": "B1", "translations": ["проект"], "dictionaries": ["general"]},
-    {"lemma": "deadline", "pos": "noun", "level": "B1", "translations": ["дедлайн", "крайний срок"], "dictionaries": ["general"]},
-    {"lemma": "schedule", "pos": "noun", "level": "B1", "translations": ["расписание", "график"], "dictionaries": ["general"]},
-    {"lemma": "calendar", "pos": "noun", "level": "B1", "translations": ["календарь"], "dictionaries": ["general"]},
-    {"lemma": "appointment", "pos": "noun", "level": "B1", "translations": ["назначение", "встреча"], "dictionaries": ["general"]},
-    {"lemma": "environment", "pos": "noun", "level": "B1", "translations": ["окружающая среда"], "dictionaries": ["general"]},
-    {"lemma": "pollution", "pos": "noun", "level": "B1", "translations": ["загрязнение"], "dictionaries": ["general"]},
-    {"lemma": "recycle", "pos": "verb", "level": "B1", "translations": ["перерабатывать"], "dictionaries": ["general"]},
-    {"lemma": "climate", "pos": "noun", "level": "B1", "translations": ["климат"], "dictionaries": ["general", "travel"]},
-    {"lemma": "temperature", "pos": "noun", "level": "B1", "translations": ["температура"], "dictionaries": ["general", "travel"]},
-    {"lemma": "forecast", "pos": "noun", "level": "B1", "translations": ["прогноз"], "dictionaries": ["general", "travel"]},
-    {"lemma": "season", "pos": "noun", "level": "B1", "translations": ["сезон", "время года"], "dictionaries": ["general"]},
-    {"lemma": "spring", "pos": "noun", "level": "B1", "translations": ["весна"], "dictionaries": ["general"]},
-    {"lemma": "autumn", "pos": "noun", "level": "B1", "translations": ["осень"], "dictionaries": ["general"]},
-    {"lemma": "winter", "pos": "noun", "level": "B1", "translations": ["зима"], "dictionaries": ["general", "travel"]},
-    {"lemma": "summer", "pos": "noun", "level": "B1", "translations": ["лето"], "dictionaries": ["general", "travel"]},
-    {"lemma": "nature", "pos": "noun", "level": "B1", "translations": ["природа"], "dictionaries": ["general", "travel"]},
-    {"lemma": "wildlife", "pos": "noun", "level": "B1", "translations": ["дикая природа"], "dictionaries": ["general", "travel"]},
-    {"lemma": "protect", "pos": "verb", "level": "B1", "translations": ["защищать", "охранять"], "dictionaries": ["general"]},
-    {"lemma": "destroy", "pos": "verb", "level": "B1", "translations": ["разрушать", "уничтожать"], "dictionaries": ["general"]},
-    {"lemma": "conserve", "pos": "verb", "level": "B1", "translations": ["сохранять", "беречь"], "dictionaries": ["general"]},
-    {"lemma": "waste", "pos": "noun", "level": "B1", "translations": ["мусор", "отходы"], "dictionaries": ["general"]},
-    {"lemma": "energy", "pos": "noun", "level": "B1", "translations": ["энергия"], "dictionaries": ["general"]},
-    {"lemma": "power", "pos": "noun", "level": "B1", "translations": ["сила", "мощность", "власть"], "dictionaries": ["general"]},
-    {"lemma": "economy", "pos": "noun", "level": "B2", "translations": ["экономика"], "dictionaries": ["general"]},
-    {"lemma": "inflation", "pos": "noun", "level": "B2", "translations": ["инфляция"], "dictionaries": ["general"]},
-    {"lemma": "recession", "pos": "noun", "level": "B2", "translations": ["рецессия", "спад"], "dictionaries": ["general"]},
-    {"lemma": "industry", "pos": "noun", "level": "B2", "translations": ["промышленность", "индустрия"], "dictionaries": ["general"]},
-    {"lemma": "manufacture", "pos": "verb", "level": "B2", "translations": ["производить", "изготавливать"], "dictionaries": ["general"]},
-    {"lemma": "export", "pos": "verb", "level": "B2", "translations": ["экспортировать", "вывозить"], "dictionaries": ["general", "travel"]},
-    {"lemma": "import", "pos": "verb", "level": "B2", "translations": ["импортировать", "ввозить"], "dictionaries": ["general", "travel"]},
-    {"lemma": "trade", "pos": "noun", "level": "B2", "translations": ["торговля"], "dictionaries": ["general"]},
-    {"lemma": "commerce", "pos": "noun", "level": "B2", "translations": ["коммерция", "торговля"], "dictionaries": ["general"]},
-    {"lemma": "profit", "pos": "noun", "level": "B2", "translations": ["прибыль"], "dictionaries": ["general"]},
-    {"lemma": "loss", "pos": "noun", "level": "B2", "translations": ["убыток", "потеря"], "dictionaries": ["general"]},
-    {"lemma": "invest", "pos": "verb", "level": "B2", "translations": ["инвестировать", "вкладывать"], "dictionaries": ["general"]},
-    {"lemma": "budget", "pos": "noun", "level": "B2", "translations": ["бюджет"], "dictionaries": ["general"]},
-    {"lemma": "debt", "pos": "noun", "level": "B2", "translations": ["долг"], "dictionaries": ["general"]},
-    {"lemma": "loan", "pos": "noun", "level": "B2", "translations": ["кредит", "заем"], "dictionaries": ["general"]},
-    {"lemma": "mortgage", "pos": "noun", "level": "B2", "translations": ["ипотека"], "dictionaries": ["general"]},
-    {"lemma": "tax", "pos": "noun", "level": "B2", "translations": ["налог"], "dictionaries": ["general"]},
-    {"lemma": "government", "pos": "noun", "level": "B2", "translations": ["правительство"], "dictionaries": ["general"]},
-    {"lemma": "politics", "pos": "noun", "level": "B2", "translations": ["политика"], "dictionaries": ["general"]},
-    {"lemma": "election", "pos": "noun", "level": "B2", "translations": ["выборы"], "dictionaries": ["general"]},
-    {"lemma": "vote", "pos": "verb", "level": "B2", "translations": ["голосовать"], "dictionaries": ["general"]},
-    {"lemma": "law", "pos": "noun", "level": "B2", "translations": ["закон", "право"], "dictionaries": ["general"]},
-    {"lemma": "crime", "pos": "noun", "level": "B2", "translations": ["преступление"], "dictionaries": ["general"]},
-    {"lemma": "punish", "pos": "verb", "level": "B2", "translations": ["наказывать"], "dictionaries": ["general"]},
-    {"lemma": "prison", "pos": "noun", "level": "B2", "translations": ["тюрьма"], "dictionaries": ["general"]},
-    {"lemma": "arrest", "pos": "verb", "level": "B2", "translations": ["арестовывать"], "dictionaries": ["general"]},
-    {"lemma": "trial", "pos": "noun", "level": "B2", "translations": ["судебный процесс", "суд"], "dictionaries": ["general"]},
-    {"lemma": "judge", "pos": "noun", "level": "B2", "translations": ["судья"], "dictionaries": ["general"]},
-    {"lemma": "lawyer", "pos": "noun", "level": "B2", "translations": ["юрист", "адвокат"], "dictionaries": ["general"]},
-    {"lemma": "evidence", "pos": "noun", "level": "B2", "translations": ["улика", "доказательство"], "dictionaries": ["general"]},
-    {"lemma": "witness", "pos": "noun", "level": "B2", "translations": ["свидетель"], "dictionaries": ["general"]},
-    {"lemma": "guilty", "pos": "adjective", "level": "B2", "translations": ["виновный"], "dictionaries": ["general"]},
-    {"lemma": "innocent", "pos": "adjective", "level": "B2", "translations": ["невиновный"], "dictionaries": ["general"]},
-    {"lemma": "media", "pos": "noun", "level": "B2", "translations": ["СМИ", "медиа"], "dictionaries": ["general"]},
-    {"lemma": "journalism", "pos": "noun", "level": "B2", "translations": ["журналистика"], "dictionaries": ["general"]},
-    {"lemma": "broadcast", "pos": "verb", "level": "B2", "translations": ["транслировать", "вещать"], "dictionaries": ["general"]},
-    {"lemma": "publish", "pos": "verb", "level": "B2", "translations": ["публиковать", "издавать"], "dictionaries": ["general"]},
-    {"lemma": "article", "pos": "noun", "level": "B2", "translations": ["статья"], "dictionaries": ["general"]},
-    {"lemma": "headline", "pos": "noun", "level": "B2", "translations": ["заголовок"], "dictionaries": ["general"]},
-    {"lemma": "editor", "pos": "noun", "level": "B2", "translations": ["редактор"], "dictionaries": ["general"]},
-    {"lemma": "audience", "pos": "noun", "level": "B2", "translations": ["аудитория", "зрители"], "dictionaries": ["general"]},
-    {"lemma": "entertainment", "pos": "noun", "level": "B2", "translations": ["развлечение"], "dictionaries": ["general"]},
-    {"lemma": "celebrity", "pos": "noun", "level": "B2", "translations": ["знаменитость"], "dictionaries": ["general"]},
-    {"lemma": "scandal", "pos": "noun", "level": "B2", "translations": ["скандал"], "dictionaries": ["general"]},
-    {"lemma": "rumor", "pos": "noun", "level": "B2", "translations": ["слух"], "dictionaries": ["general"]},
-    {"lemma": "gossip", "pos": "noun", "level": "B2", "translations": ["сплетня"], "dictionaries": ["general"]},
-    {"lemma": "privacy", "pos": "noun", "level": "B2", "translations": ["конфиденциальность", "приватность"], "dictionaries": ["general"]},
-    {"lemma": "public", "pos": "adjective", "level": "B2", "translations": ["общественный", "публичный"], "dictionaries": ["general"]},
-    {"lemma": "private", "pos": "adjective", "level": "B2", "translations": ["частный", "личный"], "dictionaries": ["general"]},
-    {"lemma": "report", "pos": "verb", "level": "B2", "translations": ["сообщать", "отчитываться"], "dictionaries": ["general"]},
-    {"lemma": "bureaucracy", "pos": "noun", "level": "C1", "translations": ["бюрократия"], "dictionaries": ["general"]},
-    {"lemma": "diplomacy", "pos": "noun", "level": "C1", "translations": ["дипломатия"], "dictionaries": ["general"]},
-    {"lemma": "ambassador", "pos": "noun", "level": "C1", "translations": ["посол"], "dictionaries": ["general", "travel"]},
-    {"lemma": "treaty", "pos": "noun", "level": "C1", "translations": ["договор", "трактат"], "dictionaries": ["general"]},
-    {"lemma": "sanction", "pos": "noun", "level": "C1", "translations": ["санкция"], "dictionaries": ["general"]},
-    {"lemma": "embargo", "pos": "noun", "level": "C1", "translations": ["эмбарго"], "dictionaries": ["general", "travel"]},
-    {"lemma": "sovereign", "pos": "adjective", "level": "C1", "translations": ["суверенный"], "dictionaries": ["general"]},
-    {"lemma": "jurisdiction", "pos": "noun", "level": "C1", "translations": ["юрисдикция"], "dictionaries": ["general"]},
-    {"lemma": "legislation", "pos": "noun", "level": "C1", "translations": ["законодательство"], "dictionaries": ["general"]},
-    {"lemma": "amendment", "pos": "noun", "level": "C1", "translations": ["поправка"], "dictionaries": ["general"]},
-    {"lemma": "constitution", "pos": "noun", "level": "C1", "translations": ["конституция"], "dictionaries": ["general"]},
-    {"lemma": "precedent", "pos": "noun", "level": "C1", "translations": ["прецедент"], "dictionaries": ["general"]},
-    {"lemma": "statute", "pos": "noun", "level": "C1", "translations": ["устав", "статут"], "dictionaries": ["general"]},
-    {"lemma": "litigation", "pos": "noun", "level": "C1", "translations": ["судебный процесс"], "dictionaries": ["general"]},
-    {"lemma": "plaintiff", "pos": "noun", "level": "C1", "translations": ["истец"], "dictionaries": ["general"]},
-    {"lemma": "defendant", "pos": "noun", "level": "C1", "translations": ["ответчик", "подсудимый"], "dictionaries": ["general"]},
-    {"lemma": "verdict", "pos": "noun", "level": "C1", "translations": ["вердикт", "приговор"], "dictionaries": ["general"]},
-    {"lemma": "acquit", "pos": "verb", "level": "C1", "translations": ["оправдывать"], "dictionaries": ["general"]},
-    {"lemma": "convict", "pos": "verb", "level": "C1", "translations": ["осуждать"], "dictionaries": ["general"]},
-    {"lemma": "parole", "pos": "noun", "level": "C1", "translations": ["условно-досрочное освобождение"], "dictionaries": ["general"]},
-    {"lemma": "probation", "pos": "noun", "level": "C1", "translations": ["испытательный срок"], "dictionaries": ["general"]},
-    {"lemma": "felony", "pos": "noun", "level": "C1", "translations": ["тяжкое преступление"], "dictionaries": ["general"]},
-    {"lemma": "misdemeanor", "pos": "noun", "level": "C1", "translations": ["проступок", "мелкое правонарушение"], "dictionaries": ["general"]},
-    {"lemma": "subpoena", "pos": "noun", "level": "C1", "translations": ["повестка в суд"], "dictionaries": ["general"]},
-    {"lemma": "affidavit", "pos": "noun", "level": "C1", "translations": ["письменное показание под присягой"], "dictionaries": ["general"]},
-    {"lemma": "cryptography", "pos": "noun", "level": "C1", "translations": ["криптография"], "dictionaries": ["it"]},
-    {"lemma": "blockchain", "pos": "noun", "level": "C1", "translations": ["блокчейн"], "dictionaries": ["it"]},
-    {"lemma": "decentralized", "pos": "adjective", "level": "C1", "translations": ["децентрализованный"], "dictionaries": ["it"]},
-    {"lemma": "token", "pos": "noun", "level": "C1", "translations": ["токен"], "dictionaries": ["it"]},
-    {"lemma": "ledger", "pos": "noun", "level": "C1", "translations": ["реестр", "гроссбух"], "dictionaries": ["it"]},
-    {"lemma": "node", "pos": "noun", "level": "C1", "translations": ["узел", "нода"], "dictionaries": ["it"]},
-    {"lemma": "payload", "pos": "noun", "level": "C1", "translations": ["полезная нагрузка"], "dictionaries": ["it"]},
-    {"lemma": "endpoint", "pos": "noun", "level": "C1", "translations": ["конечная точка"], "dictionaries": ["it"]},
-    {"lemma": "webhook", "pos": "noun", "level": "C1", "translations": ["вебхук"], "dictionaries": ["it"]},
-    {"lemma": "gateway", "pos": "noun", "level": "C1", "translations": ["шлюз"], "dictionaries": ["it"]},
-    {"lemma": "proxy", "pos": "noun", "level": "C1", "translations": ["прокси"], "dictionaries": ["it"]},
-    {"lemma": "cache", "pos": "noun", "level": "C1", "translations": ["кэш", "кеш"], "dictionaries": ["it"]},
-    {"lemma": "jitter", "pos": "noun", "level": "C1", "translations": ["джиттер", "дрожание"], "dictionaries": ["it"]},
-    {"lemma": "packet", "pos": "noun", "level": "C1", "translations": ["пакет"], "dictionaries": ["it"]},
-    {"lemma": "protocol", "pos": "noun", "level": "C1", "translations": ["протокол"], "dictionaries": ["it"]},
-    {"lemma": "topology", "pos": "noun", "level": "C1", "translations": ["топология"], "dictionaries": ["it"]},
-    {"lemma": "subnet", "pos": "noun", "level": "C1", "translations": ["подсеть"], "dictionaries": ["it"]},
-    {"lemma": "firewall", "pos": "noun", "level": "C1", "translations": ["межсетевой экран", "файрвол"], "dictionaries": ["it"]},
-    {"lemma": "malware", "pos": "noun", "level": "C1", "translations": ["вредоносное ПО"], "dictionaries": ["it"]},
-    {"lemma": "ransomware", "pos": "noun", "level": "C1", "translations": ["программа-вымогатель"], "dictionaries": ["it"]},
-    {"lemma": "phishing", "pos": "noun", "level": "C1", "translations": ["фишинг"], "dictionaries": ["it"]},
-    {"lemma": "telemetry", "pos": "noun", "level": "C1", "translations": ["телеметрия"], "dictionaries": ["it"]},
-    {"lemma": "provisioning", "pos": "noun", "level": "C1", "translations": ["выделение ресурсов", "провиженинг"], "dictionaries": ["it"]},
-    {"lemma": "virtualization", "pos": "noun", "level": "C1", "translations": ["виртуализация"], "dictionaries": ["it"]},
-    {"lemma": "containerization", "pos": "noun", "level": "C1", "translations": ["контейнеризация"], "dictionaries": ["it"]},
-    {"lemma": "obfuscation", "pos": "noun", "level": "C2", "translations": ["обфускация", "запутывание"], "dictionaries": ["it"]},
-    {"lemma": "metaprogramming", "pos": "noun", "level": "C2", "translations": ["метапрограммирование"], "dictionaries": ["it"]},
-    {"lemma": "transpilation", "pos": "noun", "level": "C2", "translations": ["транспиляция"], "dictionaries": ["it"]},
-    {"lemma": "minification", "pos": "noun", "level": "C2", "translations": ["минификация"], "dictionaries": ["it"]},
-    {"lemma": "bundling", "pos": "noun", "level": "C2", "translations": ["сборка", "бандлинг"], "dictionaries": ["it"]},
-    {"lemma": "hydration", "pos": "noun", "level": "C2", "translations": ["гидратация"], "dictionaries": ["it"]},
-    {"lemma": "rehydration", "pos": "noun", "level": "C2", "translations": ["регидратация"], "dictionaries": ["it"]},
-    {"lemma": "rendering", "pos": "noun", "level": "C2", "translations": ["рендеринг", "отрисовка"], "dictionaries": ["it"]},
-    {"lemma": "rasterization", "pos": "noun", "level": "C2", "translations": ["растеризация"], "dictionaries": ["it"]},
-    {"lemma": "vectorization", "pos": "noun", "level": "C2", "translations": ["векторизация"], "dictionaries": ["it"]},
-    {"lemma": "tessellation", "pos": "noun", "level": "C2", "translations": ["тесселяция", "мозаичное разбиение"], "dictionaries": ["it"]},
-    {"lemma": "raytracing", "pos": "noun", "level": "C2", "translations": ["трассировка лучей"], "dictionaries": ["it"]},
-    {"lemma": "shader", "pos": "noun", "level": "C2", "translations": ["шейдер"], "dictionaries": ["it"]},
-    {"lemma": "kernel", "pos": "noun", "level": "C2", "translations": ["ядро"], "dictionaries": ["it"]},
-    {"lemma": "daemon", "pos": "noun", "level": "C2", "translations": ["демон", "фоновая служба"], "dictionaries": ["it"]},
-    {"lemma": "syscall", "pos": "noun", "level": "C2", "translations": ["системный вызов"], "dictionaries": ["it"]},
-    {"lemma": "mutex", "pos": "noun", "level": "C2", "translations": ["мьютекс"], "dictionaries": ["it"]},
-    {"lemma": "semaphore", "pos": "noun", "level": "C2", "translations": ["семафор"], "dictionaries": ["it"]},
-    {"lemma": "deadlock", "pos": "noun", "level": "C2", "translations": ["взаимная блокировка", "дедлок"], "dictionaries": ["it"]},
-    {"lemma": "livelock", "pos": "noun", "level": "C2", "translations": ["активная блокировка", "лайвлок"], "dictionaries": ["it"]},
-    {"lemma": "starvation", "pos": "noun", "level": "C2", "translations": ["голодание потока"], "dictionaries": ["it"]},
-    {"lemma": "thrashing", "pos": "noun", "level": "C2", "translations": ["трэшинг", "пробуксовка"], "dictionaries": ["it"]},
-    {"lemma": "paging", "pos": "noun", "level": "C2", "translations": ["подкачка", "пейджинг"], "dictionaries": ["it"]},
-    {"lemma": "swapping", "pos": "noun", "level": "C2", "translations": ["свопинг", "обмен"], "dictionaries": ["it"]},
-    {"lemma": "defragmentation", "pos": "noun", "level": "C2", "translations": ["дефрагментация"], "dictionaries": ["it"]},
-    {"lemma": "quorum", "pos": "noun", "level": "C2", "translations": ["кворум"], "dictionaries": ["it"]},
-    {"lemma": "consensus", "pos": "noun", "level": "C2", "translations": ["консенсус"], "dictionaries": ["it"]},
-    {"lemma": "sharding", "pos": "noun", "level": "C2", "translations": ["шардирование"], "dictionaries": ["it"]},
-    {"lemma": "replication", "pos": "noun", "level": "C2", "translations": ["репликация"], "dictionaries": ["it"]},
-    {"lemma": "failover", "pos": "noun", "level": "C2", "translations": ["аварийное переключение", "фейловер"], "dictionaries": ["it"]},
-    {"lemma": "ingress", "pos": "noun", "level": "C2", "translations": ["входящий трафик", "ингресс"], "dictionaries": ["it"]},
-    {"lemma": "egress", "pos": "noun", "level": "C2", "translations": ["исходящий трафик", "егресс"], "dictionaries": ["it"]},
-    {"lemma": "saturation", "pos": "noun", "level": "C2", "translations": ["насыщение"], "dictionaries": ["it"]},
-    {"lemma": "nilpotency", "pos": "noun", "level": "C2", "translations": ["нильпотентность"], "dictionaries": ["it"]},
-    {"lemma": "commutativity", "pos": "noun", "level": "C2", "translations": ["коммутативность"], "dictionaries": ["it"]},
-    {"lemma": "associativity", "pos": "noun", "level": "C2", "translations": ["ассоциативность"], "dictionaries": ["it"]},
-    {"lemma": "transitivity", "pos": "noun", "level": "C2", "translations": ["транзитивность"], "dictionaries": ["it"]},
-    {"lemma": "reflexivity", "pos": "noun", "level": "C2", "translations": ["рефлексивность"], "dictionaries": ["it"]},
-    {"lemma": "isomorphism", "pos": "noun", "level": "C2", "translations": ["изоморфизм"], "dictionaries": ["it"]},
-    {"lemma": "homomorphism", "pos": "noun", "level": "C2", "translations": ["гомоморфизм"], "dictionaries": ["it"]},
-    {"lemma": "automorphism", "pos": "noun", "level": "C2", "translations": ["автоморфизм"], "dictionaries": ["it"]},
-    {"lemma": "bijection", "pos": "noun", "level": "C2", "translations": ["биекция"], "dictionaries": ["it"]},
-    {"lemma": "surjection", "pos": "noun", "level": "C2", "translations": ["сюръекция"], "dictionaries": ["it"]},
-    {"lemma": "injection", "pos": "noun", "level": "C2", "translations": ["инъекция"], "dictionaries": ["it"]},
-    {"lemma": "covariance", "pos": "noun", "level": "C2", "translations": ["ковариантность"], "dictionaries": ["it"]},
-    {"lemma": "contravariance", "pos": "noun", "level": "C2", "translations": ["контравариантность"], "dictionaries": ["it"]},
-    {"lemma": "functor", "pos": "noun", "level": "C2", "translations": ["функтор"], "dictionaries": ["it"]},
-    {"lemma": "monad", "pos": "noun", "level": "C2", "translations": ["монада"], "dictionaries": ["it"]},
-    {"lemma": "currying", "pos": "noun", "level": "C2", "translations": ["каррирование"], "dictionaries": ["it"]},
-    {"lemma": "thunk", "pos": "noun", "level": "C2", "translations": ["отложенное вычисление"], "dictionaries": ["it"]}
-  ]
-}
-### end of scripts/words2.json ########################################################################
 
 ### scripts/words_generation_prompt.txt ########################################################################
 Ты — эксперт-лексикограф и методист по обучению английскому языку. Твоя задача — составить список английских слов для приложения интервального повторения.

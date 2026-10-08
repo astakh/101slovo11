@@ -5,6 +5,7 @@ from sqlalchemy.sql import func, text
 from datetime import datetime
 from .base import Base
 
+
 class LessonExercise(Base):
     __tablename__ = "lesson_exercises"
 
@@ -21,6 +22,7 @@ class LessonExercise(Base):
     nontarget_words: Mapped[dict | list] = mapped_column(JSON, nullable=False, server_default=text("'[]'::json"))
     eval_prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     eval_completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    eval_total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("lesson_id", "order_index", name="uq_exercises_lesson_order"),

@@ -2,7 +2,6 @@
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models.user import User
 from app.models.lesson import Lesson
 from app.models.lesson_exercise import LessonExercise
@@ -17,7 +16,6 @@ async def get_lesson_summary(
 ) -> dict:
     """
     Формирует итоги завершённого урока.
-
     Returns:
         Словарь с метриками для шаблона.
     """
@@ -28,7 +26,6 @@ async def get_lesson_summary(
     )
     result = await db.execute(stmt)
     lesson = result.scalar_one_or_none()
-
     if not lesson:
         raise ValueError("Урок не найден")
 
@@ -58,12 +55,10 @@ async def get_lesson_summary(
             else:
                 typo_words += 1
 
-    # Токены
-    total_prompt_tokens = lesson.gen_prompt_tokens or 0
-    total_completion_tokens = lesson.gen_completion_tokens or 0
+    # Токены — используем total_tokens из API
+    total_tokens = lesson.gen_total_tokens or 0
     for ex in exercises:
-        total_prompt_tokens += ex.eval_prompt_tokens or 0
-        total_completion_tokens += ex.eval_completion_tokens or 0
+        total_tokens += ex.eval_total_tokens or 0
 
     # Стрик
     today = get_user_today(user.timezone)
@@ -83,7 +78,6 @@ async def get_lesson_summary(
         "typo_words": typo_words,
         "failed_words": failed_words,
         "total_exercises": len(exercises),
-        "total_prompt_tokens": total_prompt_tokens,
-        "total_completion_tokens": total_completion_tokens,
+        "total_tokens": total_tokens,
         "streak": streak,
     }

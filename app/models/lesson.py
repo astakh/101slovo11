@@ -4,6 +4,7 @@ from sqlalchemy.sql import func, text
 from datetime import datetime, date
 from .base import Base
 
+
 class Lesson(Base):
     __tablename__ = "lessons"
 
@@ -18,6 +19,7 @@ class Lesson(Base):
     completed_local_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     gen_prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     gen_completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gen_total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("user_id", "lesson_number", name="uq_lessons_user_number"),

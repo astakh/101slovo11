@@ -5,16 +5,13 @@ import json
 import time
 import uuid
 import logging
-
 import httpx
-
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 # OAuth URL остается прежним (с портом 9443)
 OAUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
-
 # 🔥 ИСПРАВЛЕНИЕ: Современный унифицированный URL для чата (как в вашем примере)
 CHAT_URL = "https://api.giga.chat/v1/chat/completions"
 
@@ -26,7 +23,6 @@ RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
 
 class GigaChatError(Exception):
     """Базовая ошибка GigaChat."""
-
     def __init__(self, message: str, code: str = "llm_error", http_status: int | None = None):
         super().__init__(message)
         self.code = code
@@ -35,7 +31,6 @@ class GigaChatError(Exception):
 
 class GigaTokenManager:
     """Управление OAuth-токеном GigaChat с ленивым обновлением."""
-
     def __init__(self):
         self._access_token: str | None = None
         self._expires_at: float = 0
@@ -48,7 +43,6 @@ class GigaTokenManager:
             # Обновляем токен, если он истекает менее чем через 2 минуты (120 сек)
             if self._access_token and now < self._expires_at - 120:
                 return self._access_token
-
             await self._refresh_token()
             return self._access_token  # type: ignore
 
@@ -130,7 +124,6 @@ async def chat(
         }
 
         start_time = time.time()
-
         try:
             async with httpx.AsyncClient(verify=settings.GIGACHAT_VERIFY_SSL) as client:
                 resp = await client.post(
@@ -139,7 +132,6 @@ async def chat(
                     headers=headers,
                     timeout=deadline_seconds,
                 )
-
             latency_ms = int((time.time() - start_time) * 1000)
 
             if resp.status_code == 200:
@@ -193,7 +185,6 @@ async def chat(
 def _extract_json(text: str) -> dict | list:
     """Извлекает JSON из текста ответа (с поддержкой markdown-блоков)."""
     text = text.strip()
-
     # Убираем markdown-обёртку если есть
     if text.startswith("```"):
         lines = text.split("\n")
@@ -202,7 +193,6 @@ def _extract_json(text: str) -> dict | list:
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         text = "\n".join(lines).strip()
-
     return json.loads(text)
 
 
@@ -213,8 +203,13 @@ async def chat_json(
     max_tokens: int = 5000,
     deadline_seconds: float = 45.0,
     max_json_retries: int = 2,
-) -> tuple[dict | list, int, int, int]:
-    """Вызов GigaChat с извлечением JSON из ответа."""
+) -> tuple[dict | list, int, int, int, int]:
+    """
+    Вызов GigaChat с извлечением JSON из ответа.
+    
+    Returns:
+        (parsed, prompt_tokens, completion_tokens, total_tokens, latency_ms)
+    """
     for json_attempt in range(max_json_retries + 1):
         response = await chat(
             messages,
@@ -222,7 +217,6 @@ async def chat_json(
             max_tokens=max_tokens,
             deadline_seconds=deadline_seconds,
         )
-
         choices = response.get("choices", [])
         if not choices:
             raise GigaChatError("No choices in response", code="llm_empty_response")
@@ -233,6 +227,7 @@ async def chat_json(
         usage = response.get("usage", {})
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
+        total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
         latency_ms = response.get("_latency_ms", 0)
 
         if finish_reason == "length" and json_attempt < max_json_retries:
@@ -241,7 +236,7 @@ async def chat_json(
 
         try:
             parsed = _extract_json(content)
-            return parsed, prompt_tokens, completion_tokens, latency_ms
+            return parsed, prompt_tokens, completion_tokens, total_tokens, latency_ms
         except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"GigaChat: Invalid JSON (attempt {json_attempt}): {content[:200]}")
             if json_attempt < max_json_retries:

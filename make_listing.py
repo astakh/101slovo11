@@ -37,7 +37,9 @@ IGNORE_DIR_PATTERNS = [
     ".mypy_cache",
     ".pytest_cache",
     "*.egg-info",
-    "data"
+    "data",
+    "fonts",
+    "vendor"
 ]
 
 # Маски игнорируемых ФАЙЛОВ (glob-шаблоны по имени файла)
@@ -74,7 +76,7 @@ IGNORE_FILE_PATTERNS = [
     "Thumbs.db",
     ".DS_Store",
     OUTPUT_FILE,   # не включать сам файл листинга
-    "*.md",        # игнорировать markdown-файлы
+    "words*.json",        # игнорировать markdown-файлы
 ]
 
 # Конкретные игнорируемые ПАПКИ (точные имена, сравниваются с именем папки)

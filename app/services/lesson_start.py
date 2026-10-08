@@ -1,10 +1,8 @@
 """Идемпотентный старт урока с вызовом LLM."""
 
 from datetime import datetime, timezone
-
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models.user import User
 from app.models.lesson import Lesson
 from app.models.lesson_exercise import LessonExercise
@@ -19,7 +17,6 @@ from app.llm.validation import LlmUsage
 
 class LessonStartError(Exception):
     """Ошибка при старте урока."""
-
     def __init__(self, message: str, code: str = "lesson_start_error"):
         super().__init__(message)
         self.code = code
@@ -34,17 +31,14 @@ async def start_lesson(
 ) -> Lesson:
     """
     Идемпотентный старт урока.
-
     1. Проверка идемпотентности.
     2. Проверка незавершённого урока.
     3. Проверка дневного лимита.
     4. Кластеризация слов.
     5. Вызов LLM.
     6. Транзакция: создание записей.
-
     Returns:
         Созданный или существующий Lesson.
-
     Raises:
         LessonStartError: при ошибке.
         GigaChatError: при ошибке LLM.
@@ -56,7 +50,6 @@ async def start_lesson(
     )
     result_idem = await db.execute(stmt_idem)
     existing_lesson = result_idem.scalar_one_or_none()
-
     if existing_lesson:
         if existing_lesson.status == "in_progress":
             return existing_lesson
@@ -79,13 +72,11 @@ async def start_lesson(
     )
     result_today = await db.execute(stmt_today)
     lessons_today = result_today.scalar_one_or_none() or 0
-
     if lessons_today >= user.daily_lesson_limit:
         raise LessonStartError("Дневной лимит уроков исчерпан", code="limit_reached")
 
     # 4. Загружаем слова для кластеризации
     from app.models.word import Word
-
     stmt_words = select(Word).where(Word.id.in_(word_ids))
     result_words = await db.execute(stmt_words)
     words = result_words.scalars().all()
@@ -158,6 +149,7 @@ async def start_lesson(
         started_local_date=today,
         gen_prompt_tokens=usage.prompt_tokens,
         gen_completion_tokens=usage.completion_tokens,
+        gen_total_tokens=usage.total_tokens,
     )
     db.add(lesson)
     await db.flush()  # Получаем lesson.id
@@ -205,5 +197,4 @@ async def start_lesson(
 
     await db.flush()
     await db.refresh(lesson)
-
     return lesson
