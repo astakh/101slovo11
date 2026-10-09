@@ -1088,7 +1088,8 @@ async def log_llm_call(
 ### app/llm/validation.py ########################################################################
 # app/llm/validation.py
 """Pydantic-модели для валидации ответов LLM."""
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from typing import Any
 
 
 class TargetWordItem(BaseModel):
@@ -1125,6 +1126,61 @@ class EvaluateResponse(BaseModel):
     evaluations: list[EvaluationItem] = Field(default_factory=list)
     suggested_words: list[SuggestedWord] = Field(default_factory=list)
     translation_errors: list[str] = Field(default_factory=list)
+
+    @field_validator("translation_errors", mode="before")
+    @classmethod
+    def normalize_translation_errors(cls, v: Any) -> list[str]:
+        """
+        Нормализует translation_errors в список строк.
+        
+        GigaChat иногда возвращает:
+        - Список словарей (error objects) вместо списка строк
+        - Одну строку вместо списка
+        - None или пустое значение
+        
+        Этот валидатор преобразует все варианты в list[str].
+        """
+        if v is None:
+            return []
+        
+        # Если это не список — оборачиваем в список
+        if not isinstance(v, list):
+            if isinstance(v, str):
+                return [v] if v.strip() else []
+            # Неизвестный тип — возвращаем пустой список
+            return []
+        
+        # Обрабатываем каждый элемент списка
+        result = []
+        for item in v:
+            if isinstance(item, str):
+                # Уже строка — добавляем как есть
+                if item.strip():
+                    result.append(item)
+            elif isinstance(item, dict):
+                # Словарь — пытаемся извлечь полезную информацию
+                # Формат может быть: {"original_word": "...", "error_type": "..."}
+                # или другие варианты
+                parts = []
+                if "original_word" in item:
+                    parts.append(str(item["original_word"]))
+                if "error_type" in item:
+                    parts.append(str(item["error_type"]))
+                if "message" in item:
+                    parts.append(str(item["message"]))
+                if "description" in item:
+                    parts.append(str(item["description"]))
+                
+                if parts:
+                    result.append(": ".join(parts))
+                else:
+                    # Если не удалось извлечь — конвертируем dict в строку
+                    result.append(str(item))
+            else:
+                # Любой другой тип — конвертируем в строку
+                result.append(str(item))
+        
+        return result
 
 
 class LlmUsage(BaseModel):
@@ -6445,185 +6501,193 @@ def is_webhook_ip_allowed(ip: str) -> bool:
 /* ============================================
    Локальные шрифты (Inter woff2)
    ============================================ */
+
 @font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 400;
-    font-display: swap;
-    src: url('/static/fonts/inter-400.woff2') format('woff2');
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/inter-400.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
+
 @font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 500;
-    font-display: swap;
-    src: url('/static/fonts/inter-500.woff2') format('woff2');
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/static/fonts/inter-500.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
+
 @font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 600;
-    font-display: swap;
-    src: url('/static/fonts/inter-600.woff2') format('woff2');
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/static/fonts/inter-600.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
+
 @font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 700;
-    font-display: swap;
-    src: url('/static/fonts/inter-700.woff2') format('woff2');
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/static/fonts/inter-700.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
+
 @font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 800;
-    font-display: swap;
-    src: url('/static/fonts/inter-800.woff2') format('woff2');
-    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('/static/fonts/inter-800.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
 /* ============================================
    101slovo — Modern UI Design System
    ============================================ */
+
 :root {
-    /* Brand */
-    --brand-primary: #6366f1;
-    --brand-primary-dark: #4f46e5;
-    --brand-primary-light: #818cf8;
-    --brand-secondary: #ec4899;
-    --brand-accent: #06b6d4;
+  /* Brand */
+  --brand-primary: #6366f1;
+  --brand-primary-dark: #4f46e5;
+  --brand-primary-light: #818cf8;
+  --brand-secondary: #ec4899;
+  --brand-accent: #06b6d4;
 
-    /* Gradients */
-    --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    --gradient-success: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-    --gradient-warning: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-    --gradient-info: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-    --gradient-fire: linear-gradient(135deg, #f12711 0%, #f5af19 100%);
+  /* Gradients */
+  --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --gradient-success: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+  --gradient-warning: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  --gradient-info: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  --gradient-fire: linear-gradient(135deg, #f12711 0%, #f5af19 100%);
 
-    /* Surfaces */
-    --surface-0: #ffffff;
-    --surface-50: #f8fafc;
-    --surface-100: #f1f5f9;
-    --surface-200: #e2e8f0;
-    --surface-300: #cbd5e1;
+  /* Surfaces */
+  --surface-0: #ffffff;
+  --surface-50: #f8fafc;
+  --surface-100: #f1f5f9;
+  --surface-200: #e2e8f0;
+  --surface-300: #cbd5e1;
 
-    /* Text */
-    --text-primary: #0f172a;
-    --text-secondary: #475569;
-    /* ✅ Спринт 3: контрастность повышена с #94a3b8 (~2.8:1) до #64748b (~4.6:1) */
-    --text-muted: #64748b;
-    --text-inverse: #ffffff;
+  /* Text */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  /* ✅ Спринт 3: контрастность повышена с #94a3b8 (~2.8:1) до #64748b (~4.6:1) */
+  --text-muted: #64748b;
+  --text-inverse: #ffffff;
 
-    /* ✅ Спринт 3: семантические цвета текста (адаптируются в тёмной теме) */
-    --text-success: #065f46;
-    --text-success-strong: #059669;
-    --text-error: #991b1b;
-    --text-error-strong: #dc2626;
-    --text-info: #1e40af;
-    --text-info-strong: #2563eb;
-    --text-warning: #92400e;
-    --text-warning-strong: #d97706;
-    --text-brand: #4f46e5;
-    --text-brand-secondary: #db2777;
-    --text-accent: #0891b2;
+  /* ✅ Спринт 3: семантические цвета текста (адаптируются в тёмной теме) */
+  --text-success: #065f46;
+  --text-success-strong: #059669;
+  --text-error: #991b1b;
+  --text-error-strong: #dc2626;
+  --text-info: #1e40af;
+  --text-info-strong: #2563eb;
+  --text-warning: #92400e;
+  --text-warning-strong: #d97706;
+  --text-brand: #4f46e5;
+  --text-brand-secondary: #db2777;
+  --text-accent: #0891b2;
 
-    /* ✅ Спринт 3: фоны для статусов */
-    --bg-success: rgba(16, 185, 129, 0.08);
-    --bg-success-border: rgba(16, 185, 129, 0.2);
-    --bg-error: rgba(239, 68, 68, 0.08);
-    --bg-error-border: rgba(239, 68, 68, 0.2);
-    --bg-info: rgba(59, 130, 246, 0.08);
-    --bg-info-border: rgba(59, 130, 246, 0.2);
-    --bg-warning: rgba(245, 158, 11, 0.08);
-    --bg-warning-border: rgba(245, 158, 11, 0.2);
+  /* ✅ Спринт 3: фоны для статусов */
+  --bg-success: rgba(16, 185, 129, 0.08);
+  --bg-success-border: rgba(16, 185, 129, 0.2);
+  --bg-error: rgba(239, 68, 68, 0.08);
+  --bg-error-border: rgba(239, 68, 68, 0.2);
+  --bg-info: rgba(59, 130, 246, 0.08);
+  --bg-info-border: rgba(59, 130, 246, 0.2);
+  --bg-warning: rgba(245, 158, 11, 0.08);
+  --bg-warning-border: rgba(245, 158, 11, 0.2);
 
-    /* Borders & Shadows */
-    --border-light: #e2e8f0;
-    --border-medium: #cbd5e1;
-    /* Алиас для совместимости со старыми шаблонами */
-    --border: #e2e8f0;
+  /* Borders & Shadows */
+  --border-light: #e2e8f0;
+  --border-medium: #cbd5e1;
+  /* Алиас для совместимости со старыми шаблонами */
+  --border: #e2e8f0;
 
-    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
-    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.05);
-    --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.05);
-    --shadow-glow: 0 0 20px rgb(99 102 241 / 0.3);
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.05);
+  --shadow-glow: 0 0 20px rgb(99 102 241 / 0.3);
 
-    /* Radius */
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 16px;
-    --radius-xl: 24px;
-    --radius-full: 9999px;
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
 
-    /* Transitions */
-    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+  /* Transitions */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ============================================
    Тёмная тема
    ============================================ */
+
 [data-theme="dark"] {
-    --surface-0: #0f172a;
-    --surface-50: #1e293b;
-    --surface-100: #334155;
-    --surface-200: #475569;
-    --surface-300: #64748b;
+  --surface-0: #0f172a;
+  --surface-50: #1e293b;
+  --surface-100: #334155;
+  --surface-200: #475569;
+  --surface-300: #64748b;
 
-    --text-primary: #f1f5f9;
-    --text-secondary: #cbd5e1;
-    /* ✅ Спринт 3: контрастность повышена с #64748b (~2.5:1 на тёмном) до #94a3b8 (~4.5:1) */
-    --text-muted: #94a3b8;
+  --text-primary: #f1f5f9;
+  --text-secondary: #cbd5e1;
+  /* ✅ Спринт 3: контрастность повышена с #64748b (~2.5:1 на тёмном) до #94a3b8 (~4.5:1) */
+  --text-muted: #94a3b8;
 
-    /* ✅ Спринт 3: светлые варианты для тёмной темы */
-    --text-success: #6ee7b7;
-    --text-success-strong: #34d399;
-    --text-error: #fca5a5;
-    --text-error-strong: #f87171;
-    --text-info: #93c5fd;
-    --text-info-strong: #60a5fa;
-    --text-warning: #fcd34d;
-    --text-warning-strong: #fbbf24;
-    --text-brand: #a5b4fc;
-    --text-brand-secondary: #f9a8d4;
-    --text-accent: #67e8f9;
+  /* ✅ Спринт 3: светлые варианты для тёмной темы */
+  --text-success: #6ee7b7;
+  --text-success-strong: #34d399;
+  --text-error: #fca5a5;
+  --text-error-strong: #f87171;
+  --text-info: #93c5fd;
+  --text-info-strong: #60a5fa;
+  --text-warning: #fcd34d;
+  --text-warning-strong: #fbbf24;
+  --text-brand: #a5b4fc;
+  --text-brand-secondary: #f9a8d4;
+  --text-accent: #67e8f9;
 
-    /* ✅ Спринт 3: фоны для статусов в тёмной теме */
-    --bg-success: rgba(16, 185, 129, 0.12);
-    --bg-success-border: rgba(16, 185, 129, 0.3);
-    --bg-error: rgba(239, 68, 68, 0.12);
-    --bg-error-border: rgba(239, 68, 68, 0.3);
-    --bg-info: rgba(59, 130, 246, 0.12);
-    --bg-info-border: rgba(59, 130, 246, 0.3);
-    --bg-warning: rgba(245, 158, 11, 0.12);
-    --bg-warning-border: rgba(245, 158, 11, 0.3);
+  /* ✅ Спринт 3: фоны для статусов в тёмной теме */
+  --bg-success: rgba(16, 185, 129, 0.12);
+  --bg-success-border: rgba(16, 185, 129, 0.3);
+  --bg-error: rgba(239, 68, 68, 0.12);
+  --bg-error-border: rgba(239, 68, 68, 0.3);
+  --bg-info: rgba(59, 130, 246, 0.12);
+  --bg-info-border: rgba(59, 130, 246, 0.3);
+  --bg-warning: rgba(245, 158, 11, 0.12);
+  --bg-warning-border: rgba(245, 158, 11, 0.3);
 
-    --border-light: #334155;
-    --border-medium: #475569;
-    --border: #334155;
+  --border-light: #334155;
+  --border-medium: #475569;
+  --border: #334155;
 }
 
 body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    font-feature-settings: 'cv11', 'ss01';
-    color: var(--text-primary);
-    background: var(--surface-50);
-    line-height: 1.6;
-    letter-spacing: -0.011em;
-    -webkit-font-smoothing: antialiased;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
+  color: var(--text-primary);
+  background: var(--surface-50);
+  line-height: 1.6;
+  letter-spacing: -0.011em;
+  -webkit-font-smoothing: antialiased;
 }
 
 h1, h2, h3, h4, h5, h6 {
-    font-weight: 700;
-    letter-spacing: -0.025em;
-    line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
 }
+
 h1 { font-size: 2.5rem; }
 h2 { font-size: 2rem; }
 h3 { font-size: 1.5rem; }
@@ -6631,312 +6695,328 @@ h4 { font-size: 1.25rem; }
 
 /* === A11Y: визуально скрытый, но доступный скринридеру === */
 .visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* === NAVBAR === */
 .navbar {
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    background: rgba(255, 255, 255, 0.8);
-    backdrop-filter: saturate(180%) blur(12px);
-    -webkit-backdrop-filter: saturate(180%) blur(12px);
-    border-bottom: 1px solid var(--border-light);
-    padding: 0.875rem 0;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: saturate(180%) blur(12px);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
+  border-bottom: 1px solid var(--border-light);
+  padding: 0.875rem 0;
 }
 
 /* ✅ Спринт 3: навбар в тёмной теме */
 [data-theme="dark"] .navbar {
-    background: rgba(15, 23, 42, 0.8);
+  background: rgba(15, 23, 42, 0.8);
 }
 
 .navbar-inner {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 1.5rem;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 2rem;
 }
 
 .navbar-brand {
-    font-weight: 800;
-    font-size: 1.25rem;
-    background: var(--gradient-primary);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    text-decoration: none;
-    letter-spacing: -0.03em;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
+  font-weight: 800;
+  font-size: 1.25rem;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  text-decoration: none;
+  letter-spacing: -0.03em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
 }
 
 /* Десктопное меню */
 .navbar-menu--desktop {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
 }
 
 /* Кнопка бургера (скрыта на десктопе) */
 .navbar-burger {
-    display: none;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    padding: 0;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    border-radius: var(--radius-md);
-    color: var(--text-secondary);
-    transition: all var(--transition-fast);
-    box-shadow: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+  box-shadow: none;
 }
+
 .navbar-burger:hover {
-    background: rgba(99, 102, 241, 0.08);
-    color: var(--brand-primary);
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--brand-primary);
 }
 
 /* Мобильное меню (выпадающее) */
 .navbar-mobile-menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    background: var(--surface-0);
-    border-bottom: 1px solid var(--border-light);
-    box-shadow: var(--shadow-lg);
-    padding: 0.75rem 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    z-index: 99;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--border-light);
+  box-shadow: var(--shadow-lg);
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  z-index: 99;
 }
 
 [data-theme="dark"] .navbar-mobile-menu {
-    background: var(--surface-0);
-    border-bottom-color: var(--border-light);
+  background: var(--surface-0);
+  border-bottom-color: var(--border-light);
 }
 
 .navbar-mobile-menu .nav-link {
-    width: 100%;
-    justify-content: flex-start;
-    padding: 0.75rem 1rem;
-    font-size: 1rem;
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
 }
 
 .navbar-mobile-menu .navbar-logout {
-    width: 100%;
-    margin-top: 0.5rem;
-    padding: 0.75rem 1rem;
-    text-align: center;
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  text-align: center;
 }
 
 .nav-link {
-    padding: 0.5rem 0.875rem;
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-weight: 500;
-    font-size: 0.925rem;
-    border-radius: var(--radius-md);
-    transition: all var(--transition-fast);
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.925rem;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
 }
+
 .nav-link:hover {
-    color: var(--brand-primary);
-    background: rgba(99, 102, 241, 0.08);
+  color: var(--brand-primary);
+  background: rgba(99, 102, 241, 0.08);
 }
+
 .nav-link.active {
-    color: var(--brand-primary);
-    background: rgba(99, 102, 241, 0.1);
+  color: var(--brand-primary);
+  background: rgba(99, 102, 241, 0.1);
 }
+
 .nav-link--admin { color: var(--brand-secondary); }
 .nav-link--admin:hover { background: rgba(236, 72, 153, 0.08); }
 
 .navbar-logout {
-    padding: 0.375rem 0.75rem;
-    font-size: 0.875rem;
-    background: transparent;
-    color: var(--text-muted);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    font-family: inherit;
-    font-weight: 500;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+  font-weight: 500;
 }
+
 .navbar-logout:hover {
-    color: var(--text-error-strong);
-    border-color: #fca5a5;
-    background: rgba(239, 68, 68, 0.05);
+  color: var(--text-error-strong);
+  border-color: #fca5a5;
+  background: rgba(239, 68, 68, 0.05);
 }
 
 /* === BUTTONS === */
 button, .button, [role="button"], input[type="submit"] {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    padding: 0.625rem 1.25rem;
-    font-weight: 600;
-    font-size: 0.925rem;
-    border-radius: var(--radius-md);
-    border: none;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    text-decoration: none;
-    white-space: nowrap;
-    font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.25rem;
+  font-weight: 600;
+  font-size: 0.925rem;
+  border-radius: var(--radius-md);
+  border: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-decoration: none;
+  white-space: nowrap;
+  font-family: inherit;
 }
 
 button:not(.secondary):not(.outline):not(.navbar-burger),
 .button:not(.secondary):not(.outline),
 [role="button"]:not(.secondary):not(.outline),
 input[type="submit"] {
-    background: var(--brand-primary);
-    color: var(--text-inverse);
-    box-shadow: var(--shadow-sm), 0 1px 2px rgba(99, 102, 241, 0.2);
+  background: var(--brand-primary);
+  color: var(--text-inverse);
+  box-shadow: var(--shadow-sm), 0 1px 2px rgba(99, 102, 241, 0.2);
 }
 
 button:not(.secondary):not(.outline):not(.navbar-burger):hover,
 .button:not(.secondary):not(.outline):hover,
 [role="button"]:not(.secondary):not(.outline):hover,
 input[type="submit"]:hover {
-    background: var(--brand-primary-dark);
-    box-shadow: var(--shadow-md), 0 4px 12px rgba(99, 102, 241, 0.25);
-    transform: translateY(-1px);
+  background: var(--brand-primary-dark);
+  box-shadow: var(--shadow-md), 0 4px 12px rgba(99, 102, 241, 0.25);
+  transform: translateY(-1px);
 }
 
 button:active, .button:active, [role="button"]:active { transform: translateY(0); }
 
 .secondary, [role="button"].secondary {
-    background: var(--surface-100);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-light);
+  background: var(--surface-100);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-light);
 }
+
 .secondary:hover, [role="button"].secondary:hover {
-    background: var(--surface-200);
-    color: var(--text-primary);
+  background: var(--surface-200);
+  color: var(--text-primary);
 }
 
 .btn-lg, [role="button"][style*="font-size: 1.2rem"],
 [role="button"][style*="padding: 1rem 2rem"] {
-    padding: 1rem 2rem;
-    font-size: 1.1rem;
-    border-radius: var(--radius-lg);
+  padding: 1rem 2rem;
+  font-size: 1.1rem;
+  border-radius: var(--radius-lg);
 }
 
 /* === FORMS === */
 input[type="text"], input[type="email"], input[type="password"],
 input[type="number"], input[type="search"], textarea, select {
-    padding: 0.75rem 1rem;
-    border: 1.5px solid var(--border-light);
-    border-radius: var(--radius-md);
-    background: var(--surface-0);
-    color: var(--text-primary);
-    font-size: 0.95rem;
-    font-family: inherit;
-    transition: all var(--transition-fast);
-    width: 100%;
-    box-sizing: border-box;
+  padding: 0.75rem 1rem;
+  border: 1.5px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+  width: 100%;
+  box-sizing: border-box;
 }
+
 input:focus, textarea:focus, select:focus {
-    outline: none;
-    border-color: var(--brand-primary);
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  outline: none;
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
 }
+
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
+
 textarea { resize: vertical; min-height: 100px; line-height: 1.6; }
+
 label {
-    display: block;
-    margin-bottom: 0.5rem;
-    font-weight: 600;
-    font-size: 0.875rem;
-    color: var(--text-secondary);
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
 }
+
 fieldset {
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    padding: 1.25rem;
-    margin-bottom: 1.25rem;
-    background: var(--surface-50);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+  background: var(--surface-50);
 }
+
 legend { font-weight: 600; padding: 0 0.5rem; font-size: 0.95rem; }
 
 /* === RANGE INPUT (кроссбраузерно) === */
 input[type="range"] {
-    height: 6px;
-    background: var(--surface-200);
-    border-radius: var(--radius-full);
-    border: none;
-    padding: 0;
-    appearance: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
+  height: 6px;
+  background: var(--surface-200);
+  border-radius: var(--radius-full);
+  border: none;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
 }
 
 input[type="range"]::-webkit-slider-thumb {
-    appearance: none;
-    -webkit-appearance: none;
-    width: 22px;
-    height: 22px;
-    background: var(--brand-primary);
-    border-radius: 50%;
-    cursor: pointer;
-    box-shadow: 0 2px 6px rgba(99, 102, 241, 0.4);
-    transition: all var(--transition-fast);
+  appearance: none;
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  background: var(--brand-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.4);
+  transition: all var(--transition-fast);
 }
+
 input[type="range"]::-webkit-slider-thumb:hover {
-    transform: scale(1.15);
+  transform: scale(1.15);
 }
 
 input[type="range"]::-moz-range-thumb {
-    width: 22px;
-    height: 22px;
-    background: var(--brand-primary);
-    border-radius: 50%;
-    border: none;
-    cursor: pointer;
-    box-shadow: 0 2px 6px rgba(99, 102, 241, 0.4);
+  width: 22px;
+  height: 22px;
+  background: var(--brand-primary);
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.4);
 }
+
 input[type="range"]::-moz-range-thumb:hover {
-    transform: scale(1.15);
+  transform: scale(1.15);
 }
+
 input[type="range"]::-moz-range-track {
-    height: 6px;
-    background: var(--surface-200);
-    border-radius: var(--radius-full);
-    border: none;
+  height: 6px;
+  background: var(--surface-200);
+  border-radius: var(--radius-full);
+  border: none;
 }
 
 /* === BADGES === */
 .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 0.25rem 0.625rem;
-    border-radius: var(--radius-full);
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
+
 /* ✅ Спринт 3: используем семантические переменные */
 .badge-active { background: rgba(99, 102, 241, 0.12); color: var(--text-brand); }
 .badge-mastered { background: var(--bg-success); color: var(--text-success-strong); }
@@ -6946,17 +7026,18 @@ input[type="range"]::-moz-range-track {
 
 /* === FLASH === */
 .flash-success, .flash-error, .flash-info, .flash-warning {
-    padding: 1rem 1.25rem;
-    border-radius: var(--radius-lg);
-    margin-bottom: 1.25rem;
-    font-weight: 500;
-    font-size: 0.925rem;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    border: 1px solid transparent;
-    animation: slideInDown 0.3s ease-out;
+  padding: 1rem 1.25rem;
+  border-radius: var(--radius-lg);
+  margin-bottom: 1.25rem;
+  font-weight: 500;
+  font-size: 0.925rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid transparent;
+  animation: slideInDown 0.3s ease-out;
 }
+
 /* ✅ Спринт 3: используем семантические переменные вместо фиксированных цветов */
 .flash-success { background: var(--bg-success); border-color: var(--bg-success-border); color: var(--text-success); }
 .flash-error { background: var(--bg-error); border-color: var(--bg-error-border); color: var(--text-error); }
@@ -6965,163 +7046,178 @@ input[type="range"]::-moz-range-track {
 
 /* === TABLES === */
 table {
-    width: 100%;
-    border-collapse: separate;
-    border-spacing: 0;
-    background: var(--surface-0);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--border-light);
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--surface-0);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border-light);
 }
+
 thead { background: var(--surface-50); }
+
 th {
-    padding: 0.875rem 1rem;
-    text-align: left;
-    font-weight: 600;
-    font-size: 0.8125rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-secondary);
-    border-bottom: 1px solid var(--border-light);
+  padding: 0.875rem 1rem;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-light);
 }
+
 td {
-    padding: 1rem;
-    border-bottom: 1px solid var(--border-light);
-    font-size: 0.925rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 0.925rem;
 }
+
 tbody tr { transition: background var(--transition-fast); }
 tbody tr:hover { background: var(--surface-50); }
 tbody tr:last-child td { border-bottom: none; }
 
 .table-scroll {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* === STAT CARDS === */
 .stat-card {
-    position: relative;
-    overflow: hidden;
-    padding: 1.5rem;
-    background: var(--surface-0);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-sm);
-    transition: all var(--transition-base);
+  position: relative;
+  overflow: hidden;
+  padding: 1.5rem;
+  background: var(--surface-0);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-base);
 }
+
 .stat-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 3px;
-    background: var(--gradient-primary);
-    opacity: 0;
-    transition: opacity var(--transition-base);
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--gradient-primary);
+  opacity: 0;
+  transition: opacity var(--transition-base);
 }
+
 .stat-card:hover {
-    transform: translateY(-4px);
-    box-shadow: var(--shadow-lg);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
 }
+
 .stat-card:hover::before { opacity: 1; }
 
 .stat-card__icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 48px; height: 48px;
-    border-radius: var(--radius-md);
-    background: rgba(99, 102, 241, 0.1);
-    color: var(--brand-primary);
-    margin-bottom: 1rem;
-    font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px; height: 48px;
+  border-radius: var(--radius-md);
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--brand-primary);
+  margin-bottom: 1rem;
+  font-size: 1.5rem;
 }
+
 /* ✅ Спринт 3: адаптивные цвета иконок */
 .stat-card__icon--fire { background: var(--bg-warning); color: var(--text-warning-strong); }
 .stat-card__icon--book { background: var(--bg-success); color: var(--text-success-strong); }
 .stat-card__icon--calendar { background: var(--bg-info); color: var(--text-info-strong); }
 
 .stat-card__value {
-    font-size: 2.5rem;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    line-height: 1;
-    margin-bottom: 0.25rem;
+  font-size: 2.5rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  margin-bottom: 0.25rem;
 }
+
 .stat-card__label {
-    font-size: 0.875rem;
-    color: var(--text-muted);
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
+
 .stat-card__sublabel {
-    font-size: 0.8125rem;
-    color: var(--text-muted);
-    margin-top: 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
 }
 
 /* === CARD === */
 .card {
-    background: var(--surface-0);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-lg);
-    padding: 1.5rem;
-    box-shadow: var(--shadow-sm);
+  background: var(--surface-0);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-sm);
 }
 
 /* === EXERCISE === */
 .exercise-card {
-    background: var(--surface-0);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-xl);
-    padding: 2rem;
-    box-shadow: var(--shadow-md);
-    margin-bottom: 1.5rem;
+  background: var(--surface-0);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-xl);
+  padding: 2rem;
+  box-shadow: var(--shadow-md);
+  margin-bottom: 1.5rem;
 }
+
 .exercise-sentence {
-    font-size: 1.5rem;
-    font-weight: 600;
-    line-height: 1.4;
-    margin-bottom: 1rem;
-    letter-spacing: -0.01em;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin-bottom: 1rem;
+  letter-spacing: -0.01em;
 }
+
 .exercise-words {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
 }
 
 /* Адаптивная сетка результата упражнения */
 .exercise-result-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
 }
 
 /* === SUGGESTION === */
 .suggestion-card {
-    padding: 1rem 1.25rem;
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-md);
-    margin-bottom: 0.75rem;
-    background: var(--surface-50);
-    transition: all var(--transition-fast);
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  margin-bottom: 0.75rem;
+  background: var(--surface-50);
+  transition: all var(--transition-fast);
 }
+
 .suggestion-card:hover {
-    border-color: var(--brand-primary-light);
-    background: var(--surface-0);
-    box-shadow: var(--shadow-sm);
+  border-color: var(--brand-primary-light);
+  background: var(--surface-0);
+  box-shadow: var(--shadow-sm);
 }
+
 .suggestion-card--added {
-    background: var(--bg-success);
-    border-color: var(--bg-success-border);
+  background: var(--bg-success);
+  border-color: var(--bg-success-border);
 }
+
 .suggestion-card--ignored {
-    background: rgba(148, 163, 184, 0.05);
-    border-color: rgba(148, 163, 184, 0.2);
-    opacity: 0.7;
+  background: rgba(148, 163, 184, 0.05);
+  border-color: rgba(148, 163, 184, 0.2);
+  opacity: 0.7;
 }
 
 /* ✅ Спринт 3: статусные цвета для текста в результатах */
@@ -7132,178 +7228,198 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* === SPINNER === */
 .htmx-indicator {
-    display: none;
-    align-items: center;
-    gap: 0.5rem;
-    color: var(--text-muted);
-    font-size: 0.875rem;
-    font-style: normal;
+  display: none;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-style: normal;
 }
+
 .htmx-request .htmx-indicator, .htmx-indicator.htmx-request {
-    display: inline-flex;
+  display: inline-flex;
 }
+
 .spinner {
-    display: inline-block;
-    width: 16px; height: 16px;
-    border: 2px solid var(--surface-200);
-    border-top-color: var(--brand-primary);
-    border-radius: 50%;
-    animation: spin 0.6s linear infinite;
+  display: inline-block;
+  width: 16px; height: 16px;
+  border: 2px solid var(--surface-200);
+  border-top-color: var(--brand-primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
 }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* === PAGINATION === */
 .pagination {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 2rem;
-    flex-wrap: wrap;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 2rem;
+  flex-wrap: wrap;
 }
+
 .pagination a {
-    min-width: 36px; height: 36px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-md);
-    background: var(--surface-0);
-    border: 1px solid var(--border-light);
-    color: var(--text-secondary);
-    text-decoration: none;
-    font-weight: 500;
-    transition: all var(--transition-fast);
+  min-width: 36px; height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--surface-0);
+  border: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-weight: 500;
+  transition: all var(--transition-fast);
 }
+
 .pagination a:hover {
-    background: var(--brand-primary);
-    color: var(--text-inverse);
-    border-color: var(--brand-primary);
+  background: var(--brand-primary);
+  color: var(--text-inverse);
+  border-color: var(--brand-primary);
 }
 
 /* === WORD ITEM (vocabulary) === */
 .word-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 1rem 1.25rem;
-    background: var(--surface-0);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-md);
-    margin-bottom: 0.5rem;
-    transition: all var(--transition-fast);
-    text-decoration: none;
-    color: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  background: var(--surface-0);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  margin-bottom: 0.5rem;
+  transition: all var(--transition-fast);
+  text-decoration: none;
+  color: inherit;
 }
+
 .word-item:hover {
-    border-color: var(--brand-primary-light);
-    box-shadow: var(--shadow-sm);
-    transform: translateX(4px);
+  border-color: var(--brand-primary-light);
+  box-shadow: var(--shadow-sm);
+  transform: translateX(4px);
 }
+
 .word-item__main {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    flex: 1;
-    min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+  min-width: 0;
 }
+
 .word-item__lemma {
-    font-weight: 700;
-    font-size: 1.0625rem;
+  font-weight: 700;
+  font-size: 1.0625rem;
 }
+
 .word-item__pos {
-    font-size: 0.8125rem;
-    color: var(--text-muted);
-    padding: 0.125rem 0.5rem;
-    background: var(--surface-100);
-    border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  padding: 0.125rem 0.5rem;
+  background: var(--surface-100);
+  border-radius: var(--radius-sm);
 }
+
 .word-item__translation {
-    color: var(--text-secondary);
-    font-size: 0.925rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 0.925rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+
 .word-item__meta {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
 }
+
 .word-item__due {
-    font-size: 0.8125rem;
-    color: var(--text-muted);
-    padding: 0.25rem 0.625rem;
-    background: var(--surface-100);
-    border-radius: var(--radius-full);
-    white-space: nowrap;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  padding: 0.25rem 0.625rem;
+  background: var(--surface-100);
+  border-radius: var(--radius-full);
+  white-space: nowrap;
 }
 
 /* Адаптивные фильтры словаря */
 .vocab-filters {
-    display: grid;
-    grid-template-columns: 1fr auto auto;
-    gap: 0.75rem;
-    align-items: end;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.75rem;
+  align-items: end;
 }
 
 /* === CTA SECTION === */
 .cta-section {
-    text-align: center;
-    padding: 3rem 2rem;
-    background: var(--gradient-primary);
-    border-radius: var(--radius-xl);
-    color: var(--text-inverse);
-    margin: 2rem 0;
-    box-shadow: var(--shadow-lg), 0 8px 32px rgba(99, 102, 241, 0.25);
+  text-align: center;
+  padding: 3rem 2rem;
+  background: var(--gradient-primary);
+  border-radius: var(--radius-xl);
+  color: var(--text-inverse);
+  margin: 2rem 0;
+  box-shadow: var(--shadow-lg), 0 8px 32px rgba(99, 102, 241, 0.25);
 }
+
 .cta-section h3 { color: var(--text-inverse); font-size: 1.75rem; margin-bottom: 0.5rem; }
 .cta-section p { opacity: 0.9; margin-bottom: 1.5rem; }
+
 .cta-section .button, .cta-section [role="button"] {
-    background: var(--surface-0);
-    color: var(--brand-primary);
-    border: none;
-    padding: 1rem 2.5rem;
-    font-size: 1.1rem;
-    font-weight: 700;
-    box-shadow: var(--shadow-lg);
+  background: var(--surface-0);
+  color: var(--brand-primary);
+  border: none;
+  padding: 1rem 2.5rem;
+  font-size: 1.1rem;
+  font-weight: 700;
+  box-shadow: var(--shadow-lg);
 }
+
 .cta-section .button:hover, .cta-section [role="button"]:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-xl);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-xl);
 }
 
 /* === HERO === */
 .hero {
-    padding: 2rem 0;
-    margin-bottom: 2rem;
+  padding: 2rem 0;
+  margin-bottom: 2rem;
 }
+
 .hero__greeting {
-    font-size: 1.125rem;
-    color: var(--text-muted);
-    font-weight: 500;
-    margin-bottom: 0.25rem;
+  font-size: 1.125rem;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-bottom: 0.25rem;
 }
+
 .hero__title {
-    font-size: 2.5rem;
-    font-weight: 800;
-    letter-spacing: -0.03em;
-    margin: 0;
-    background: var(--gradient-primary);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+  font-size: 2.5rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 0;
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 /* === UTILS === */
 .container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
 .container--narrow { max-width: 720px; }
 .container--medium { max-width: 960px; }
+
 .text-center { text-align: center; }
+
 .mt-1 { margin-top: 0.5rem; }
 .mt-2 { margin-top: 1rem; }
 .mt-3 { margin-top: 1.5rem; }
 .mt-4 { margin-top: 2rem; }
+
 .mb-2 { margin-bottom: 1rem; }
 .mb-3 { margin-bottom: 1.5rem; }
 .mb-4 { margin-bottom: 2rem; }
@@ -7314,111 +7430,123 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* === Skeleton Loading === */
 .skeleton {
-    background: linear-gradient(
-        90deg,
-        var(--surface-100) 25%,
-        var(--surface-200) 50%,
-        var(--surface-100) 75%
-    );
-    background-size: 200% 100%;
-    animation: skeleton-shimmer 1.5s infinite;
-    border-radius: var(--radius-md);
+  background: linear-gradient(
+    90deg,
+    var(--surface-100) 25%,
+    var(--surface-200) 50%,
+    var(--surface-100) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s infinite;
+  border-radius: var(--radius-md);
 }
+
 @keyframes skeleton-shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
+
 .skeleton-text {
-    height: 1rem;
-    margin-bottom: 0.5rem;
-    width: 100%;
+  height: 1rem;
+  margin-bottom: 0.5rem;
+  width: 100%;
 }
+
 .skeleton-text.short { width: 60%; }
 .skeleton-text.title { height: 1.5rem; width: 40%; margin-bottom: 1rem; }
+
 .skeleton-card {
-    height: 120px;
-    width: 100%;
+  height: 120px;
+  width: 100%;
 }
 
 .htmx-skeleton-wrapper.htmx-request .skeleton-target {
-    opacity: 0.5;
-    pointer-events: none;
+  opacity: 0.5;
+  pointer-events: none;
 }
+
 .htmx-skeleton-wrapper.htmx-request .skeleton-loader {
-    display: block !important;
+  display: block !important;
 }
+
 .skeleton-loader {
-    display: none;
+  display: none;
 }
 
 /* === ADD WORD MODAL === */
 [x-cloak] {
-    display: none !important;
+  display: none !important;
 }
 
 .modal-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    background: rgba(15, 23, 42, 0.6);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding: 10vh 1rem 2rem 1rem;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10vh 1rem 2rem 1rem;
 }
+
 .modal-panel {
-    width: 100%;
-    max-width: 600px;
-    max-height: 80vh;
-    overflow-y: auto;
-    background: var(--surface-0);
-    border-radius: var(--radius-xl);
-    padding: 2rem;
-    box-shadow: var(--shadow-xl);
-    animation: fadeInUp 0.25s ease-out;
+  width: 100%;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--surface-0);
+  border-radius: var(--radius-xl);
+  padding: 2rem;
+  box-shadow: var(--shadow-xl);
+  animation: fadeInUp 0.25s ease-out;
 }
 
 .word-option-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 1rem;
-    padding: 1rem 1.25rem;
-    background: var(--surface-50);
-    border: 1.5px solid var(--border-light);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all var(--transition-fast);
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: var(--surface-50);
+  border: 1.5px solid var(--border-light);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
 }
+
 .word-option-card:hover {
-    border-color: var(--brand-primary-light);
-    background: var(--surface-0);
-    box-shadow: var(--shadow-sm);
+  border-color: var(--brand-primary-light);
+  background: var(--surface-0);
+  box-shadow: var(--shadow-sm);
 }
+
 .word-option-card input[type="checkbox"] {
-    width: 20px;
-    height: 20px;
-    margin-top: 2px;
-    accent-color: var(--brand-primary);
-    cursor: pointer;
-    flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: var(--brand-primary);
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 /* === ANIMATIONS === */
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
 @keyframes fadeInUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
+
 @keyframes slideInDown {
-    from { opacity: 0; transform: translateY(-10px); }
-    to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .fade-in { animation: fadeIn 0.4s ease-out; }
 .fade-in-up { animation: fadeInUp 0.5s ease-out; }
 
 ::selection { background: rgba(99, 102, 241, 0.2); }
+
 :focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
 
 /* === SCROLLBAR === */
@@ -7428,8 +7556,8 @@ tbody tr:last-child td { border-bottom: none; }
 ::-webkit-scrollbar-thumb:hover { background: var(--surface-200); }
 
 * {
-    scrollbar-width: thin;
-    scrollbar-color: var(--surface-300) var(--surface-100);
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-300) var(--surface-100);
 }
 
 /* ============================================
@@ -7437,70 +7565,71 @@ tbody tr:last-child td { border-bottom: none; }
    ============================================ */
 
 @media (min-width: 1280px) {
-    .container { max-width: 1200px; }
+  .container { max-width: 1200px; }
 }
 
 @media (max-width: 1024px) {
-    .grid-3 { grid-template-columns: repeat(2, 1fr); }
-    .grid-4 { grid-template-columns: repeat(2, 1fr); }
-    h1 { font-size: 2.25rem; }
-    .hero__title { font-size: 2.25rem; }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  h1 { font-size: 2.25rem; }
+  .hero__title { font-size: 2.25rem; }
 }
 
 @media (max-width: 768px) {
-    .grid-3, .grid-4 { grid-template-columns: 1fr; }
-    h1 { font-size: 2rem; }
-    h2 { font-size: 1.5rem; }
-    h3 { font-size: 1.25rem; }
-    .stat-card__value { font-size: 2rem; }
-    .hero__title { font-size: 2rem; }
+  .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  h1 { font-size: 2rem; }
+  h2 { font-size: 1.5rem; }
+  h3 { font-size: 1.25rem; }
+  .stat-card__value { font-size: 2rem; }
+  .hero__title { font-size: 2rem; }
 
-    .navbar-menu--desktop { display: none; }
-    .navbar-burger { display: flex; }
-    .navbar-inner { gap: 0.75rem; }
+  .navbar-menu--desktop { display: none; }
+  .navbar-burger { display: flex; }
 
-    .exercise-result-grid { grid-template-columns: 1fr; }
-    .vocab-filters { grid-template-columns: 1fr; }
-    .vocab-filters select { min-width: unset; }
+  .navbar-inner { gap: 0.75rem; }
 
-    .exercise-card { padding: 1.5rem; }
-    .exercise-sentence { font-size: 1.25rem; }
+  .exercise-result-grid { grid-template-columns: 1fr; }
+  .vocab-filters { grid-template-columns: 1fr; }
+  .vocab-filters select { min-width: unset; }
 
-    .cta-section { padding: 2.5rem 1.5rem; }
-    .cta-section h3 { font-size: 1.5rem; }
+  .exercise-card { padding: 1.5rem; }
+  .exercise-sentence { font-size: 1.25rem; }
 
-    .modal-overlay { padding: 5vh 0.75rem 1.5rem 0.75rem; }
-    .modal-panel { padding: 1.5rem; }
+  .cta-section { padding: 2.5rem 1.5rem; }
+  .cta-section h3 { font-size: 1.5rem; }
 
-    .word-item { flex-wrap: wrap; gap: 0.5rem; }
-    .word-item__meta { width: 100%; justify-content: flex-start; }
+  .modal-overlay { padding: 5vh 0.75rem 1.5rem 0.75rem; }
+  .modal-panel { padding: 1.5rem; }
 
-    .summary-streak-flex { gap: 1.5rem !important; }
+  .word-item { flex-wrap: wrap; gap: 0.5rem; }
+  .word-item__meta { width: 100%; justify-content: flex-start; }
+
+  .summary-streak-flex { gap: 1.5rem !important; }
 }
 
 @media (max-width: 480px) {
-    .container { padding: 0 1rem; }
-    .card { padding: 1.25rem; }
-    .exercise-card { padding: 1.25rem; }
-    .stat-card { padding: 1rem; }
-    .cta-section { padding: 2rem 1rem; }
-    .modal-overlay { padding: 3vh 0.5rem 1rem 0.5rem; }
-    .modal-panel { padding: 1.25rem; }
+  .container { padding: 0 1rem; }
+  .card { padding: 1.25rem; }
+  .exercise-card { padding: 1.25rem; }
+  .stat-card { padding: 1rem; }
+  .cta-section { padding: 2rem 1rem; }
 
-    h1 { font-size: 1.75rem; }
-    h2 { font-size: 1.375rem; }
-    .hero__title { font-size: 1.75rem; }
-    .stat-card__value { font-size: 1.75rem; }
+  .modal-overlay { padding: 3vh 0.5rem 1rem 0.5rem; }
+  .modal-panel { padding: 1.25rem; }
 
-    .exercise-sentence { font-size: 1.125rem; }
+  h1 { font-size: 1.75rem; }
+  h2 { font-size: 1.375rem; }
+  .hero__title { font-size: 1.75rem; }
+  .stat-card__value { font-size: 1.75rem; }
+  .exercise-sentence { font-size: 1.125rem; }
 
-    .flash-success, .flash-error, .flash-info, .flash-warning {
-        padding: 0.875rem 1rem;
-        font-size: 0.875rem;
-    }
+  .flash-success, .flash-error, .flash-info, .flash-warning {
+    padding: 0.875rem 1rem;
+    font-size: 0.875rem;
+  }
 
-    .pagination { gap: 0.25rem; }
-    .pagination a { min-width: 32px; height: 32px; font-size: 0.875rem; }
+  .pagination { gap: 0.25rem; }
+  .pagination a { min-width: 32px; height: 32px; font-size: 0.875rem; }
 }
 ### end of app/static/css/custom.css ########################################################################
 
@@ -7803,75 +7932,62 @@ async function copyToClipboard(text) {
 ### end of app/templates/auth/register.html ########################################################################
 
 ### app/templates/base.html ########################################################################
-<!-- app/templates/base.html -->
 <!DOCTYPE html>
 <html lang="ru" data-theme="light" class="notranslate" translate="no">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#6366f1">
-    <meta name="google" content="notranslate">
-    <title>{% block title %}101slovo{% endblock %}</title>
-
-    <script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="google" content="notranslate">
+  <title>{% block title %}101slovo{% endblock %}</title>
+  <script>
     (function() {
-        const theme = localStorage.getItem('theme') || 'light';
-        document.documentElement.setAttribute('data-theme', theme);
+      const theme = localStorage.getItem('theme') || 'light';
+      document.documentElement.setAttribute('data-theme', theme);
     })();
-    </script>
-
-    <link rel="preload" href="/static/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/static/fonts/inter-500.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/static/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/static/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/static/fonts/inter-800.woff2" as="font" type="font/woff2" crossorigin>
-
-    <link rel="stylesheet" href="/static/css/custom.css">
-
-    <script src="/static/vendor/htmx.min.js"></script>
-    <script defer src="/static/vendor/alpine.min.js"></script>
-    <script defer src="/static/vendor/lucide.min.js"></script>
-    <script defer src="/static/js/app.js"></script>
-
-    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="shortcut icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <link rel="manifest" href="/site.webmanifest" />
-
-    {% block head %}{% endblock %}
+  </script>
+  <link rel="preload" href="/static/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-500.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-800.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/css/custom.css">
+  <script src="/static/vendor/htmx.min.js"></script>
+  <script defer src="/static/vendor/alpine.min.js"></script>
+  <script defer src="/static/vendor/lucide.min.js"></script>
+  <script defer src="/static/js/app.js"></script>
+  <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
+  <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
+  <link rel="manifest" href="/static/favicon/site.webmanifest" />
+  {% block head %}{% endblock %}
 </head>
 <body>
-    <a href="#main-content" class="visually-hidden" style="position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden;">
-        Перейти к основному содержимому
-    </a>
-
-    {% include "partials/nav.html" %}
-
-    {% include "partials/flash.html" %}
-
-    <main class="container fade-in-up" id="main-content" style="padding-top: 2rem; padding-bottom: 4rem;" aria-label="Основное содержимое страницы">
-        {% block content %}{% endblock %}
-    </main>
-
-    <footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;" aria-label="Информация о сайте">
-        <p style="margin-bottom: 0.75rem;">© 2026 101slovo • Изучай английский в контексте</p>
-        <nav aria-label="Юридические документы">
-            <p style="display: flex; justify-content: center; gap: 1.5rem; flex-wrap: wrap; font-size: 0.8125rem;">
-                <a href="/legal/offer" style="color: var(--text-muted); text-decoration: none;">Оферта</a>
-                <a href="/legal/privacy" style="color: var(--text-muted); text-decoration: none;">Конфиденциальность</a>
-                <a href="/legal/terms" style="color: var(--text-muted); text-decoration: none;">Условия использования</a>
-                <a href="/legal/consent" style="color: var(--text-muted); text-decoration: none;">Согласие на обработку ПД</a>
-            </p>
-        </nav>
-    </footer>
-
-    <script>
-        document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
-        document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
-    </script>
-
-    {% block scripts %}{% endblock %}
+  <a href="#main-content" class="visually-hidden" style="position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden;">
+    Перейти к основному содержимому
+  </a>
+  {% include "partials/nav.html" %}
+  {% include "partials/flash.html" %}
+  <main class="container fade-in-up" id="main-content" style="padding-top: 2rem; padding-bottom: 4rem;" aria-label="Основное содержимое страницы">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;" aria-label="Информация о сайте">
+    <p style="margin-bottom: 0.75rem;">© 2026 101slovo • Изучай английский в контексте</p>
+    <nav aria-label="Юридические документы">
+      <p style="display: flex; justify-content: center; gap: 1.5rem; flex-wrap: wrap; font-size: 0.8125rem;">
+        <a href="/legal/offer" style="color: var(--text-muted); text-decoration: none;">Оферта</a>
+        <a href="/legal/privacy" style="color: var(--text-muted); text-decoration: none;">Конфиденциальность</a>
+        <a href="/legal/terms" style="color: var(--text-muted); text-decoration: none;">Условия использования</a>
+        <a href="/legal/consent" style="color: var(--text-muted); text-decoration: none;">Согласие на обработку ПД</a>
+      </p>
+    </nav>
+  </footer>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
+    document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
+  </script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>
 ### end of app/templates/base.html ########################################################################
@@ -8009,130 +8125,115 @@ async function handleCopyPromo(button, code) {
 {% block title %}Тарифы — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-
-    <div class="text-center mb-4">
-        <div style="font-size: 3rem; margin-bottom: 0.5rem;">👑</div>
-        <h1 style="margin: 0; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-            Premium подписка
-        </h1>
-        <p style="color: var(--text-muted); margin-top: 0.5rem; font-size: 1.0625rem;">
-            Безлимитные уроки, без ограничений по общему числу
-        </p>
-    </div>
-
-    {% if subscription.is_premium %}
-    <div class="flash-info mb-4">
-        <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
-        У вас уже активна подписка <strong>{{ subscription.plan }}</strong>
-        до {{ subscription.expires_at.strftime('%d.%m.%Y') }}.
-        При покупке нового тарифа оставшиеся дни будут добавлены.
-    </div>
-    {% endif %}
-
-    <div class="grid grid-3" style="align-items: stretch;">
-
-        <!-- Free -->
-        <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--border-light);">
-            <h3 style="margin-top: 0;">Free</h3>
-            <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">0 ₽</div>
-            <ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
-                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-                    1 урок в день
-                </li>
-                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-                    5 уроков всего
-                </li>
-                <li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
-                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-                    До 10 слов в уроке
-                </li>
-            </ul>
-            <button disabled class="secondary" style="width: 100%;">Текущий план</button>
-        </div>
-
-        <!-- Monthly -->
-        <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
-            <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
-            <h3 style="margin-top: 0;">Месячная</h3>
-            <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">
-                {{ "%.0f" | format(monthly_price) }} ₽
-                <span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span>
-            </div>
-            <ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
-                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-                    До 5 уроков в день
-                </li>
-                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-                    Безлимит по общему числу
-                </li>
-                <li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
-                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-                    До 10 слов в уроке
-                </li>
-            </ul>
-            <form method="POST" action="/billing/subscribe">
-                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-                <input type="hidden" name="plan" value="monthly">
-                <label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer; line-height: 1.5;">
-                    <input type="checkbox" required style="width: auto; margin-top: 2px; flex-shrink: 0;">
-                    <span>
-                        Согласен с <a href="/legal/offer" target="_blank">публичной офертой</a>,
-                        <a href="/legal/privacy" target="_blank">политикой конфиденциальности</a>
-                        и даю согласие на
-                        <a href="/legal/consent" target="_blank">обработку персональных данных</a>
-                        и автоматическое списание средств
-                    </span>
-                </label>
-                <button type="submit" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</button>
-            </form>
-        </div>
-
-        <!-- 6 Months -->
-        <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981; position: relative;">
-            <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">
-                −{{ discount_percent }}%
-            </div>
-            <h3 style="margin-top: 0;">6 месяцев</h3>
-            <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">
-                {{ "%.0f" | format(six_month_price) }} ₽
-            </div>
-            <div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 0.5rem;">
-                {{ "%.0f" | format(six_month_per_month) }} ₽/мес ·
-                <s>{{ "%.0f" | format(six_month_full) }} ₽</s> ·
-                экономия {{ "%.0f" | format(six_month_saving) }} ₽
-            </div>
-            <ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
-                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-                    До 5 уроков в день
-                </li>
-                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-                    Безлимит по общему числу
-                </li>
-                <li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
-                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-                    До 10 слов в уроке
-                </li>
-            </ul>
-            <form method="POST" action="/billing/subscribe">
-                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-                <input type="hidden" name="plan" value="six_months">
-                <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer;">
-                    <input type="checkbox" required style="width: auto;">
-                    Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
-                </label>
-                <button type="submit" style="width: 100%; background: #10b981;">
-                    Подключить за {{ "%.0f" | format(six_month_price) }} ₽
-                </button>
-            </form>
-        </div>
-    </div>
-
+<div class="text-center mb-4">
+<div style="font-size: 3rem; margin-bottom: 0.5rem;">👑</div>
+<h1 style="margin: 0; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+Premium подписка
+</h1>
+<p style="color: var(--text-muted); margin-top: 0.5rem; font-size: 1.0625rem;">
+Безлимитные уроки без ограничений
+</p>
+</div>
+{% if subscription.is_premium %}
+<div class="flash-info mb-4">
+<i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
+У вас уже активна подписка <strong>{{ subscription.plan }}</strong>
+до {{ subscription.expires_at.strftime('%d.%m.%Y') }}.
+При покупке нового тарифа оставшиеся дни будут добавлены.
+</div>
+{% endif %}
+<div class="grid grid-3" style="align-items: stretch;">
+<!-- Free -->
+<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--border-light);">
+<h3 style="margin-top: 0;">Free</h3>
+<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">0 ₽</div>
+<ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
+<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+1 урок в день
+</li>
+<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+5 уроков всего
+</li>
+<li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
+<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+До 10 слов в уроке
+</li>
+</ul>
+<button disabled class="secondary" style="width: 100%;">Текущий план</button>
+</div>
+<!-- Monthly -->
+<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
+<div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
+<h3 style="margin-top: 0;">Месячная</h3>
+<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">
+{{ "%.0f" | format(monthly_price) }} ₽
+<span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span>
+</div>
+<ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
+<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+До 5 уроков в день
+</li>
+<li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
+<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+До 10 слов в уроке
+</li>
+</ul>
+<form method="POST" action="/billing/subscribe">
+<input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+<input type="hidden" name="plan" value="monthly">
+<label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer; line-height: 1.5;">
+<input type="checkbox" required style="width: auto; margin-top: 2px; flex-shrink: 0;">
+<span>
+Согласен с <a href="/legal/offer" target="_blank">публичной офертой</a>,
+<a href="/legal/privacy" target="_blank">политикой конфиденциальности</a>
+и даю согласие на
+<a href="/legal/consent" target="_blank">обработку персональных данных</a>
+и автоматическое списание средств
+</span>
+</label>
+<button type="submit" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</button>
+</form>
+</div>
+<!-- 6 Months -->
+<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981; position: relative;">
+<div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">
+−{{ discount_percent }}%
+</div>
+<h3 style="margin-top: 0;">6 месяцев</h3>
+<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">
+{{ "%.0f" | format(six_month_price) }} ₽
+</div>
+<div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+{{ "%.0f" | format(six_month_per_month) }} ₽/мес ·
+<s>{{ "%.0f" | format(six_month_full) }} ₽</s> ·
+экономия {{ "%.0f" | format(six_month_saving) }} ₽
+</div>
+<ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
+<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+До 5 уроков в день
+</li>
+<li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
+<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+До 10 слов в уроке
+</li>
+</ul>
+<form method="POST" action="/billing/subscribe">
+<input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+<input type="hidden" name="plan" value="six_months">
+<label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer;">
+<input type="checkbox" required style="width: auto;">
+Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
+</label>
+<button type="submit" style="width: 100%; background: #10b981;">
+Подключить за {{ "%.0f" | format(six_month_price) }} ₽
+</button>
+</form>
+</div>
+</div>
 </div>
 {% endblock %}
 ### end of app/templates/billing/plans.html ########################################################################
@@ -8306,146 +8407,135 @@ async function handleCopyPromo(button, code) {
 {% block title %}101slovo — Учи английский в контексте{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto; text-align: center; padding-top: 2rem;">
-
-    <!-- Hero -->
-    <div style="padding: 4rem 1rem;">
-        <span class="badge badge-active" style="font-size: 0.875rem; padding: 0.5rem 1rem; margin-bottom: 1.5rem;">
-            🚀 Powered by GigaChat AI
-        </span>
-        <h1 style="font-size: 3.5rem; line-height: 1.1; margin-bottom: 1.5rem; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-            Забудь зубрёжку.<br>Учи слова в контексте.
-        </h1>
-        <p style="font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 2.5rem auto; line-height: 1.6;">
-            101slovo генерирует персонализированные предложения с помощью ИИ и использует интервальное повторение (SRS), чтобы слова запоминались навсегда.
-        </p>
-        <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-            <a href="/register" role="button" class="btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
-                Начать бесплатно
-            </a>
-            <a href="/login" role="button" class="secondary btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
-                У меня есть аккаунт
-            </a>
-        </div>
-    </div>
-
-    <!-- Features -->
-    <div class="grid grid-3" style="margin-top: 4rem; text-align: left;">
-        <div class="card">
-            <div class="stat-card__icon" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">
-                <i data-lucide="brain" style="width: 24px; height: 24px;"></i>
-            </div>
-            <h3>Интервальное повторение</h3>
-            <p style="color: var(--text-secondary);">Научно доказанный алгоритм SRS покажет слово именно тогда, когда ты почти его забыл.</p>
-        </div>
-        <div class="card">
-            <div class="stat-card__icon" style="background: rgba(236, 72, 153, 0.1); color: var(--brand-secondary);">
-                <i data-lucide="sparkles" style="width: 24px; height: 24px;"></i>
-            </div>
-            <h3>Контекст от ИИ</h3>
-            <p style="color: var(--text-secondary);">GigaChat создаёт уникальные, естественные предложения специально для твоего уровня (A1–C2).</p>
-        </div>
-        <div class="card">
-            <div class="stat-card__icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
-                <i data-lucide="target" style="width: 24px; height: 24px;"></i>
-            </div>
-            <h3>Тематические словари</h3>
-            <p style="color: var(--text-secondary);">Выбирай общий, IT или travel словарь. Учи только то, что реально нужно тебе.</p>
-        </div>
-    </div>
-
-    <!-- Pricing -->
-    <div style="margin-top: 5rem;">
-        <h2 style="margin-bottom: 0.5rem;">Тарифы</h2>
-        <p style="color: var(--text-muted); margin-bottom: 2rem;">
-            Начни бесплатно — {{ free_lessons_total }} уроков без оплаты
-        </p>
-
-        <div class="grid grid-3" style="text-align: left; align-items: stretch;">
-            <!-- Free -->
-            <div class="card" style="display: flex; flex-direction: column; padding: 2rem;">
-                <h3 style="margin-top: 0;">Free</h3>
-                <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">0 ₽</div>
-                <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
-                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">
-                        ✅ {{ free_daily_limit }} урок в день
-                    </li>
-                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">
-                        ✅ {{ free_lessons_total }} уроков всего
-                    </li>
-                    <li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
-                </ul>
-                <a href="/register" role="button" class="secondary" style="margin-top: 1.5rem; width: 100%; text-align: center;">Начать бесплатно</a>
-            </div>
-
-            <!-- Monthly -->
-            <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
-                <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
-                <h3 style="margin-top: 0;">Месячная</h3>
-                <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">
-                    {{ "%.0f" | format(monthly_price) }} ₽<span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span>
-                </div>
-                <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
-                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До 5 уроков в день</li>
-                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ Безлимит по общему числу</li>
-                    <li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
-                </ul>
-                <a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center;">
-                    Подключить за {{ "%.0f" | format(monthly_price) }} ₽
-                </a>
-            </div>
-
-            <!-- 6 Months -->
-            <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981;">
-                <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">−{{ discount_percent }}%</div>
-                <h3 style="margin-top: 0;">6 месяцев</h3>
-                <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">
-                    {{ "{:,.0f}".format(six_month_price) | replace(",", " ") }} ₽
-                </div>
-                <div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1rem;">
-                    {{ "%.0f" | format(six_month_per_month) }} ₽/мес · экономия {{ "%.0f" | format(six_month_saving) }} ₽
-                </div>
-                <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
-                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До 5 уроков в день</li>
-                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ Безлимит по общему числу</li>
-                    <li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
-                </ul>
-                <a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center; background: #10b981;">
-                    Подключить за {{ "{:,.0f}".format(six_month_price) | replace(",", " ") }} ₽
-                </a>
-            </div>
-        </div>
-    </div>
-
-    <!-- Referral -->
-    <div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium); text-align: center; padding: 2.5rem;">
-        <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">🎁</div>
-        <h3 style="margin-bottom: 0.5rem;">Пригласи друга — получи бонус</h3>
-        <p style="color: var(--text-secondary); max-width: 500px; margin: 0 auto;">
-            Поделись своим промокодом. Когда друг купит подписку, ты получишь
-            +{{ referral_bonus_days }} дней Premium. Твой друг тоже получит
-            +{{ referral_bonus_days }} дней к своей подписке.
-            Без ограничений по количеству друзей.
-        </p>
-    </div>
-
-    <!-- Social Proof / Stats -->
-    <div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium);">
-        <div class="grid grid-3" style="text-align: center;">
-            <div>
-                <div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-primary);">6</div>
-                <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Стадий SRS</div>
-            </div>
-            <div>
-                <div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-secondary);">15с</div>
-                <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Среднее время оценки</div>
-            </div>
-            <div>
-                <div style="font-size: 2.5rem; font-weight: 800; color: #10b981;">100%</div>
-                <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Серверный рендеринг</div>
-            </div>
-        </div>
-    </div>
-
+<!-- Hero -->
+<div style="padding: 4rem 1rem;">
+<span class="badge badge-active" style="font-size: 0.875rem; padding: 0.5rem 1rem; margin-bottom: 1.5rem;">
+🚀 Powered by GigaChat AI
+</span>
+<h1 style="font-size: 3.5rem; line-height: 1.1; margin-bottom: 1.5rem; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+Забудь зубрёжку.<br>Учи слова в контексте.
+</h1>
+<p style="font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 2.5rem auto; line-height: 1.6;">
+101slovo генерирует персонализированные предложения с помощью ИИ и использует интервальное повторение (SRS), чтобы слова запоминались навсегда.
+</p>
+<div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+<a href="/register" role="button" class="btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
+Начать бесплатно
+</a>
+<a href="/login" role="button" class="secondary btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
+У меня есть аккаунт
+</a>
+</div>
+</div>
+<!-- Features -->
+<div class="grid grid-3" style="margin-top: 4rem; text-align: left;">
+<div class="card">
+<div class="stat-card__icon" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">
+<i data-lucide="brain" style="width: 24px; height: 24px;"></i>
+</div>
+<h3>Интервальное повторение</h3>
+<p style="color: var(--text-secondary);">Научно доказанный алгоритм SRS покажет слово именно тогда, когда ты почти его забыл.</p>
+</div>
+<div class="card">
+<div class="stat-card__icon" style="background: rgba(236, 72, 153, 0.1); color: var(--brand-secondary);">
+<i data-lucide="sparkles" style="width: 24px; height: 24px;"></i>
+</div>
+<h3>Контекст от ИИ</h3>
+<p style="color: var(--text-secondary);">GigaChat создаёт уникальные, естественные предложения специально для твоего уровня (A1–C2).</p>
+</div>
+<div class="card">
+<div class="stat-card__icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
+<i data-lucide="target" style="width: 24px; height: 24px;"></i>
+</div>
+<h3>Тематические словари</h3>
+<p style="color: var(--text-secondary);">Выбирай общий, IT или travel словарь. Учи только то, что реально нужно тебе.</p>
+</div>
+</div>
+<!-- Pricing -->
+<div style="margin-top: 5rem;">
+<h2 style="margin-bottom: 0.5rem;">Тарифы</h2>
+<p style="color: var(--text-muted); margin-bottom: 2rem;">
+Начни бесплатно — {{ free_lessons_total }} уроков без оплаты
+</p>
+<div class="grid grid-3" style="text-align: left; align-items: stretch;">
+<!-- Free -->
+<div class="card" style="display: flex; flex-direction: column; padding: 2rem;">
+<h3 style="margin-top: 0;">Free</h3>
+<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">0 ₽</div>
+<ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
+<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">
+✅ {{ free_daily_limit }} урок в день
+</li>
+<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">
+✅ {{ free_lessons_total }} уроков всего
+</li>
+<li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
+</ul>
+<a href="/register" role="button" class="secondary" style="margin-top: 1.5rem; width: 100%; text-align: center;">Начать бесплатно</a>
+</div>
+<!-- Monthly -->
+<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
+<div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
+<h3 style="margin-top: 0;">Месячная</h3>
+<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">
+{{ "%.0f" | format(monthly_price) }} ₽<span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span>
+</div>
+<ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
+<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До 5 уроков в день</li>
+<li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
+</ul>
+<a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center;">
+Подключить за {{ "%.0f" | format(monthly_price) }} ₽
+</a>
+</div>
+<!-- 6 Months -->
+<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981;">
+<div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">−{{ discount_percent }}%</div>
+<h3 style="margin-top: 0;">6 месяцев</h3>
+<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">
+{{ "{:,.0f}".format(six_month_price) | replace(",", " ") }} ₽
+</div>
+<div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1rem;">
+{{ "%.0f" | format(six_month_per_month) }} ₽/мес · экономия {{ "%.0f" | format(six_month_saving) }} ₽
+</div>
+<ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
+<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До 5 уроков в день</li>
+<li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
+</ul>
+<a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center; background: #10b981;">
+Подключить за {{ "{:,.0f}".format(six_month_price) | replace(",", " ") }} ₽
+</a>
+</div>
+</div>
+</div>
+<!-- Referral -->
+<div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium); text-align: center; padding: 2.5rem;">
+<div style="font-size: 2.5rem; margin-bottom: 0.75rem;">🎁</div>
+<h3 style="margin-bottom: 0.5rem;">Пригласи друга — получи бонус</h3>
+<p style="color: var(--text-secondary); max-width: 500px; margin: 0 auto;">
+Поделись своим промокодом. Когда друг купит подписку, ты получишь
++{{ referral_bonus_days }} дней Premium. Твой друг тоже получит
++{{ referral_bonus_days }} дней к своей подписке.
+Без ограничений по количеству друзей.
+</p>
+</div>
+<!-- Social Proof / Stats -->
+<div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium);">
+<div class="grid grid-3" style="text-align: center;">
+<div>
+<div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-primary);">6</div>
+<div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Стадий SRS</div>
+</div>
+<div>
+<div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-secondary);">15с</div>
+<div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Среднее время оценки</div>
+</div>
+<div>
+<div style="font-size: 2.5rem; font-weight: 800; color: #10b981;">100%</div>
+<div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Серверный рендеринг</div>
+</div>
+</div>
+</div>
 </div>
 {% endblock %}
 ### end of app/templates/landing.html ########################################################################
@@ -9310,167 +9400,167 @@ button[type="submit"] {
 ### app/templates/lesson/exercise_result.html ########################################################################
 {% if error %}
 <div class="flash-error" role="alert">
-    <i data-lucide="alert-circle" style="width: 20px; height: 20px;" aria-hidden="true"></i>
-    {{ error }}
+<i data-lucide="alert-circle" style="width: 20px; height: 20px;" aria-hidden="true"></i>
+{{ error }}
 </div>
 <button onclick="location.reload()" class="secondary">
-    <i data-lucide="rotate-ccw" style="width: 16px; height: 16px;" aria-hidden="true"></i>
-    Попробовать снова
+<i data-lucide="rotate-ccw" style="width: 16px; height: 16px;" aria-hidden="true"></i>
+Попробовать снова
 </button>
 {% else %}
-
 <!-- Status Card -->
 <div class="exercise-card" style="margin-bottom: 1.5rem;" role="status" aria-live="polite">
-    {% set eval_status = evaluation.status %}
-
-    {% if eval_status == 'correct' %}
-    <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
-        <div style="width: 48px; height: 48px; border-radius: 50%; background: var(--bg-success); display: flex; align-items: center; justify-content: center; font-size: 1.5rem;" aria-hidden="true">✅</div>
-        <div>
-            <h3 style="margin: 0; color: var(--text-success);">Отлично!</h3>
-            <p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">Перевод верный</p>
-        </div>
-    </div>
-    {% elif eval_status == 'typo' %}
-    <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
-        <div style="width: 48px; height: 48px; border-radius: 50%; background: var(--bg-warning); display: flex; align-items: center; justify-content: center; font-size: 1.5rem;" aria-hidden="true">⚠️</div>
-        <div>
-            <h3 style="margin: 0; color: var(--text-warning);">Почти верно</h3>
-            <p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">Есть мелкие недочёты</p>
-        </div>
-    </div>
-    {% else %}
-    <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
-        <div style="width: 48px; height: 48px; border-radius: 50%; background: var(--bg-error); display: flex; align-items: center; justify-content: center; font-size: 1.5rem;" aria-hidden="true">❌</div>
-        <div>
-            <h3 style="margin: 0; color: var(--text-error);">Не совсем так</h3>
-            <p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">Давай разберёмся</p>
-        </div>
-    </div>
-    {% endif %}
-
-    {% if evaluation.feedback %}
-    <div style="padding: 1rem; background: var(--surface-50); border-radius: var(--radius-md); margin-bottom: 1rem; border-left: 3px solid var(--brand-primary);">
-        <em>{{ evaluation.feedback }}</em>
-    </div>
-    {% endif %}
-
-    <div class="exercise-result-grid">
-        <div>
-            <div style="font-size: 0.8125rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Эталон</div>
-            <div style="font-weight: 500;">{{ exercise.reference_translation }}</div>
-        </div>
-        {% if exercise.user_translation %}
-        <div>
-            <div style="font-size: 0.8125rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Ваш перевод</div>
-            <div style="font-weight: 500;">{{ exercise.user_translation }}</div>
-        </div>
-        {% endif %}
-    </div>
+{% set eval_status = evaluation.status %}
+{% if eval_status == 'correct' %}
+<div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
+<div style="width: 48px; height: 48px; border-radius: 50%; background: var(--bg-success); display: flex; align-items: center; justify-content: center; font-size: 1.5rem;" aria-hidden="true">✅</div>
+<div>
+<h3 style="margin: 0; color: var(--text-success);">Отлично!</h3>
+<p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">Перевод верный</p>
 </div>
-
+</div>
+{% elif eval_status == 'typo' %}
+<div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
+<div style="width: 48px; height: 48px; border-radius: 50%; background: var(--bg-warning); display: flex; align-items: center; justify-content: center; font-size: 1.5rem;" aria-hidden="true">⚠️</div>
+<div>
+<h3 style="margin: 0; color: var(--text-warning);">Почти верно</h3>
+<p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">Есть мелкие недочёты</p>
+</div>
+</div>
+{% else %}
+<div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
+<div style="width: 48px; height: 48px; border-radius: 50%; background: var(--bg-error); display: flex; align-items: center; justify-content: center; font-size: 1.5rem;" aria-hidden="true">❌</div>
+<div>
+<h3 style="margin: 0; color: var(--text-error);">Не совсем так</h3>
+<p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">Давай разберёмся</p>
+</div>
+</div>
+{% endif %}
+{% if evaluation.feedback %}
+<div style="padding: 1rem; background: var(--surface-50); border-radius: var(--radius-md); margin-bottom: 1rem; border-left: 3px solid var(--brand-primary);">
+<em>{{ evaluation.feedback }}</em>
+</div>
+{% endif %}
+<!-- Исходное предложение -->
+<div style="margin-bottom: 1.5rem; padding: 1.25rem; background: var(--surface-50); border-radius: var(--radius-md); border: 1px solid var(--border-light);">
+<div style="font-size: 0.8125rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; font-weight: 600;">
+<i data-lucide="message-circle" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
+Исходное предложение
+</div>
+<p style="font-size: 1.125rem; font-weight: 600; margin: 0; color: var(--text-primary); line-height: 1.5;">{{ exercise.target_sentence }}</p>
+</div>
+<div class="exercise-result-grid">
+<div>
+<div style="font-size: 0.8125rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Эталон</div>
+<div style="font-weight: 500;">{{ exercise.reference_translation }}</div>
+</div>
+{% if exercise.user_translation %}
+<div>
+<div style="font-size: 0.8125rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Ваш перевод</div>
+<div style="font-weight: 500;">{{ exercise.user_translation }}</div>
+</div>
+{% endif %}
+</div>
+</div>
 <!-- Word Breakdown -->
 <div class="exercise-card">
-    <h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
-        <i data-lucide="list-checks" style="width: 18px; height: 18px;" aria-hidden="true"></i>
-        Разбор слов
-    </h4>
-    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
-        {% for tw in target_words %}
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: var(--surface-50); border-radius: var(--radius-md); flex-wrap: wrap; gap: 0.5rem;">
-            <div style="display: flex; align-items: center; gap: 0.75rem;">
-                <strong>{{ tw.lemma }}</strong>
-                <span style="color: var(--text-muted); font-size: 0.875rem;">({{ tw.pos }})</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                {% if tw.eval_status == 'mastered' %}
-                    <span class="badge badge-mastered">✓ Усвоено</span>
-                {% elif tw.eval_status == 'failed' %}
-                    <span class="badge badge-ignored">✗ Ошибка</span>
-                {% else %}
-                    <span class="badge badge-active">~ В процессе</span>
-                {% endif %}
-            </div>
-        </div>
-        {% if tw.eval_comment %}
-        <div style="padding: 0 1rem 0.5rem 1rem; color: var(--text-secondary); font-size: 0.875rem; font-style: italic;">
-            💬 {{ tw.eval_comment }}
-        </div>
-        {% endif %}
-        {% endfor %}
-    </div>
+<h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+<i data-lucide="list-checks" style="width: 18px; height: 18px;" aria-hidden="true"></i>
+Разбор слов
+</h4>
+<div style="display: flex; flex-direction: column; gap: 0.5rem;">
+{% for tw in target_words %}
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: var(--surface-50); border-radius: var(--radius-md); flex-wrap: wrap; gap: 0.5rem;">
+<div style="display: flex; align-items: center; gap: 0.75rem;">
+<strong>{{ tw.lemma }}</strong>
+<span style="color: var(--text-muted); font-size: 0.875rem;">({{ tw.pos }})</span>
 </div>
-
+<div style="display: flex; align-items: center; gap: 0.5rem;">
+{% if tw.eval_status == 'mastered' %}
+<span class="badge badge-mastered">✓ Усвоено</span>
+{% elif tw.eval_status == 'failed' %}
+<span class="badge badge-ignored">✗ Ошибка</span>
+{% else %}
+<span class="badge badge-active">~ В процессе</span>
+{% endif %}
+</div>
+</div>
+{% if tw.eval_comment %}
+<div style="padding: 0 1rem 0.5rem 1rem; color: var(--text-secondary); font-size: 0.875rem; font-style: italic;">
+💬 {{ tw.eval_comment }}
+</div>
+{% endif %}
+{% endfor %}
+</div>
+</div>
 <!-- Suggested Words -->
 {% if suggested_words %}
 <div class="exercise-card">
-    <h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
-        <i data-lucide="lightbulb" style="width: 18px; height: 18px; color: var(--text-warning-strong);" aria-hidden="true"></i>
-        Новые слова из вашего перевода
-    </h4>
-    <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0;">
-        Хотите добавить их в свой словарь?
-    </p>
-    {% for sw in suggested_words %}
-    <div class="suggestion-card {% if sw.state == 'added' %}suggestion-card--added{% elif sw.state == 'ignored' %}suggestion-card--ignored{% endif %}"
-         role="status" aria-live="polite">
-        {% if sw.state == 'added' %}
-            <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-success-strong);">
-                <i data-lucide="check-circle" style="width: 18px; height: 18px;" aria-hidden="true"></i>
-                <strong>{{ sw.lemma }}</strong> — {{ sw.translation }}
-            </div>
-        {% elif sw.state == 'ignored' %}
-            <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-muted);">
-                <i data-lucide="x-circle" style="width: 18px; height: 18px;" aria-hidden="true"></i>
-                <s>{{ sw.lemma }}</s> — <s>{{ sw.translation }}</s>
-            </div>
-        {% else %}
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 200px;">
-                    <strong style="font-size: 1.0625rem;">{{ sw.lemma }}</strong>
-                    <div style="color: var(--text-secondary);">{{ sw.translation }}</div>
-                    {% if sw.reason %}
-                    <div style="color: var(--text-muted); font-size: 0.8125rem; margin-top: 0.25rem;">💬 {{ sw.reason }}</div>
-                    {% endif %}
-                </div>
-                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                    <button hx-post="/lesson/suggestions/{{ exercise.id }}/{{ loop.index0 }}"
-                            hx-target="closest .suggestion-card"
-                            hx-swap="outerHTML"
-                            hx-vals='{"action": "add", "csrf_token": "{{ request.state.csrf_token }}"}'
-                            style="padding: 0.375rem 0.875rem; font-size: 0.875rem;"
-                            aria-label="Добавить слово {{ sw.lemma }} в словарь">
-                        <i data-lucide="plus" style="width: 14px; height: 14px;" aria-hidden="true"></i>
-                        Добавить
-                    </button>
-                    <button hx-post="/lesson/suggestions/{{ exercise.id }}/{{ loop.index0 }}"
-                            hx-target="closest .suggestion-card"
-                            hx-swap="outerHTML"
-                            hx-vals='{"action": "ignore", "csrf_token": "{{ request.state.csrf_token }}"}'
-                            class="secondary"
-                            style="padding: 0.375rem 0.875rem; font-size: 0.875rem;"
-                            aria-label="Пропустить слово {{ sw.lemma }}">
-                        Пропустить
-                    </button>
-                </div>
-            </div>
-        {% endif %}
-    </div>
-    {% endfor %}
+<h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+<i data-lucide="lightbulb" style="width: 18px; height: 18px; color: var(--text-warning-strong);" aria-hidden="true"></i>
+Новые слова из вашего перевода
+</h4>
+<p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0;">
+Хотите добавить их в свой словарь?
+</p>
+{% for sw in suggested_words %}
+<div class="suggestion-card {% if sw.state == 'added' %}suggestion-card--added{% elif sw.state == 'ignored' %}suggestion-card--ignored{% endif %}"
+role="status" aria-live="polite">
+{% if sw.state == 'added' %}
+<div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-success-strong);">
+<i data-lucide="check-circle" style="width: 18px; height: 18px;" aria-hidden="true"></i>
+<strong>{{ sw.lemma }}</strong> — {{ sw.translation }}
+</div>
+{% elif sw.state == 'ignored' %}
+<div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-muted);">
+<i data-lucide="x-circle" style="width: 18px; height: 18px;" aria-hidden="true"></i>
+<s>{{ sw.lemma }}</s> — <s>{{ sw.translation }}</s>
+</div>
+{% else %}
+<div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
+<div style="flex: 1; min-width: 200px;">
+<strong style="font-size: 1.0625rem;">{{ sw.lemma }}</strong>
+<div style="color: var(--text-secondary);">{{ sw.translation }}</div>
+{% if sw.reason %}
+<div style="color: var(--text-muted); font-size: 0.8125rem; margin-top: 0.25rem;">💬 {{ sw.reason }}</div>
+{% endif %}
+</div>
+<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+<button hx-post="/lesson/suggestions/{{ exercise.id }}/{{ loop.index0 }}"
+hx-target="closest .suggestion-card"
+hx-swap="outerHTML"
+hx-vals='{"action": "add", "csrf_token": "{{ request.state.csrf_token }}"}'
+style="padding: 0.375rem 0.875rem; font-size: 0.875rem;"
+aria-label="Добавить слово {{ sw.lemma }} в словарь">
+<i data-lucide="plus" style="width: 14px; height: 14px;" aria-hidden="true"></i>
+Добавить
+</button>
+<button hx-post="/lesson/suggestions/{{ exercise.id }}/{{ loop.index0 }}"
+hx-target="closest .suggestion-card"
+hx-swap="outerHTML"
+hx-vals='{"action": "ignore", "csrf_token": "{{ request.state.csrf_token }}"}'
+class="secondary"
+style="padding: 0.375rem 0.875rem; font-size: 0.875rem;"
+aria-label="Пропустить слово {{ sw.lemma }}">
+Пропустить
+</button>
+</div>
 </div>
 {% endif %}
-
+</div>
+{% endfor %}
+</div>
+{% endif %}
 <!-- Next Button -->
 {% if lesson_completed %}
 <a href="/lesson/{{ lesson_id }}/summary" role="button" class="btn-lg" style="width: 100%; text-align: center; background: var(--gradient-success);">
-    📊 Посмотреть итоги урока
+📊 Посмотреть итоги урока
 </a>
 {% else %}
 <a href="/lesson/{{ lesson_id }}" role="button" class="btn-lg" style="width: 100%; text-align: center;">
-    Далее →
+Далее →
 </a>
 {% endif %}
-
 {% endif %}
 ### end of app/templates/lesson/exercise_result.html ########################################################################
 
@@ -9902,142 +9992,140 @@ button[type="submit"] {
 
 ### app/templates/partials/nav.html ########################################################################
 <nav class="navbar" x-data="{ mobileMenuOpen: false }" aria-label="Основная навигация">
-    <div class="navbar-inner">
-        <a href="/" class="navbar-brand" aria-label="101slovo — на главную">
-            <i data-lucide="book-open" style="width: 20px; height: 20px;" aria-hidden="true"></i>
-            101slovo
+  <div class="navbar-inner">
+    <a href="/" class="navbar-brand" aria-label="101slovo — на главную">
+      <i data-lucide="book-open" style="width: 20px; height: 20px;" aria-hidden="true"></i>
+      101slovo
+    </a>
+
+    <!-- Бургер — ВСЕГДА рендерится, виден только на мобильных через CSS -->
+    <button class="navbar-burger"
+            type="button"
+            @click="mobileMenuOpen = !mobileMenuOpen"
+            :aria-expanded="mobileMenuOpen.toString()"
+            aria-controls="mobile-menu"
+            aria-label="Открыть меню навигации">
+      <i data-lucide="menu" x-show="!mobileMenuOpen" style="width: 22px; height: 22px;" aria-hidden="true"></i>
+      <i data-lucide="x" x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
+    </button>
+
+    <!-- ===== ДЕСКТОПНОЕ МЕНЮ (скрыто на мобильных через CSS) ===== -->
+    <div class="navbar-menu--desktop">
+      {% if request.state.user %}
+        <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
+          <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
         </a>
-
-        <!-- Бургер (виден только на мобильных) -->
-        {% if request.state.user %}
-        <button class="navbar-burger"
-                @click="mobileMenuOpen = !mobileMenuOpen"
-                :aria-expanded="mobileMenuOpen"
-                aria-controls="mobile-menu"
-                aria-label="Открыть меню навигации">
-            <i data-lucide="menu" x-show="!mobileMenuOpen" style="width: 22px; height: 22px;" aria-hidden="true"></i>
-            <i data-lucide="x" x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
-        </button>
-        {% endif %}
-
-        <!-- Десктопное меню -->
-        <div class="navbar-menu--desktop">
-            {% if request.state.user %}
-                <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" {% if request.url.path == '/dashboard' %}aria-current="page"{% endif %}>
-                    <i data-lucide="layout-dashboard" style="width: 16px; height: 16px;" aria-hidden="true"></i> Дашборд
-                </a>
-                <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" {% if '/vocabulary' in request.url.path %}aria-current="page"{% endif %}>
-                    <i data-lucide="book" style="width: 16px; height: 16px;" aria-hidden="true"></i> Словарь
-                </a>
-                <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" {% if '/billing' in request.url.path %}aria-current="page"{% endif %}>
-                    <i data-lucide="crown" style="width: 16px; height: 16px;" aria-hidden="true"></i> Подписка
-                </a>
-                <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" {% if request.url.path == '/settings' %}aria-current="page"{% endif %}>
-                    <i data-lucide="settings" style="width: 16px; height: 16px;" aria-hidden="true"></i> Настройки
-                </a>
-                {% if request.state.user.is_admin %}
-                    <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}" {% if request.url.path == '/admin/prompts' %}aria-current="page"{% endif %}>
-                        <i data-lucide="shield" style="width: 16px; height: 16px;" aria-hidden="true"></i> Промпты
-                    </a>
-                    <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}" {% if request.url.path == '/admin/stats' %}aria-current="page"{% endif %}>
-                        <i data-lucide="bar-chart-3" style="width: 16px; height: 16px;" aria-hidden="true"></i> Статистика
-                    </a>
-                {% endif %}
-
-                <button onclick="toggleTheme()" class="nav-link" style="border: none; background: transparent; cursor: pointer;" title="Сменить тему" aria-label="Сменить цветовую тему">
-                    <i data-lucide="sun" class="theme-icon-sun" style="width: 18px; height: 18px; display: none;" aria-hidden="true"></i>
-                    <i data-lucide="moon" class="theme-icon-moon" style="width: 18px; height: 18px;" aria-hidden="true"></i>
-                </button>
-
-                <form action="/logout" method="POST" style="display: inline; margin-left: 0.5rem;">
-                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-                    <button type="submit" class="navbar-logout" aria-label="Выйти из аккаунта">
-                        <i data-lucide="log-out" style="width: 14px; height: 14px;" aria-hidden="true"></i> Выйти
-                    </button>
-                </form>
-            {% else %}
-                <button onclick="toggleTheme()" class="nav-link" style="border: none; background: transparent; cursor: pointer;" title="Сменить тему" aria-label="Сменить цветовую тему">
-                    <i data-lucide="sun" class="theme-icon-sun" style="width: 18px; height: 18px; display: none;" aria-hidden="true"></i>
-                    <i data-lucide="moon" class="theme-icon-moon" style="width: 18px; height: 18px;" aria-hidden="true"></i>
-                </button>
-                <a href="/login" class="nav-link">Войти</a>
-                <a href="/register" class="nav-link" style="background: var(--brand-primary); color: white;">Регистрация</a>
-            {% endif %}
-        </div>
-    </div>
-
-    <!-- Мобильное меню -->
-    {% if request.state.user %}
-    <div class="navbar-mobile-menu"
-         id="mobile-menu"
-         x-show="mobileMenuOpen"
-         x-transition:enter="fadeInUp"
-         x-transition:enter-start="opacity-0"
-         x-transition:enter-end="opacity-100"
-         x-cloak
-         @click.outside="mobileMenuOpen = false">
-
-        <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" @click="mobileMenuOpen = false" {% if request.url.path == '/dashboard' %}aria-current="page"{% endif %}>
-            <i data-lucide="layout-dashboard" style="width: 16px; height: 16px;" aria-hidden="true"></i> Дашборд
+        <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
+          <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
         </a>
-        <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false" {% if '/vocabulary' in request.url.path %}aria-current="page"{% endif %}>
-            <i data-lucide="book" style="width: 16px; height: 16px;" aria-hidden="true"></i> Словарь
+        <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
+          <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
         </a>
-        <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false" {% if '/billing' in request.url.path %}aria-current="page"{% endif %}>
-            <i data-lucide="crown" style="width: 16px; height: 16px;" aria-hidden="true"></i> Подписка
-        </a>
-        <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" @click="mobileMenuOpen = false" {% if request.url.path == '/settings' %}aria-current="page"{% endif %}>
-            <i data-lucide="settings" style="width: 16px; height: 16px;" aria-hidden="true"></i> Настройки
+        <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
+          <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
         </a>
         {% if request.state.user.is_admin %}
-            <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}" @click="mobileMenuOpen = false" {% if request.url.path == '/admin/prompts' %}aria-current="page"{% endif %}>
-                <i data-lucide="shield" style="width: 16px; height: 16px;" aria-hidden="true"></i> Промпты
-            </a>
-            <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}" @click="mobileMenuOpen = false" {% if request.url.path == '/admin/stats' %}aria-current="page"{% endif %}>
-                <i data-lucide="bar-chart-3" style="width: 16px; height: 16px;" aria-hidden="true"></i> Статистика
-            </a>
+          <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
+            <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
+          </a>
+          <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
+            <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
+          </a>
         {% endif %}
-
-        <button onclick="toggleTheme()" class="nav-link" style="border: none; background: transparent; cursor: pointer;" aria-label="Сменить цветовую тему">
-            <i data-lucide="sun" class="theme-icon-sun" style="width: 18px; height: 18px; display: none;" aria-hidden="true"></i>
-            <i data-lucide="moon" class="theme-icon-moon" style="width: 18px; height: 18px;" aria-hidden="true"></i>
-            Сменить тему
+        <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+          <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+          <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
         </button>
-
-        <form action="/logout" method="POST">
-            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-            <button type="submit" class="navbar-logout" aria-label="Выйти из аккаунта">
-                <i data-lucide="log-out" style="width: 14px; height: 14px;" aria-hidden="true"></i> Выйти
-            </button>
+        <form action="/logout" method="POST" style="display:inline;margin-left:0.5rem;">
+          <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+          <button type="submit" class="navbar-logout" aria-label="Выйти из аккаунта">
+            <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
+          </button>
         </form>
+      {% else %}
+        <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+          <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+          <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+        </button>
+        <a href="/login" class="nav-link">Войти</a>
+        <a href="/register" class="nav-link nav-link--primary">Регистрация</a>
+      {% endif %}
     </div>
+
+  </div><!-- /.navbar-inner -->
+
+  <!-- ===== МОБИЛЬНОЕ МЕНЮ ===== -->
+  <!-- ВСЕГДА рендерится. По умолчанию СКРЫТО через CSS (display: none).
+       Показывается через добавление класса .is-open (управляется Alpine). -->
+  <div class="navbar-mobile-menu"
+       id="mobile-menu"
+       :class="{ 'is-open': mobileMenuOpen }"
+       @click.outside="mobileMenuOpen = false">
+
+    {% if request.state.user %}
+      <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" @click="mobileMenuOpen = false">
+        <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
+      </a>
+      <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+        <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+      </a>
+      <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+        <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
+      </a>
+      <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" @click="mobileMenuOpen = false">
+        <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
+      </a>
+      {% if request.state.user.is_admin %}
+        <a href="/admin/prompts" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+          <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
+        </a>
+        <a href="/admin/stats" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+          <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
+        </a>
+      {% endif %}
+      <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
+        <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+        <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+        Сменить тему
+      </button>
+      <form action="/logout" method="POST" style="margin-top:0.5rem;">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <button type="submit" class="navbar-logout" style="width:100%;" aria-label="Выйти">
+          <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
+        </button>
+      </form>
+    {% else %}
+      <a href="/login" class="nav-link" @click="mobileMenuOpen = false">Войти</a>
+      <a href="/register" class="nav-link nav-link--primary" @click="mobileMenuOpen = false">Регистрация</a>
+      <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
+        <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+        <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+        Сменить тему
+      </button>
     {% endif %}
+
+  </div><!-- /.navbar-mobile-menu -->
+
 </nav>
 
 <script>
 function toggleTheme() {
-    const html = document.documentElement;
-    const current = html.getAttribute('data-theme');
-    const next = current === 'dark' ? 'light' : 'dark';
-    html.setAttribute('data-theme', next);
-    localStorage.setItem('theme', next);
-    updateThemeIcons(next);
+  var html = document.documentElement;
+  var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+  updateThemeIcons(next);
 }
-
 function updateThemeIcons(theme) {
-    const suns = document.querySelectorAll('.theme-icon-sun');
-    const moons = document.querySelectorAll('.theme-icon-moon');
-    if (theme === 'dark') {
-        suns.forEach(el => el.style.display = 'block');
-        moons.forEach(el => el.style.display = 'none');
-    } else {
-        suns.forEach(el => el.style.display = 'none');
-        moons.forEach(el => el.style.display = 'block');
-    }
+  document.querySelectorAll('.theme-icon-sun').forEach(function(el) {
+    el.style.display = theme === 'dark' ? 'block' : 'none';
+  });
+  document.querySelectorAll('.theme-icon-moon').forEach(function(el) {
+    el.style.display = theme === 'dark' ? 'none' : 'block';
+  });
 }
-
-document.addEventListener('DOMContentLoaded', () => {
-    updateThemeIcons(document.documentElement.getAttribute('data-theme'));
+document.addEventListener('DOMContentLoaded', function() {
+  updateThemeIcons(document.documentElement.getAttribute('data-theme'));
 });
 </script>
 ### end of app/templates/partials/nav.html ########################################################################
