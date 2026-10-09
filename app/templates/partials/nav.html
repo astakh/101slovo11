@@ -4,47 +4,48 @@
             <i data-lucide="book-open" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 4px;"></i>
             101slovo
         </a>
-
         <div class="navbar-menu">
             {% if request.state.user %}
-                <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
-                    <i data-lucide="layout-dashboard" style="width: 16px; height: 16px;"></i> Дашборд
-                </a>
-                <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
-                    <i data-lucide="book" style="width: 16px; height: 16px;"></i> Словарь
-                </a>
-                <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
-                    <i data-lucide="settings" style="width: 16px; height: 16px;"></i> Настройки
-                </a>
+            <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
+                <i data-lucide="layout-dashboard" style="width: 16px; height: 16px;"></i> Дашборд
+            </a>
+            <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
+                <i data-lucide="book" style="width: 16px; height: 16px;"></i> Словарь
+            </a>
+            <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
+                <i data-lucide="crown" style="width: 16px; height: 16px;"></i> Подписка
+            </a>
+            <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
+                <i data-lucide="settings" style="width: 16px; height: 16px;"></i> Настройки
+            </a>
+            {% if request.state.user.is_admin %}
+            <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
+                <i data-lucide="shield" style="width: 16px; height: 16px;"></i> Промпты
+            </a>
+            <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
+                <i data-lucide="bar-chart-3" style="width: 16px; height: 16px;"></i> Статистика
+            </a>
+            {% endif %}
 
-                {% if request.state.user.is_admin %}
-                    <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
-                        <i data-lucide="shield" style="width: 16px; height: 16px;"></i> Промпты
-                    </a>
-                    <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
-                        <i data-lucide="bar-chart-3" style="width: 16px; height: 16px;"></i> Статистика
-                    </a>
-                {% endif %}
+            <!-- Переключатель темы -->
+            <button onclick="toggleTheme()" class="nav-link" style="border: none; background: transparent; cursor: pointer;" title="Сменить тему">
+                <i data-lucide="sun" class="theme-icon-sun" style="width: 18px; height: 18px; display: none;"></i>
+                <i data-lucide="moon" class="theme-icon-moon" style="width: 18px; height: 18px;"></i>
+            </button>
 
-                <!-- Переключатель темы -->
-                <button onclick="toggleTheme()" class="nav-link" style="border: none; background: transparent; cursor: pointer;" title="Сменить тему">
-                    <i data-lucide="sun" class="theme-icon-sun" style="width: 18px; height: 18px; display: none;"></i>
-                    <i data-lucide="moon" class="theme-icon-moon" style="width: 18px; height: 18px;"></i>
+            <form action="/logout" method="POST" style="display: inline; margin-left: 0.5rem;">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit" class="navbar-logout">
+                    <i data-lucide="log-out" style="width: 14px; height: 14px;"></i> Выйти
                 </button>
-
-                <form action="/logout" method="POST" style="display: inline; margin-left: 0.5rem;">
-                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-                    <button type="submit" class="navbar-logout">
-                        <i data-lucide="log-out" style="width: 14px; height: 14px;"></i> Выйти
-                    </button>
-                </form>
+            </form>
             {% else %}
-                <button onclick="toggleTheme()" class="nav-link" style="border: none; background: transparent; cursor: pointer;" title="Сменить тему">
-                    <i data-lucide="sun" class="theme-icon-sun" style="width: 18px; height: 18px; display: none;"></i>
-                    <i data-lucide="moon" class="theme-icon-moon" style="width: 18px; height: 18px;"></i>
-                </button>
-                <a href="/login" class="nav-link">Войти</a>
-                <a href="/register" class="nav-link" style="background: var(--brand-primary); color: white;">Регистрация</a>
+            <button onclick="toggleTheme()" class="nav-link" style="border: none; background: transparent; cursor: pointer;" title="Сменить тему">
+                <i data-lucide="sun" class="theme-icon-sun" style="width: 18px; height: 18px; display: none;"></i>
+                <i data-lucide="moon" class="theme-icon-moon" style="width: 18px; height: 18px;"></i>
+            </button>
+            <a href="/login" class="nav-link">Войти</a>
+            <a href="/register" class="nav-link" style="background: var(--brand-primary); color: white;">Регистрация</a>
             {% endif %}
         </div>
     </div>
@@ -72,7 +73,6 @@ function updateThemeIcons(theme) {
     }
 }
 
-// Инициализация иконок при загрузке
 document.addEventListener('DOMContentLoaded', () => {
     updateThemeIcons(document.documentElement.getAttribute('data-theme'));
 });

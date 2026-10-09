@@ -1,11 +1,9 @@
 """Роуты для уроков."""
-
 import logging
 from fastapi import APIRouter, Request, Depends, Form, status, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.core.templates import templates
@@ -20,6 +18,9 @@ from app.services.lesson_start import start_lesson, LessonStartError
 from app.services.lesson_evaluate import evaluate_exercise, LessonEvaluateError
 from app.services.lesson_summary import get_lesson_summary
 from app.services.lesson_resume import get_resume_info
+from app.services.paywall import check_lesson_access, get_effective_daily_limit
+from app.services.subscription import is_premium
+from app.config import settings
 from app.llm.gigachat import GigaChatError
 from app.utils.text_validation import compute_lemma_key
 from app.utils.datetime_utils import get_user_today
@@ -46,13 +47,34 @@ async def lesson_preview_page(
     )
     result_ip = await db.execute(stmt_ip)
     in_progress = result_ip.scalar_one_or_none()
+
     if in_progress:
         return RedirectResponse(
             url=f"/lesson/{in_progress.id}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    # Проверка дневного лимита
+    # === ПРОВЕРКА ПЕЙВОЛЛА (общий лимит для freemium) ===
+    access = await check_lesson_access(db, user)
+
+    if not access["allowed"]:
+        return templates.TemplateResponse(
+            "lesson/preview.html",
+            {
+                "request": request,
+                "user": user,
+                "limit_reached": True,
+                "paywall_reason": access["reason"],
+                "lessons_today": 0,
+                "daily_lesson_limit": 0,
+                "free_lessons_remaining": access.get("free_lessons_remaining"),
+            },
+        )
+
+    # === ПРОВЕРКА ДНЕВНОГО ЛИМИТА ===
+    premium = access["is_premium"]
+    effective_daily_limit = get_effective_daily_limit(user, premium)
+
     today = get_user_today(user.timezone)
     stmt_today = select(func.count(Lesson.id)).where(
         Lesson.user_id == user.id,
@@ -61,15 +83,17 @@ async def lesson_preview_page(
     result_today = await db.execute(stmt_today)
     lessons_today = result_today.scalar_one_or_none() or 0
 
-    if lessons_today >= user.daily_lesson_limit:
+    if lessons_today >= effective_daily_limit:
         return templates.TemplateResponse(
             "lesson/preview.html",
             {
                 "request": request,
                 "user": user,
                 "limit_reached": True,
+                "paywall_reason": "daily_limit",
                 "lessons_today": lessons_today,
-                "daily_lesson_limit": user.daily_lesson_limit,
+                "daily_lesson_limit": effective_daily_limit,
+                "free_lessons_remaining": access.get("free_lessons_remaining"),
             },
         )
 
@@ -82,6 +106,8 @@ async def lesson_preview_page(
             "request": request,
             "user": user,
             "limit_reached": False,
+            "paywall_reason": None,
+            "free_lessons_remaining": access.get("free_lessons_remaining"),
             **preview,
         },
     )
@@ -99,7 +125,25 @@ async def lesson_start_post(
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
 
-    logger.info(f"🚀 Начало старта урока | user_id={user.id} | idempotency_key={idempotency_key[:16]}... | word_ids={word_ids}")
+    # === ПРОВЕРКА ПЕЙВОЛЛА (общий лимит для freemium) ===
+    access = await check_lesson_access(db, user)
+    if not access["allowed"]:
+        if request.headers.get("HX-Request"):
+            return templates.TemplateResponse(
+                "lesson/preview.html",
+                {
+                    "request": request,
+                    "user": user,
+                    "error": "Бесплатные уроки исчерпаны. Подключите Premium для продолжения.",
+                },
+                status_code=422,
+            )
+        raise HTTPException(status_code=422, detail="Бесплатные уроки исчерпаны")
+
+    logger.info(
+        f"🚀 Начало старта урока | user_id={user.id} | "
+        f"idempotency_key={idempotency_key[:16]}... | word_ids={word_ids}"
+    )
 
     try:
         lesson = await start_lesson(
@@ -117,11 +161,11 @@ async def lesson_start_post(
                 status_code=422,
             )
         raise HTTPException(status_code=422, detail=str(e))
-        
     except GigaChatError as e:
-        # 🔥 ВАЖНО: Логируем точную причину сбоя LLM
-        logger.error(f"🚨 GigaChatError during lesson start | Code: {e.code} | Message: {e} | HTTP Status: {e.http_status}")
-        
+        logger.error(
+            f"🚨 GigaChatError during lesson start | Code: {e.code} | "
+            f"Message: {e} | HTTP Status: {e.http_status}"
+        )
         if request.headers.get("HX-Request"):
             return templates.TemplateResponse(
                 "errors/503.html",
@@ -130,7 +174,10 @@ async def lesson_start_post(
             )
         raise HTTPException(status_code=503, detail="LLM недоступен. Попробуйте позже.")
 
-    logger.info(f"✅ Урок успешно создан | lesson_id={lesson.id} | lesson_number={lesson.lesson_number}")
+    logger.info(
+        f"✅ Урок успешно создан | lesson_id={lesson.id} | "
+        f"lesson_number={lesson.lesson_number}"
+    )
 
     return RedirectResponse(
         url=f"/lesson/{lesson.id}",
@@ -157,7 +204,6 @@ async def lesson_exercise_page(
 
     exercise = info["exercise"]
     if not exercise:
-        # Все упражнения выполнены, но урок не завершён (edge case)
         return RedirectResponse(
             url=f"/lesson/{lesson_id}/summary",
             status_code=status.HTTP_303_SEE_OTHER,
@@ -200,7 +246,10 @@ async def lesson_evaluate_post(
             status_code=422,
         )
     except GigaChatError as e:
-        logger.error(f"🚨 GigaChatError during evaluation | Code: {e.code} | Message: {e} | HTTP Status: {e.http_status}")
+        logger.error(
+            f"🚨 GigaChatError during evaluation | Code: {e.code} | "
+            f"Message: {e} | HTTP Status: {e.http_status}"
+        )
         return templates.TemplateResponse(
             "lesson/exercise_result.html",
             {
@@ -211,7 +260,10 @@ async def lesson_evaluate_post(
             status_code=503,
         )
 
-    logger.info(f"✅ Оценка завершена | exercise_id={exercise_id} | status={result['evaluation']['status']}")
+    logger.info(
+        f"✅ Оценка завершена | exercise_id={exercise_id} | "
+        f"status={result['evaluation']['status']}"
+    )
 
     return templates.TemplateResponse(
         "lesson/exercise_result.html",
@@ -233,9 +285,11 @@ async def lesson_suggestion_action(
     db: AsyncSession = Depends(get_db),
 ):
     """Обработка подсказки (добавить/игнорировать)."""
-    logger.info(f"💡 Обработка подсказки | exercise_id={exercise_id} | word_index={word_index} | action={action}")
+    logger.info(
+        f"💡 Обработка подсказки | exercise_id={exercise_id} | "
+        f"word_index={word_index} | action={action}"
+    )
 
-    # Загружаем упражнение
     stmt = select(LessonExercise).where(LessonExercise.id == exercise_id)
     result = await db.execute(stmt)
     exercise = result.scalar_one_or_none()
@@ -243,7 +297,6 @@ async def lesson_suggestion_action(
     if not exercise:
         raise HTTPException(status_code=404, detail="Упражнение не найдено")
 
-    # Проверка владения
     stmt_lesson = select(Lesson).where(Lesson.id == exercise.lesson_id)
     result_lesson = await db.execute(stmt_lesson)
     lesson = result_lesson.scalar_one_or_none()
@@ -251,7 +304,6 @@ async def lesson_suggestion_action(
     if not lesson or lesson.user_id != user.id:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
 
-    # Загружаем suggested_words
     suggested = list(exercise.suggested_words or [])
     if word_index >= len(suggested):
         raise HTTPException(status_code=404, detail="Подсказка не найдена")
@@ -261,14 +313,12 @@ async def lesson_suggestion_action(
     translation = word_data.get("translation", "")
 
     if action == "add":
-        # Ищем слово в глобальном словаре
         lemma_key = compute_lemma_key(lemma)
         stmt_word = select(Word).where(Word.lemma_key == lemma_key).limit(1)
         result_word = await db.execute(stmt_word)
         word = result_word.scalar_one_or_none()
 
         if word:
-            # Проверяем, нет ли уже в user_words
             stmt_uw = select(UserWord).where(
                 UserWord.user_id == user.id,
                 UserWord.word_id == word.id,
@@ -291,10 +341,9 @@ async def lesson_suggestion_action(
                 existing_uw.stage = 0
                 existing_uw.due_lesson_number = user.last_lesson_number + 1
 
-        word_data["state"] = "added"
+            word_data["state"] = "added"
 
     elif action == "ignore":
-        # Ищем слово и помечаем как ignored
         lemma_key = compute_lemma_key(lemma)
         stmt_word = select(Word).where(Word.lemma_key == lemma_key).limit(1)
         result_word = await db.execute(stmt_word)
@@ -320,17 +369,14 @@ async def lesson_suggestion_action(
             else:
                 existing_uw.status = "ignored"
 
-        word_data["state"] = "ignored"
+            word_data["state"] = "ignored"
     else:
         raise HTTPException(status_code=400, detail="Неизвестное действие")
 
-    # Обновляем JSON в упражнении
     suggested[word_index] = word_data
     exercise.suggested_words = suggested
-
     await db.flush()
 
-    # Возвращаем обновлённый HTML для карточки подсказки
     return templates.TemplateResponse(
         "lesson/_suggestion_card.html",
         {

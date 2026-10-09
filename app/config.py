@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 from typing import List
 
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
@@ -37,7 +38,31 @@ class Settings(BaseSettings):
     # Level
     MAX_LEVEL: str = "C2"
 
-    ENV: str = "development" # "production" или "development"
+    ENV: str = "development"  # "production" или "development"
+
+    # ============================================
+    # Monetization
+    # ============================================
+
+    # Freemium limits
+    FREE_LESSON_PER_DAY_LIMIT: int = 1
+    FREE_LESSONS_TOTAL_LIMIT: int = 5
+
+    # Subscription pricing (в копейках)
+    SUBSCRIPTION_MONTHLY_PRICE_KOP: int = 30000
+    SUBSCRIPTION_6M_PRICE_KOP: int = 135000
+    SUBSCRIPTION_6M_DISCOUNT_PERCENT: int = 25
+
+    # Grace period
+    GRACE_PERIOD_DAYS: int = 1
+
+    # Referral
+    REFERRAL_BONUS_DAYS: int = 30
+    REFERRAL_PROMO_MAX_ATTEMPTS: int = 3
+
+    # YooKassa
+    YOOKASSA_SHOP_ID: str = ""
+    YOOKASSA_SECRET_KEY: str = ""
 
     # Валидатор для парсинга строки через запятую в список
     @field_validator("AVAILABLE_DICTIONARIES", mode="before")
@@ -46,5 +71,6 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [d.strip() for d in v.split(",")]
         return v
+
 
 settings = Settings()

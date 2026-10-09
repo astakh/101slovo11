@@ -1,9 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Подготовка к уроку — 101slovo{% endblock %}
 {% block content %}
-
 <div class="container--medium" style="margin: 0 auto;">
-    
+
     <!-- Заголовок страницы -->
     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2.5rem; flex-wrap: wrap; gap: 1rem;">
         <div>
@@ -18,138 +17,137 @@
             </p>
         </div>
         <a href="/dashboard" class="secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.625rem 1rem;">
-            <i data-lucide="x" style="width: 16px; height: 16px;"></i> 
+            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
             Отмена
         </a>
     </div>
 
     {% if error %}
-        <div class="flash-error" style="margin-bottom: 1.5rem;">
-            <i data-lucide="alert-circle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
-            <span>{{ error }}</span>
-        </div>
+    <div class="flash-error" style="margin-bottom: 1.5rem;">
+        <i data-lucide="alert-circle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
+        <span>{{ error }}</span>
+    </div>
     {% endif %}
 
-    {% if limit_reached %}
-        <div class="card text-center" style="padding: 3rem 2rem; border-color: rgba(16, 185, 129, 0.3);">
-            <div style="font-size: 3rem; margin-bottom: 1rem;">🎉</div>
-            <h3 style="margin-bottom: 0.5rem;">Лимит на сегодня исчерпан!</h3>
-            <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
-                Вы прошли {{ lessons_today }} из {{ daily_lesson_limit }} уроков. Отдохните, мозг тоже нуждается в перезагрузке.
-            </p>
-            <a href="/dashboard" role="button">На дашборд</a>
-        </div>
-        
+    {% if limit_reached and paywall_reason == 'free_limit_reached' %}
+    <!-- Полный пейволл: бесплатные уроки исчерпаны -->
+    {% include "partials/paywall.html" %}
+
+    {% elif limit_reached and paywall_reason == 'daily_limit' %}
+    <div class="card text-center" style="padding: 3rem 2rem; border-color: rgba(16, 185, 129, 0.3);">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">🎉</div>
+        <h3 style="margin-bottom: 0.5rem;">Лимит на сегодня исчерпан!</h3>
+        <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+            Вы прошли {{ lessons_today }} из {{ daily_lesson_limit }} уроков. Отдохните, мозг тоже нуждается в перезагрузке.
+        </p>
+        <a href="/dashboard" role="button">На дашборд</a>
+    </div>
+
     {% elif state == 'dictionary_exhausted' %}
-        <div class="card text-center" style="padding: 3rem 2rem; border-color: rgba(245, 158, 11, 0.3);">
-            <div style="font-size: 3rem; margin-bottom: 1rem;">🏆</div>
-            <h3 style="margin-bottom: 0.5rem;">Словарь исчерпан!</h3>
-            <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
-                Вы изучили все доступные слова для текущего уровня и словаря.
-            </p>
-            <a href="/settings" role="button" class="secondary">Сменить уровень или словарь</a>
-        </div>
-        
+    <div class="card text-center" style="padding: 3rem 2rem; border-color: rgba(245, 158, 11, 0.3);">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">🏆</div>
+        <h3 style="margin-bottom: 0.5rem;">Словарь исчерпан!</h3>
+        <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+            Вы изучили все доступные слова для текущего уровня и словаря.
+        </p>
+        <a href="/settings" role="button" class="secondary">Сменить уровень или словарь</a>
+    </div>
+
     {% else %}
-        
-        {% if level_up %}
-            <div class="flash-success" style="justify-content: center; font-size: 1.0625rem; margin-bottom: 2rem;">
-                <i data-lucide="trending-up" style="width: 22px; height: 22px;"></i>
-                🎉 Уровень повышен до <strong>{{ new_level }}</strong>! Добавлены слова нового уровня.
+
+    {% if level_up %}
+    <div class="flash-success" style="justify-content: center; font-size: 1.0625rem; margin-bottom: 2rem;">
+        <i data-lucide="trending-up" style="width: 22px; height: 22px;"></i>
+        🎉 Уровень повышен до <strong>{{ new_level }}</strong>! Добавлены слова нового уровня.
+    </div>
+    {% endif %}
+
+    <form hx-post="/lesson/start"
+          hx-target="body"
+          hx-swap="innerHTML"
+          hx-indicator="#start-spinner"
+          x-data="{ idempotencyKey: crypto.randomUUID() }">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <input type="hidden" name="idempotency_key" :value="idempotencyKey">
+
+        {% for w in all_words %}
+        <input type="hidden" name="word_ids" value="{{ w.word_id }}">
+        {% endfor %}
+
+        <!-- Блок: На повторение -->
+        {% if due_words %}
+        <div class="mb-4">
+            <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: var(--text-primary);">
+                <i data-lucide="rotate-ccw" style="width: 20px; height: 20px; color: var(--brand-accent);"></i>
+                На повторение
+                <span class="badge badge-review" style="margin-left: 0.25rem;">{{ due_words | length }}</span>
+            </h3>
+            <div class="grid grid-3" style="gap: 1rem;">
+                {% for w in due_words %}
+                <div class="card fade-in-up" style="padding: 1.25rem; border-left: 4px solid var(--brand-accent); transition: all 0.2s ease; cursor: default;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
+                        <div>
+                            <div style="font-weight: 700; font-size: 1.25rem; color: var(--text-primary);">{{ w.lemma }}</div>
+                            <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
+                        </div>
+                        <span class="badge badge-active" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">Stage {{ w.stage }}</span>
+                    </div>
+                    <div style="padding-top: 0.75rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.5;">
+                        {{ w.translations | join(', ') }}
+                    </div>
+                </div>
+                {% endfor %}
             </div>
+        </div>
         {% endif %}
 
-        <form hx-post="/lesson/start" 
-              hx-target="body" 
-              hx-swap="innerHTML" 
-              hx-indicator="#start-spinner" 
-              x-data="{ idempotencyKey: crypto.randomUUID() }">
-            
-            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-            <input type="hidden" name="idempotency_key" :value="idempotencyKey">
-            {% for w in all_words %}
-                <input type="hidden" name="word_ids" value="{{ w.word_id }}">
-            {% endfor %}
-
-            <!-- Блок: На повторение -->
-            {% if due_words %}
-                <div class="mb-4">
-                    <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: var(--text-primary);">
-                        <i data-lucide="rotate-ccw" style="width: 20px; height: 20px; color: var(--brand-accent);"></i>
-                        На повторение 
-                        <span class="badge badge-review" style="margin-left: 0.25rem;">{{ due_words | length }}</span>
-                    </h3>
-                    <div class="grid grid-3" style="gap: 1rem;">
-                        {% for w in due_words %}
-                            <div class="card fade-in-up" style="padding: 1.25rem; border-left: 4px solid var(--brand-accent); transition: all 0.2s ease; cursor: default;">
-                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
-                                    <div>
-                                        <div style="font-weight: 700; font-size: 1.25rem; color: var(--text-primary);">{{ w.lemma }}</div>
-                                        <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
-                                    </div>
-                                    <span class="badge badge-active" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">Stage {{ w.stage }}</span>
-                                </div>
-                                <div style="padding-top: 0.75rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.5;">
-                                    {{ w.translations | join(', ') }}
-                                </div>
-                            </div>
-                        {% endfor %}
+        <!-- Блок: Новые слова -->
+        {% if new_words %}
+        <div class="mb-4">
+            <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: var(--text-primary);">
+                <i data-lucide="plus-circle" style="width: 20px; height: 20px; color: var(--brand-secondary);"></i>
+                Новые слова
+                <span class="badge badge-new" style="margin-left: 0.25rem;">{{ new_words | length }}</span>
+            </h3>
+            <div class="grid grid-3" style="gap: 1rem;">
+                {% for w in new_words %}
+                <div class="card fade-in-up" style="padding: 1.25rem; border-left: 4px solid var(--brand-secondary); transition: all 0.2s ease; cursor: default;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
+                        <div>
+                            <div style="font-weight: 700; font-size: 1.25rem; color: var(--text-primary);">{{ w.lemma }}</div>
+                            <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
+                        </div>
+                        <span class="badge badge-new">Новое</span>
+                    </div>
+                    <div style="padding-top: 0.75rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.5;">
+                        {{ w.translations | join(', ') }}
                     </div>
                 </div>
-            {% endif %}
-
-            <!-- Блок: Новые слова -->
-            {% if new_words %}
-                <div class="mb-4">
-                    <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: var(--text-primary);">
-                        <i data-lucide="plus-circle" style="width: 20px; height: 20px; color: var(--brand-secondary);"></i>
-                        Новые слова 
-                        <span class="badge badge-new" style="margin-left: 0.25rem;">{{ new_words | length }}</span>
-                    </h3>
-                    <div class="grid grid-3" style="gap: 1rem;">
-                        {% for w in new_words %}
-                            <div class="card fade-in-up" style="padding: 1.25rem; border-left: 4px solid var(--brand-secondary); transition: all 0.2s ease; cursor: default;">
-                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
-                                    <div>
-                                        <div style="font-weight: 700; font-size: 1.25rem; color: var(--text-primary);">{{ w.lemma }}</div>
-                                        <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
-                                    </div>
-                                    <span class="badge badge-new">Новое</span>
-                                </div>
-                                <div style="padding-top: 0.75rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.5;">
-                                    {{ w.translations | join(', ') }}
-                                </div>
-                            </div>
-                        {% endfor %}
-                    </div>
-                </div>
-            {% endif %}
-
-            <!-- CTA Section -->
-            <div class="cta-section" style="margin-top: 3rem; position: relative; overflow: hidden;">
-                <!-- Декоративный элемент на фоне -->
-                <div style="position: absolute; top: -50%; right: -10%; width: 300px; height: 300px; background: rgba(255,255,255,0.1); border-radius: 50%; filter: blur(40px); pointer-events: none;"></div>
-                
-                <h3 style="position: relative; z-index: 1;">Готовы начать?</h3>
-                <p style="position: relative; z-index: 1; opacity: 0.9; max-width: 500px; margin: 0.5rem auto 1.5rem auto;">
-                    В этом уроке <strong>{{ all_words | length }}</strong> слов. ИИ сгенерирует для них уникальный контекст.
-                </p>
-                
-                <div style="position: relative; z-index: 1; display: inline-block;">
-                    <button type="submit" class="btn-lg" style="background: white; color: var(--brand-primary); border: none; box-shadow: 0 4px 14px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 0.75rem;">
-                        <i data-lucide="play" style="width: 20px; height: 20px; fill: currentColor;"></i>
-                        Начать урок
-                    </button>
-                    
-                    <span class="htmx-indicator" id="start-spinner" style="margin-left: 1rem; color: white; font-weight: 500; display: inline-flex; align-items: center; gap: 0.5rem;">
-                        <span class="spinner" style="border-color: rgba(255,255,255,0.3); border-top-color: white;"></span>
-                        Генерация контекста...
-                    </span>
-                </div>
+                {% endfor %}
             </div>
-            
-        </form>
+        </div>
+        {% endif %}
+
+        <!-- CTA Section -->
+        <div class="cta-section" style="margin-top: 3rem; position: relative; overflow: hidden;">
+            <div style="position: absolute; top: -50%; right: -10%; width: 300px; height: 300px; background: rgba(255,255,255,0.1); border-radius: 50%; filter: blur(40px); pointer-events: none;"></div>
+            <h3 style="position: relative; z-index: 1;">Готовы начать?</h3>
+            <p style="position: relative; z-index: 1; opacity: 0.9; max-width: 500px; margin: 0.5rem auto 1.5rem auto;">
+                В этом уроке <strong>{{ all_words | length }}</strong> слов. ИИ сгенерирует для них уникальный контекст.
+            </p>
+            <div style="position: relative; z-index: 1; display: inline-block;">
+                <button type="submit" class="btn-lg" style="background: white; color: var(--brand-primary); border: none; box-shadow: 0 4px 14px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 0.75rem;">
+                    <i data-lucide="play" style="width: 20px; height: 20px; fill: currentColor;"></i>
+                    Начать урок
+                </button>
+                <span class="htmx-indicator" id="start-spinner" style="margin-left: 1rem; color: white; font-weight: 500; display: inline-flex; align-items: center; gap: 0.5rem;">
+                    <span class="spinner" style="border-color: rgba(255,255,255,0.3); border-top-color: white;"></span>
+                    Генерация контекста...
+                </span>
+            </div>
+        </div>
+    </form>
     {% endif %}
-    
+
 </div>
 {% endblock %}
