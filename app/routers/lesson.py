@@ -1,9 +1,11 @@
 """Роуты для уроков."""
 import logging
+
 from fastapi import APIRouter, Request, Depends, Form, status, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.core.templates import templates
@@ -24,10 +26,64 @@ from app.config import settings
 from app.llm.gigachat import GigaChatError
 from app.utils.text_validation import compute_lemma_key
 from app.utils.datetime_utils import get_user_today
+from app.utils.flash import add_flash
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/lesson", tags=["lesson"])
+
+
+def _non_htmx_evaluate_success_redirect(result: dict) -> RedirectResponse:
+    """
+    Фолбэк-редирект для нативного POST-запроса, если по какой-то причине
+    не сработал HTMX.
+
+    Вместо того чтобы отдавать голый фрагмент `exercise_result.html`,
+    переводим пользователя на следующий шаг урока и показываем flash-сообщение.
+    """
+    lesson_id = result["lesson_id"]
+
+    if result.get("lesson_completed"):
+        url = f"/lesson/{lesson_id}/summary"
+    else:
+        url = f"/lesson/{lesson_id}"
+
+    response = RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+
+    evaluation = result.get("evaluation") or {}
+    eval_status = evaluation.get("status", "")
+    feedback = evaluation.get("feedback", "")
+
+    if eval_status == "correct":
+        add_flash(response, "success", feedback or "Перевод проверен")
+    elif eval_status == "typo":
+        add_flash(response, "info", feedback or "Почти верно, есть небольшие недочёты")
+    else:
+        add_flash(response, "warning", feedback or "Перевод неверный")
+
+    return response
+
+
+def _non_htmx_evaluate_error_redirect(
+    lesson_id: int | None,
+    message: str,
+    *,
+    to_summary: bool = False,
+    category: str = "error",
+) -> RedirectResponse:
+    """
+    Фолбэк-редирект для ошибок при нативном POST-запросе.
+    """
+    if lesson_id is None:
+        url = "/dashboard"
+    elif to_summary:
+        url = f"/lesson/{lesson_id}/summary"
+    else:
+        url = f"/lesson/{lesson_id}"
+
+    response = RedirectResponse(url=url, status_code=status.HTTP_303_SEE_OTHER)
+    add_flash(response, category, message)
+    return response
 
 
 @router.get("/preview")
@@ -75,8 +131,8 @@ async def lesson_preview_page(
     # === ПРОВЕРКА ДНЕВНОГО ЛИМИТА ===
     premium = access["is_premium"]
     effective_daily_limit = get_effective_daily_limit(user, premium)
-
     today = get_user_today(user.timezone)
+
     stmt_today = select(func.count(Lesson.id)).where(
         Lesson.user_id == user.id,
         Lesson.started_local_date == today,
@@ -130,6 +186,7 @@ async def lesson_start_post(
 
     # === ПРОВЕРКА ПЕЙВОЛЛА (общий лимит для freemium) ===
     access = await check_lesson_access(db, user)
+
     if not access["allowed"]:
         if request.headers.get("HX-Request"):
             return templates.TemplateResponse(
@@ -141,6 +198,7 @@ async def lesson_start_post(
                 },
                 status_code=422,
             )
+
         raise HTTPException(status_code=422, detail="Бесплатные уроки исчерпаны")
 
     logger.info(
@@ -157,24 +215,28 @@ async def lesson_start_post(
         )
     except LessonStartError as e:
         logger.warning(f"⚠️ LessonStartError: {e.code} - {e}")
+
         if request.headers.get("HX-Request"):
             return templates.TemplateResponse(
                 "lesson/preview.html",
                 {"request": request, "user": user, "error": str(e)},
                 status_code=422,
             )
+
         raise HTTPException(status_code=422, detail=str(e))
     except GigaChatError as e:
         logger.error(
             f"🚨 GigaChatError during lesson start | Code: {e.code} | "
             f"Message: {e} | HTTP Status: {e.http_status}"
         )
+
         if request.headers.get("HX-Request"):
             return templates.TemplateResponse(
                 "errors/503.html",
                 {"request": request, "error": str(e)},
                 status_code=503,
             )
+
         raise HTTPException(status_code=503, detail="LLM недоступен. Попробуйте позже.")
 
     logger.info(
@@ -206,6 +268,7 @@ async def lesson_exercise_page(
         )
 
     exercise = info["exercise"]
+
     if not exercise:
         return RedirectResponse(
             url=f"/lesson/{lesson_id}/summary",
@@ -231,8 +294,26 @@ async def lesson_evaluate_post(
     user: User = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """Оценка перевода (HTMX)."""
+    """
+    Оценка перевода.
+
+    Основной сценарий — HTMX: возвращаем фрагмент `lesson/exercise_result.html`.
+
+    Дополнительная защита: если браузер по какой-то причине сделал обычный
+    нативный POST без заголовка `HX-Request`, не отдаём голый фрагмент,
+    а делаем redirect на следующее упражнение или на итоги урока.
+    """
+    is_htmx = bool(request.headers.get("HX-Request"))
+
     logger.info(f"📝 Оценка перевода | user_id={user.id} | exercise_id={exercise_id}")
+
+    # Небольшая предварительная загрузка только для нативного фолбэка.
+    # Если оценка упадёт с ошибкой, нам всё равно нужно знать,
+    # куда вернуть пользователя.
+    stmt_fallback = select(LessonExercise).where(LessonExercise.id == exercise_id)
+    result_fallback = await db.execute(stmt_fallback)
+    fallback_exercise = result_fallback.scalar_one_or_none()
+    fallback_lesson_id = fallback_exercise.lesson_id if fallback_exercise else None
 
     try:
         result = await evaluate_exercise(
@@ -243,30 +324,65 @@ async def lesson_evaluate_post(
         )
     except LessonEvaluateError as e:
         logger.warning(f"⚠️ LessonEvaluateError: {e.code} - {e}")
-        return templates.TemplateResponse(
-            "lesson/exercise_result.html",
-            {"request": request, "user": user, "error": str(e)},
-            status_code=422,
+
+        if is_htmx:
+            return templates.TemplateResponse(
+                "lesson/exercise_result.html",
+                {"request": request, "user": user, "error": str(e)},
+                status_code=422,
+            )
+
+        # Нативный фолбэк
+        if e.code == "forbidden" or fallback_lesson_id is None:
+            return _non_htmx_evaluate_error_redirect(
+                None,
+                str(e),
+            )
+
+        if e.code == "lesson_completed":
+            return _non_htmx_evaluate_error_redirect(
+                fallback_lesson_id,
+                str(e),
+                to_summary=True,
+                category="info",
+            )
+
+        return _non_htmx_evaluate_error_redirect(
+            fallback_lesson_id,
+            str(e),
         )
     except GigaChatError as e:
         logger.error(
             f"🚨 GigaChatError during evaluation | Code: {e.code} | "
             f"Message: {e} | HTTP Status: {e.http_status}"
         )
-        return templates.TemplateResponse(
-            "lesson/exercise_result.html",
-            {
-                "request": request,
-                "user": user,
-                "error": "Сервис оценки временно недоступен. Попробуйте ещё раз.",
-            },
-            status_code=503,
+
+        if is_htmx:
+            return templates.TemplateResponse(
+                "lesson/exercise_result.html",
+                {
+                    "request": request,
+                    "user": user,
+                    "error": "Сервис оценки временно недоступен. Попробуйте ещё раз.",
+                },
+                status_code=503,
+            )
+
+        # Нативный фолбэк
+        return _non_htmx_evaluate_error_redirect(
+            fallback_lesson_id,
+            "Сервис оценки временно недоступен. Попробуйте ещё раз.",
         )
 
     logger.info(
         f"✅ Оценка завершена | exercise_id={exercise_id} | "
         f"status={result['evaluation']['status']}"
     )
+
+    # Если это был нативный запрос без HTMX — не отдаём фрагмент,
+    # а переводим пользователя на следующий шаг урока.
+    if not is_htmx:
+        return _non_htmx_evaluate_success_redirect(result)
 
     return templates.TemplateResponse(
         "lesson/exercise_result.html",
@@ -308,6 +424,7 @@ async def lesson_suggestion_action(
         raise HTTPException(status_code=403, detail="Доступ запрещён")
 
     suggested = list(exercise.suggested_words or [])
+
     if word_index >= len(suggested):
         raise HTTPException(status_code=404, detail="Подсказка не найдена")
 
@@ -317,6 +434,7 @@ async def lesson_suggestion_action(
 
     if action == "add":
         lemma_key = compute_lemma_key(lemma)
+
         stmt_word = select(Word).where(Word.lemma_key == lemma_key).limit(1)
         result_word = await db.execute(stmt_word)
         word = result_word.scalar_one_or_none()
@@ -348,6 +466,7 @@ async def lesson_suggestion_action(
 
     elif action == "ignore":
         lemma_key = compute_lemma_key(lemma)
+
         stmt_word = select(Word).where(Word.lemma_key == lemma_key).limit(1)
         result_word = await db.execute(stmt_word)
         word = result_word.scalar_one_or_none()
@@ -373,6 +492,7 @@ async def lesson_suggestion_action(
                 existing_uw.status = "ignored"
 
             word_data["state"] = "ignored"
+
     else:
         raise HTTPException(status_code=400, detail="Неизвестное действие")
 

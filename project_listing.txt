@@ -30,6 +30,31 @@ DEFAULT_DICTIONARY_CODE=general
 
 # Level Up
 MAX_LEVEL=C2
+
+# ============================================
+# Monetization
+# ============================================
+
+# Freemium limits
+FREE_LESSON_PER_DAY_LIMIT=1
+FREE_LESSONS_TOTAL_LIMIT=5
+
+# Subscription pricing (в копейках)
+SUBSCRIPTION_MONTHLY_PRICE_KOP=30000
+SUBSCRIPTION_6M_PRICE_KOP=135000
+SUBSCRIPTION_6M_DISCOUNT_PERCENT=25
+
+# Grace period (для будущих рекуррентов)
+GRACE_PERIOD_DAYS=1
+
+# Referral
+REFERRAL_BONUS_DAYS=30
+REFERRAL_PROMO_MAX_ATTEMPTS=3
+
+# YooKassa
+# Получите в личном кабинете: https://yookassa.ru/
+YOOKASSA_SHOP_ID=
+YOOKASSA_SECRET_KEY=
 ### end of .env.example ########################################################################
 
 ### alembic.ini ########################################################################
@@ -85,6 +110,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 from typing import List
 
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
@@ -120,7 +146,31 @@ class Settings(BaseSettings):
     # Level
     MAX_LEVEL: str = "C2"
 
-    ENV: str = "development" # "production" или "development"
+    ENV: str = "development"  # "production" или "development"
+
+    # ============================================
+    # Monetization (обязательные параметры)
+    # ============================================
+
+    # Freemium limits
+    FREE_LESSON_PER_DAY_LIMIT: int
+    FREE_LESSONS_TOTAL_LIMIT: int
+
+    # Subscription pricing (в копейках)
+    SUBSCRIPTION_MONTHLY_PRICE_KOP: int
+    SUBSCRIPTION_6M_PRICE_KOP: int
+    SUBSCRIPTION_6M_DISCOUNT_PERCENT: int
+
+    # Grace period (для будущих рекуррентов)
+    GRACE_PERIOD_DAYS: int
+
+    # Referral
+    REFERRAL_BONUS_DAYS: int
+    REFERRAL_PROMO_MAX_ATTEMPTS: int
+
+    # YooKassa
+    YOOKASSA_SHOP_ID: str = ""
+    YOOKASSA_SECRET_KEY: str = ""
 
     # Валидатор для парсинга строки через запятую в список
     @field_validator("AVAILABLE_DICTIONARIES", mode="before")
@@ -129,6 +179,7 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [d.strip() for d in v.split(",")]
         return v
+
 
 settings = Settings()
 ### end of app/config.py ########################################################################
@@ -164,30 +215,34 @@ from fastapi import Request, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import hmac
-
 from app.db import get_db
 from app.models.user import User
 from app.models.auth_session import AuthSession
 from app.security import hash_token, verify_csrf_token
+from app.services.subscription import get_subscription_status
+from app.services.paywall import get_paywall_context
+
 
 async def get_current_user(request: Request) -> User | None:
     return getattr(request.state, "user", None)
 
+
 async def require_auth(
-    request: Request, 
+    request: Request,
     user: User | None = Depends(get_current_user)
 ) -> User:
     if not user:
         if request.headers.get("HX-Request"):
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, 
+                status_code=status.HTTP_401_UNAUTHORIZED,
                 headers={"HX-Redirect": "/login"}
             )
         raise HTTPException(
-            status_code=status.HTTP_303_SEE_OTHER, 
+            status_code=status.HTTP_303_SEE_OTHER,
             headers={"Location": "/login"}
         )
     return user
+
 
 async def require_admin(
     request: Request,
@@ -197,6 +252,29 @@ async def require_admin(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user
 
+
+async def get_user_subscription(
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Dependency: возвращает информацию о подписке пользователя.
+    Используется в шаблонах для отображения статуса.
+    """
+    return await get_subscription_status(db, user.id)
+
+
+async def get_user_paywall(
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Dependency: возвращает контекст пейволла.
+    Используется в дашборде и превью урока.
+    """
+    return await get_paywall_context(db, user)
+
+
 async def require_csrf(
     request: Request,
     db: AsyncSession = Depends(get_db)
@@ -204,25 +282,25 @@ async def require_csrf(
     form = await request.form()
     form_csrf = form.get("csrf_token")
     cookie_csrf = request.cookies.get("csrf")
-    
+
     if not form_csrf or not cookie_csrf:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Missing CSRF token")
-        
+
     if not hmac.compare_digest(form_csrf, cookie_csrf):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="CSRF token mismatch")
-        
+
     session_token = request.cookies.get("session")
     if not session_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-        
+
     token_hash = hash_token(session_token)
     stmt = select(AuthSession).where(AuthSession.token_hash == token_hash)
     result = await db.execute(stmt)
     auth_session = result.scalar_one_or_none()
-    
+
     if not auth_session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-        
+
     if not verify_csrf_token(form_csrf, auth_session.csrf_token_hash):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid CSRF token")
 ### end of app/deps.py ########################################################################
@@ -1071,32 +1149,55 @@ class EnrichWordResponse(BaseModel):
 
 ### app/main.py ########################################################################
 # app/main.py
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin
+from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal
 from app.middleware import AppMiddleware
 from app.core.templates import templates
+from app.db import AsyncSessionLocal
+from app.services.background_tasks import run_periodic_tasks
+from app.config import settings as app_settings
+
+logger = logging.getLogger(__name__)
+
+BG_TASK_INTERVAL = 3600
+
+
+async def _background_scheduler():
+    """Фоновый планировщик периодических задач."""
+    while True:
+        await asyncio.sleep(BG_TASK_INTERVAL)
+        try:
+            async with AsyncSessionLocal() as db:
+                await run_periodic_tasks(db)
+                await db.commit()
+        except Exception as e:
+            logger.error(f"[BG SCHEDULER] Error: {e}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    bg_task = asyncio.create_task(_background_scheduler())
+    logger.info(f"[LIFESPAN] Background scheduler started (interval={BG_TASK_INTERVAL}s)")
     yield
+    bg_task.cancel()
+    try:
+        await bg_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("[LIFESPAN] Background scheduler stopped")
 
 
 app = FastAPI(title="101slovo", lifespan=lifespan)
 
 
-# Middleware для защиты от ботов (HEAD/OPTIONS)
-# ВАЖНО: добавляем ПОСЛЕ AppMiddleware, чтобы он выполнялся ПЕРВЫМ
 @app.middleware("http")
 async def bot_protection_middleware(request: Request, call_next):
-    """
-    Быстро отвечает на HEAD и OPTIONS запросы, не нагружая бэкенд.
-    Боты (Ahrefs, Semrush, сканеры) постоянно долбят эти методы.
-    """
     if request.method == "OPTIONS":
         return Response(
             status_code=204,
@@ -1105,22 +1206,19 @@ async def bot_protection_middleware(request: Request, call_next):
                 "Cache-Control": "no-store",
             },
         )
+
     if request.method == "HEAD":
-        # Для HEAD возвращаем 200 с пустым телом, не выполняя роуты.
-        # Исключение: /health — пусть FastAPI обработает сам (нужно для мониторинга).
         if request.url.path == "/health":
             return await call_next(request)
         return Response(
             status_code=200,
             headers={"Cache-Control": "no-store"},
         )
+
     return await call_next(request)
 
 
-# Статика
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
-
-# Middleware (выполняется ВТОРЫМ, после bot_protection)
 app.add_middleware(AppMiddleware)
 
 # Роутеры
@@ -1131,32 +1229,36 @@ app.include_router(lesson.router)
 app.include_router(settings.router)
 app.include_router(vocabulary.router)
 app.include_router(admin.router)
+app.include_router(billing.router)
+app.include_router(legal.router)
 
 
-# Обработчик ошибок (включая HTMX редиректы)
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if request.headers.get("HX-Request") and exc.headers and "HX-Redirect" in exc.headers:
         return Response(status_code=200, headers=exc.headers)
+
     if exc.status_code == 404:
         return templates.TemplateResponse("errors/404.html", {"request": request}, status_code=404)
     if exc.status_code in [401, 403]:
         return templates.TemplateResponse("errors/403.html", {"request": request}, status_code=exc.status_code)
     if exc.status_code == 503:
         return templates.TemplateResponse("errors/503.html", {"request": request}, status_code=503)
+
     return templates.TemplateResponse("errors/500.html", {"request": request}, status_code=500)
 
 
 @app.get("/")
 async def root(request: Request):
-    """
-    Главная страница:
-    - Для авторизованных пользователей — редирект на /dashboard
-    - Для неавторизованных — красивая landing-страница
-    """
     if request.state.user:
         return Response(status_code=303, headers={"Location": "/dashboard"})
-    return templates.TemplateResponse("landing.html", {"request": request})
+    return templates.TemplateResponse(
+        "landing.html",
+        {
+            "request": request,
+            "referral_bonus_days": app_settings.REFERRAL_BONUS_DAYS,
+        },
+    )
 
 
 @app.get("/health")
@@ -1225,10 +1327,15 @@ from .lesson_exercise import LessonExercise
 from .prompt import Prompt
 from .llm_call import LlmCall
 from .event import Event
+from .subscription import Subscription
+from .payment import Payment
+from .promo_code import PromoCode
+from .referral import Referral
 
 __all__ = [
-    "Base", "User", "AuthSession", "Word", "UserWord", 
-    "Lesson", "LessonExercise", "Prompt", "LlmCall", "Event"
+    "Base", "User", "AuthSession", "Word", "UserWord",
+    "Lesson", "LessonExercise", "Prompt", "LlmCall", "Event",
+    "Subscription", "Payment", "PromoCode", "Referral",
 ]
 ### end of app/models/__init__.py ########################################################################
 
@@ -1375,6 +1482,76 @@ class LlmCall(Base):
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
 ### end of app/models/llm_call.py ########################################################################
 
+### app/models/payment.py ########################################################################
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql import func
+from datetime import datetime
+from .base import Base
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # "monthly" | "six_months"
+    plan: Mapped[str] = mapped_column(String(20), nullable=False)
+    amount_kop: Mapped[int] = mapped_column(Integer, nullable=False)
+    # "pending" | "succeeded" | "failed" | "refunded"
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    # ID платежа в ЮKassa
+    yookassa_payment_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Описание для чека
+    description: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        Index("ix_payments_user_id", "user_id"),
+        Index("ix_payments_status", "status"),
+        Index("ix_payments_yookassa_id", "yookassa_payment_id"),
+    )
+### end of app/models/payment.py ########################################################################
+
+### app/models/promo_code.py ########################################################################
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Identity, Index, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql import func
+from datetime import datetime
+from .base import Base
+
+
+class PromoCode(Base):
+    __tablename__ = "promo_codes"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    # Уникальный код, 6 символов (автогенерация)
+    code: Mapped[str] = mapped_column(String(6), unique=True, nullable=False, index=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # "user_referral" | "blogger" | "marketing"
+    type: Mapped[str] = mapped_column(String(20), nullable=False, default="user_referral")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    used_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_promo_codes_owner", "owner_user_id"),
+    )
+### end of app/models/promo_code.py ########################################################################
+
 ### app/models/prompt.py ########################################################################
 from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -1391,12 +1568,92 @@ class Prompt(Base):
     updated_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=True)
 ### end of app/models/prompt.py ########################################################################
 
-### app/models/user.py ########################################################################
-from sqlalchemy import BigInteger, Boolean, DateTime, Identity, Integer, SmallInteger, String
+### app/models/referral.py ########################################################################
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 from datetime import datetime
 from .base import Base
+
+
+class Referral(Base):
+    __tablename__ = "referrals"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    referrer_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    referred_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    promo_code_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("promo_codes.id", ondelete="CASCADE"), nullable=False
+    )
+    # "pending" | "rewarded"
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    rewarded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        # Один пользователь может быть приглашён только одним реферером
+        UniqueConstraint("referred_user_id", name="uq_referrals_referred_user"),
+        Index("ix_referrals_referrer", "referrer_user_id"),
+        Index("ix_referrals_status", "status"),
+    )
+### end of app/models/referral.py ########################################################################
+
+### app/models/subscription.py ########################################################################
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, String
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql import func
+from datetime import datetime
+from .base import Base
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # "monthly" | "six_months" | "referral_bonus"
+    plan: Mapped[str] = mapped_column(String(20), nullable=False)
+    # "active" | "expired" | "canceled"
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    # "payment" | "referral"
+    source: Mapped[str] = mapped_column(String(16), nullable=False, default="payment")
+    # Связь с платежом (может быть None для referral_bonus)
+    payment_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("payments.id", ondelete="SET NULL"), nullable=True
+    )
+
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    canceled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        Index("ix_subscriptions_user_status", "user_id", "status"),
+        Index("ix_subscriptions_expires_at", "expires_at"),
+    )
+### end of app/models/subscription.py ########################################################################
+
+### app/models/user.py ########################################################################
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Identity, Integer, SmallInteger, String
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql import func
+from datetime import datetime
+from .base import Base
+
 
 class User(Base):
     __tablename__ = "users"
@@ -1413,7 +1670,15 @@ class User(Base):
     words_per_lesson: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=5)
     daily_lesson_limit: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     last_lesson_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    
+
+    # === Monetization fields ===
+    # Кто пригласил этого пользователя (для реферальной программы)
+    referred_by_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    # Счётчик попыток ввода промокода (антифрод, макс 3)
+    promo_code_attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 ### end of app/models/user.py ########################################################################
@@ -1577,19 +1842,29 @@ async def admin_stats_page(
 from fastapi import APIRouter, Request, Depends, Form, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.db import get_db
 from app.services.auth import register_user, authenticate_user, create_session, delete_session
+from app.services.referral import apply_referral_code
 from app.deps import require_csrf
 from app.core.templates import templates
+from app.utils.flash import add_flash
 
 router = APIRouter(tags=["auth"])
+
 
 @router.get("/register")
 async def register_page(request: Request):
     if request.state.user:
         return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
-    return templates.TemplateResponse("auth/register.html", {"request": request})
+
+    # Подхватываем промокод из query-параметра (?ref=CODE)
+    ref_code = request.query_params.get("ref", "")
+
+    return templates.TemplateResponse(
+        "auth/register.html",
+        {"request": request, "ref_code": ref_code}
+    )
+
 
 @router.post("/register")
 async def register_post(
@@ -1597,31 +1872,47 @@ async def register_post(
     email: str = Form(...),
     password: str = Form(...),
     password_confirm: str = Form(...),
+    promo_code: str = Form(default=""),
     db: AsyncSession = Depends(get_db)
 ):
     if password != password_confirm:
         return templates.TemplateResponse(
-            "auth/register.html", 
-            {"request": request, "error": "Пароли не совпадают", "email": email}
+            "auth/register.html",
+            {"request": request, "error": "Пароли не совпадают", "email": email, "ref_code": promo_code}
         )
-    
+
     try:
         user = await register_user(db, email, password)
     except ValueError as e:
         return templates.TemplateResponse(
-            "auth/register.html", 
-            {"request": request, "error": str(e), "email": email}
+            "auth/register.html",
+            {"request": request, "error": str(e), "email": email, "ref_code": promo_code}
         )
-        
+
+    # Применяем реферальный код (если указан)
+    referral_message = None
+    if promo_code.strip():
+        success, message = await apply_referral_code(db, user, promo_code)
+        if success:
+            referral_message = message
+        # Если не удалось — не блокируем регистрацию, просто логируем
+        # (пользователь сможет ввести код позже до первой оплаты)
+
     response = RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
     await create_session(db, user.id, response)
+
+    if referral_message:
+        add_flash(response, "success", referral_message)
+
     return response
+
 
 @router.get("/login")
 async def login_page(request: Request):
     if request.state.user:
         return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     return templates.TemplateResponse("auth/login.html", {"request": request})
+
 
 @router.post("/login")
 async def login_post(
@@ -1633,13 +1924,14 @@ async def login_post(
     user = await authenticate_user(db, email, password)
     if not user:
         return templates.TemplateResponse(
-            "auth/login.html", 
+            "auth/login.html",
             {"request": request, "error": "Неверный логин или пароль", "email": email}
         )
-    
+
     response = RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     await create_session(db, user.id, response)
     return response
+
 
 @router.post("/logout", dependencies=[Depends(require_csrf)])
 async def logout_post(request: Request, db: AsyncSession = Depends(get_db)):
@@ -1649,15 +1941,487 @@ async def logout_post(request: Request, db: AsyncSession = Depends(get_db)):
     return response
 ### end of app/routers/auth.py ########################################################################
 
+### app/routers/billing.py ########################################################################
+"""Роуты биллинга и управления подпиской."""
+import logging
+from datetime import datetime, timezone
+from fastapi import APIRouter, Request, Depends, Form, HTTPException, status
+from fastapi.responses import RedirectResponse, JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.db import get_db
+from app.deps import require_auth, require_csrf
+from app.core.templates import templates
+from app.models.user import User
+from app.models.payment import Payment
+from app.config import settings
+from app.services.subscription import (
+    get_subscription_status,
+    activate_subscription,
+    cancel_subscription,
+    get_plan_price_kop,
+    get_plan_label,
+)
+from app.services.referral import get_referral_stats, reward_referrer_on_purchase
+from app.services.yookassa_client import (
+    create_payment,
+    get_payment_info,
+    is_webhook_ip_allowed,
+    YooKassaError,
+)
+from app.models.event import Event
+from app.utils.flash import add_flash
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/billing", tags=["billing"])
+
+
+def _parse_yookassa_datetime(value) -> datetime | None:
+    """
+    Парсит дату/время из ответа ЮKassa.
+    ЮKassa возвращает ISO-строки вида '2026-10-09T08:21:23.123Z'.
+    Возвращает datetime с timezone или None.
+    """
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            iso_str = value.replace("Z", "+00:00")
+            return datetime.fromisoformat(iso_str)
+        except (ValueError, TypeError) as e:
+            logger.warning(f"[BILLING] Failed to parse datetime '{value}': {e}")
+            return None
+    return None
+
+
+@router.get("")
+async def billing_page(
+    request: Request,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Страница управления подпиской."""
+    if not user.is_onboarded:
+        return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
+    sub_status = await get_subscription_status(db, user.id)
+    referral_stats = await get_referral_stats(db, user.id)
+
+    return templates.TemplateResponse(
+        "billing/manage.html",
+        {
+            "request": request,
+            "user": user,
+            "subscription": sub_status,
+            "referral": referral_stats,
+            "referral_bonus_days": settings.REFERRAL_BONUS_DAYS,
+        },
+    )
+
+
+@router.get("/plans")
+async def plans_page(
+    request: Request,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Страница выбора тарифа."""
+    if not user.is_onboarded:
+        return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
+    sub_status = await get_subscription_status(db, user.id)
+
+    monthly_price = settings.SUBSCRIPTION_MONTHLY_PRICE_KOP / 100
+    six_month_price = settings.SUBSCRIPTION_6M_PRICE_KOP / 100
+    six_month_per_month = six_month_price / 6
+    six_month_full = monthly_price * 6
+    six_month_saving = six_month_full - six_month_price
+
+    return templates.TemplateResponse(
+        "billing/plans.html",
+        {
+            "request": request,
+            "user": user,
+            "subscription": sub_status,
+            "monthly_price": monthly_price,
+            "six_month_price": six_month_price,
+            "six_month_per_month": six_month_per_month,
+            "six_month_full": six_month_full,
+            "six_month_saving": six_month_saving,
+            "discount_percent": settings.SUBSCRIPTION_6M_DISCOUNT_PERCENT,
+        },
+    )
+
+
+@router.post("/subscribe", dependencies=[Depends(require_csrf)])
+async def subscribe_post(
+    request: Request,
+    plan: str = Form(...),
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Инициация подписки.
+    Создаёт платёж в ЮKassa и редиректит на оплату.
+    """
+    if plan not in ("monthly", "six_months"):
+        raise HTTPException(status_code=400, detail="Неизвестный тариф")
+
+    if not user.is_onboarded:
+        return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
+    # Создаём запись платежа в БД (статус pending)
+    price_kop = get_plan_price_kop(plan)
+    payment = Payment(
+        user_id=user.id,
+        plan=plan,
+        amount_kop=price_kop,
+        status="pending",
+        description=f"Подписка: {get_plan_label(plan)}",
+    )
+    db.add(payment)
+    await db.flush()  # получаем payment.id
+
+    # Проверяем, настроена ли ЮKassa
+    if not settings.YOOKASSA_SHOP_ID or not settings.YOOKASSA_SECRET_KEY:
+        # DEV-режим: сразу активируем подписку
+        logger.warning("[BILLING] ЮKassa не настроена — DEV-режим: активируем подписку")
+        payment.status = "succeeded"
+        payment.paid_at = datetime.now(timezone.utc)
+        await activate_subscription(
+            db,
+            user_id=user.id,
+            plan=plan,
+            source="payment",
+            payment_id=payment.id,
+        )
+        # В DEV-режиме начисляем бонус здесь (нет webhook)
+        await reward_referrer_on_purchase(db, user.id)
+
+        response = RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
+        add_flash(response, "success", "Подписка активирована (DEV-режим) 🎉")
+        return response
+
+    # PROD-режим: создаём платёж в ЮKassa
+    try:
+        # return_url — куда вернётся пользователь после оплаты
+        base_url = str(request.base_url).rstrip("/")
+        return_url = f"{base_url}/billing/success?payment_id={payment.id}"
+
+        result = await create_payment(payment, return_url)
+
+        # Сохраняем yookassa_payment_id
+        payment.yookassa_payment_id = result["yookassa_payment_id"]
+        await db.flush()
+
+        # Редиректим на страницу оплаты
+        logger.info(
+            f"[BILLING] Redirecting to ЮKassa | user_id={user.id} | "
+            f"payment_id={payment.id} | yookassa_id={result['yookassa_payment_id']}"
+        )
+        return RedirectResponse(
+            url=result["confirmation_url"],
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+
+    except YooKassaError as e:
+        logger.error(f"[BILLING] YooKassa error: {e}")
+        # Помечаем платёж как failed
+        payment.status = "failed"
+        await db.flush()
+
+        response = RedirectResponse(url="/billing/plans", status_code=status.HTTP_303_SEE_OTHER)
+        add_flash(response, "error", f"Ошибка создания платежа: {e}")
+        return response
+
+
+@router.get("/success")
+async def billing_success(
+    request: Request,
+    payment_id: int | None = None,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Страница успеха после оплаты (return_url от ЮKassa).
+    Проверяет статус платежа и активирует подписку если нужно.
+
+    ВАЖНО: Бонус рефереру НЕ начисляется здесь.
+    Бонус начисляется ТОЛЬКО через webhook, чтобы избежать
+    двойного начисления и проблемы с пропуском.
+    """
+    if not user.is_onboarded:
+        return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
+    if not payment_id:
+        return RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
+
+    # Загружаем платёж
+    stmt = select(Payment).where(
+        Payment.id == payment_id,
+        Payment.user_id == user.id,
+    )
+    result = await db.execute(stmt)
+    payment = result.scalar_one_or_none()
+
+    if not payment:
+        return RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
+
+    # Если уже оплачен — просто идём на /billing
+    if payment.status == "succeeded":
+        return RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
+
+    # Если ЮKassa настроена — проверяем статус через API
+    if settings.YOOKASSA_SHOP_ID and settings.YOOKASSA_SECRET_KEY and payment.yookassa_payment_id:
+        try:
+            info = await get_payment_info(payment.yookassa_payment_id)
+            yookassa_status = info.get("status", "")
+
+            if yookassa_status == "succeeded":
+                payment.status = "succeeded"
+                paid_at_raw = info.get("captured_at") or info.get("created_at")
+                payment.paid_at = _parse_yookassa_datetime(paid_at_raw)
+
+                await activate_subscription(
+                    db,
+                    user_id=user.id,
+                    plan=payment.plan,
+                    source="payment",
+                    payment_id=payment.id,
+                )
+                # ❌ НЕ начисляем бонус здесь.
+                # Это сделает webhook.
+                logger.info(
+                    f"[BILLING] Payment succeeded (via API check) | "
+                    f"payment_id={payment.id} | user_id={user.id} | "
+                    f"referral bonus will be granted by webhook"
+                )
+            elif yookassa_status == "canceled":
+                payment.status = "failed"
+                logger.info(f"[BILLING] Payment canceled | payment_id={payment.id}")
+            # pending — ждём webhook
+
+        except YooKassaError as e:
+            logger.warning(f"[BILLING] Could not check payment status: {e}")
+
+    response = RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
+    if payment.status == "succeeded":
+        add_flash(response, "success", "Оплата прошла успешно! Подписка активирована 🎉")
+    elif payment.status == "failed":
+        add_flash(response, "error", "Оплата не прошла. Попробуйте ещё раз.")
+    else:
+        add_flash(response, "info", "Оплата обрабатывается. Подписка активируется автоматически.")
+
+    return response
+
+
+@router.post("/cancel", dependencies=[Depends(require_csrf)])
+async def cancel_post(
+    request: Request,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Отмена подписки."""
+    success = await cancel_subscription(db, user.id)
+
+    response = RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
+    if success:
+        add_flash(response, "info", "Подписка отменена. Доступ сохранится до конца оплаченного периода.")
+    else:
+        add_flash(response, "error", "Активная подписка не найдена.")
+
+    return response
+
+
+# ============================================================
+# WEBHOOK от ЮKassa
+# ============================================================
+
+@router.post("/webhook")
+async def billing_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Webhook-эндпоинт для уведомлений от ЮKassa.
+
+    Обрабатывает события:
+    - payment.succeeded — платёж успешен
+    - payment.canceled — платёж отменён
+
+    Защита: проверка IP-адреса отправителя.
+
+    ВАЖНО: Бонус рефереру и реферированному начисляется
+    ТОЛЬКО здесь. Функция reward_referrer_on_purchase сама
+    защищена от повторного начисления (ищет только рефералы
+    со статусом "pending").
+    """
+    # 1. Проверка IP
+    client_ip = request.client.host if request.client else ""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        client_ip = forwarded.split(",")[0].strip()
+
+    if not is_webhook_ip_allowed(client_ip):
+        logger.warning(f"[WEBHOOK] Rejected: IP {client_ip} not in ЮKassa whitelist")
+        return JSONResponse(
+            {"error": "Forbidden"},
+            status_code=403,
+        )
+
+    # 2. Парсим тело
+    try:
+        body = await request.json()
+    except Exception:
+        logger.error("[WEBHOOK] Invalid JSON body")
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    event = body.get("event", "")
+    obj = body.get("object", {})
+    yookassa_payment_id = obj.get("id", "")
+
+    logger.info(f"[WEBHOOK] Received event: {event} | yookassa_id={yookassa_payment_id}")
+
+    # 3. Находим платёж в БД
+    if not yookassa_payment_id:
+        logger.warning("[WEBHOOK] No payment id in notification")
+        return JSONResponse({"status": "ok"})
+
+    stmt = select(Payment).where(Payment.yookassa_payment_id == yookassa_payment_id)
+    result = await db.execute(stmt)
+    payment = result.scalar_one_or_none()
+
+    if not payment:
+        logger.warning(
+            f"[WEBHOOK] Payment not found in DB | yookassa_id={yookassa_payment_id}"
+        )
+        return JSONResponse({"status": "ok"})
+
+    # 4. Обрабатываем событие
+    if event == "payment.succeeded":
+        # Активация подписки — только если платёж ещё не помечен
+        if payment.status != "succeeded":
+            payment.status = "succeeded"
+            paid_at_raw = obj.get("captured_at") or obj.get("created_at")
+            payment.paid_at = _parse_yookassa_datetime(paid_at_raw)
+
+            await activate_subscription(
+                db,
+                user_id=payment.user_id,
+                plan=payment.plan,
+                source="payment",
+                payment_id=payment.id,
+            )
+
+            logger.info(
+                f"[WEBHOOK] Payment succeeded | payment_id={payment.id} | "
+                f"user_id={payment.user_id} | plan={payment.plan}"
+            )
+
+            event_record = Event(
+                user_id=payment.user_id,
+                type="payment_succeeded",
+                payload={
+                    "payment_id": payment.id,
+                    "yookassa_payment_id": yookassa_payment_id,
+                    "plan": payment.plan,
+                    "amount_kop": payment.amount_kop,
+                },
+            )
+            db.add(event_record)
+
+        # ✅ Начисление бонуса — ВНЕ блока проверки статуса платежа.
+        # Это решает проблему, когда /billing/success уже пометил
+        # платёж как "succeeded", но бонус ещё не начислен.
+        # Функция сама защищена от повторного начисления
+        # (ищет только рефералы со статусом "pending").
+        await reward_referrer_on_purchase(db, payment.user_id)
+
+    elif event == "payment.canceled":
+        if payment.status not in ("succeeded", "failed"):
+            payment.status = "failed"
+
+            logger.info(
+                f"[WEBHOOK] Payment canceled | payment_id={payment.id} | "
+                f"user_id={payment.user_id}"
+            )
+
+            event_record = Event(
+                user_id=payment.user_id,
+                type="payment_canceled",
+                payload={
+                    "payment_id": payment.id,
+                    "yookassa_payment_id": yookassa_payment_id,
+                    "reason": obj.get("cancellation_details", {}).get("reason", "unknown"),
+                },
+            )
+            db.add(event_record)
+
+    else:
+        logger.info(f"[WEBHOOK] Unhandled event: {event}")
+
+    # 5. Всегда возвращаем 200
+    return JSONResponse({"status": "ok"})
+### end of app/routers/billing.py ########################################################################
+
+### app/routers/legal.py ########################################################################
+"""Роуты для юридических страниц."""
+from fastapi import APIRouter, Request
+from app.core.templates import templates
+from app.config import settings
+
+router = APIRouter(prefix="/legal", tags=["legal"])
+
+
+@router.get("/offer")
+async def legal_offer(request: Request):
+    """Публичная оферта на подписку."""
+    return templates.TemplateResponse(
+        "legal/offer.html",
+        {
+            "request": request,
+            "referral_bonus_days": settings.REFERRAL_BONUS_DAYS,
+        },
+    )
+
+
+@router.get("/privacy")
+async def legal_privacy(request: Request):
+    """Политика конфиденциальности."""
+    return templates.TemplateResponse(
+        "legal/privacy.html",
+        {"request": request},
+    )
+
+
+@router.get("/consent")
+async def legal_consent(request: Request):
+    """Согласие на обработку персональных данных."""
+    return templates.TemplateResponse(
+        "legal/consent.html",
+        {"request": request},
+    )
+
+
+@router.get("/terms")
+async def legal_terms(request: Request):
+    """Условия использования сервиса."""
+    return templates.TemplateResponse(
+        "legal/terms.html",
+        {"request": request},
+    )
+### end of app/routers/legal.py ########################################################################
+
 ### app/routers/lesson.py ########################################################################
 """Роуты для уроков."""
-
 import logging
 from fastapi import APIRouter, Request, Depends, Form, status, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.core.templates import templates
@@ -1672,6 +2436,9 @@ from app.services.lesson_start import start_lesson, LessonStartError
 from app.services.lesson_evaluate import evaluate_exercise, LessonEvaluateError
 from app.services.lesson_summary import get_lesson_summary
 from app.services.lesson_resume import get_resume_info
+from app.services.paywall import check_lesson_access, get_effective_daily_limit
+from app.services.subscription import is_premium
+from app.config import settings
 from app.llm.gigachat import GigaChatError
 from app.utils.text_validation import compute_lemma_key
 from app.utils.datetime_utils import get_user_today
@@ -1698,13 +2465,35 @@ async def lesson_preview_page(
     )
     result_ip = await db.execute(stmt_ip)
     in_progress = result_ip.scalar_one_or_none()
+
     if in_progress:
         return RedirectResponse(
             url=f"/lesson/{in_progress.id}",
             status_code=status.HTTP_303_SEE_OTHER,
         )
 
-    # Проверка дневного лимита
+    # === ПРОВЕРКА ПЕЙВОЛЛА (общий лимит для freemium) ===
+    access = await check_lesson_access(db, user)
+
+    if not access["allowed"]:
+        return templates.TemplateResponse(
+            "lesson/preview.html",
+            {
+                "request": request,
+                "user": user,
+                "limit_reached": True,
+                "paywall_reason": access["reason"],
+                "is_premium": False,
+                "lessons_today": 0,
+                "daily_lesson_limit": 0,
+                "free_lessons_remaining": access.get("free_lessons_remaining"),
+            },
+        )
+
+    # === ПРОВЕРКА ДНЕВНОГО ЛИМИТА ===
+    premium = access["is_premium"]
+    effective_daily_limit = get_effective_daily_limit(user, premium)
+
     today = get_user_today(user.timezone)
     stmt_today = select(func.count(Lesson.id)).where(
         Lesson.user_id == user.id,
@@ -1713,15 +2502,18 @@ async def lesson_preview_page(
     result_today = await db.execute(stmt_today)
     lessons_today = result_today.scalar_one_or_none() or 0
 
-    if lessons_today >= user.daily_lesson_limit:
+    if lessons_today >= effective_daily_limit:
         return templates.TemplateResponse(
             "lesson/preview.html",
             {
                 "request": request,
                 "user": user,
                 "limit_reached": True,
+                "paywall_reason": "daily_limit",
+                "is_premium": premium,
                 "lessons_today": lessons_today,
-                "daily_lesson_limit": user.daily_lesson_limit,
+                "daily_lesson_limit": effective_daily_limit,
+                "free_lessons_remaining": access.get("free_lessons_remaining"),
             },
         )
 
@@ -1734,6 +2526,9 @@ async def lesson_preview_page(
             "request": request,
             "user": user,
             "limit_reached": False,
+            "paywall_reason": None,
+            "is_premium": premium,
+            "free_lessons_remaining": access.get("free_lessons_remaining"),
             **preview,
         },
     )
@@ -1751,7 +2546,25 @@ async def lesson_start_post(
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
 
-    logger.info(f"🚀 Начало старта урока | user_id={user.id} | idempotency_key={idempotency_key[:16]}... | word_ids={word_ids}")
+    # === ПРОВЕРКА ПЕЙВОЛЛА (общий лимит для freemium) ===
+    access = await check_lesson_access(db, user)
+    if not access["allowed"]:
+        if request.headers.get("HX-Request"):
+            return templates.TemplateResponse(
+                "lesson/preview.html",
+                {
+                    "request": request,
+                    "user": user,
+                    "error": "Бесплатные уроки исчерпаны. Подключите Premium для продолжения.",
+                },
+                status_code=422,
+            )
+        raise HTTPException(status_code=422, detail="Бесплатные уроки исчерпаны")
+
+    logger.info(
+        f"🚀 Начало старта урока | user_id={user.id} | "
+        f"idempotency_key={idempotency_key[:16]}... | word_ids={word_ids}"
+    )
 
     try:
         lesson = await start_lesson(
@@ -1769,11 +2582,11 @@ async def lesson_start_post(
                 status_code=422,
             )
         raise HTTPException(status_code=422, detail=str(e))
-        
     except GigaChatError as e:
-        # 🔥 ВАЖНО: Логируем точную причину сбоя LLM
-        logger.error(f"🚨 GigaChatError during lesson start | Code: {e.code} | Message: {e} | HTTP Status: {e.http_status}")
-        
+        logger.error(
+            f"🚨 GigaChatError during lesson start | Code: {e.code} | "
+            f"Message: {e} | HTTP Status: {e.http_status}"
+        )
         if request.headers.get("HX-Request"):
             return templates.TemplateResponse(
                 "errors/503.html",
@@ -1782,7 +2595,10 @@ async def lesson_start_post(
             )
         raise HTTPException(status_code=503, detail="LLM недоступен. Попробуйте позже.")
 
-    logger.info(f"✅ Урок успешно создан | lesson_id={lesson.id} | lesson_number={lesson.lesson_number}")
+    logger.info(
+        f"✅ Урок успешно создан | lesson_id={lesson.id} | "
+        f"lesson_number={lesson.lesson_number}"
+    )
 
     return RedirectResponse(
         url=f"/lesson/{lesson.id}",
@@ -1809,7 +2625,6 @@ async def lesson_exercise_page(
 
     exercise = info["exercise"]
     if not exercise:
-        # Все упражнения выполнены, но урок не завершён (edge case)
         return RedirectResponse(
             url=f"/lesson/{lesson_id}/summary",
             status_code=status.HTTP_303_SEE_OTHER,
@@ -1852,7 +2667,10 @@ async def lesson_evaluate_post(
             status_code=422,
         )
     except GigaChatError as e:
-        logger.error(f"🚨 GigaChatError during evaluation | Code: {e.code} | Message: {e} | HTTP Status: {e.http_status}")
+        logger.error(
+            f"🚨 GigaChatError during evaluation | Code: {e.code} | "
+            f"Message: {e} | HTTP Status: {e.http_status}"
+        )
         return templates.TemplateResponse(
             "lesson/exercise_result.html",
             {
@@ -1863,7 +2681,10 @@ async def lesson_evaluate_post(
             status_code=503,
         )
 
-    logger.info(f"✅ Оценка завершена | exercise_id={exercise_id} | status={result['evaluation']['status']}")
+    logger.info(
+        f"✅ Оценка завершена | exercise_id={exercise_id} | "
+        f"status={result['evaluation']['status']}"
+    )
 
     return templates.TemplateResponse(
         "lesson/exercise_result.html",
@@ -1885,9 +2706,11 @@ async def lesson_suggestion_action(
     db: AsyncSession = Depends(get_db),
 ):
     """Обработка подсказки (добавить/игнорировать)."""
-    logger.info(f"💡 Обработка подсказки | exercise_id={exercise_id} | word_index={word_index} | action={action}")
+    logger.info(
+        f"💡 Обработка подсказки | exercise_id={exercise_id} | "
+        f"word_index={word_index} | action={action}"
+    )
 
-    # Загружаем упражнение
     stmt = select(LessonExercise).where(LessonExercise.id == exercise_id)
     result = await db.execute(stmt)
     exercise = result.scalar_one_or_none()
@@ -1895,7 +2718,6 @@ async def lesson_suggestion_action(
     if not exercise:
         raise HTTPException(status_code=404, detail="Упражнение не найдено")
 
-    # Проверка владения
     stmt_lesson = select(Lesson).where(Lesson.id == exercise.lesson_id)
     result_lesson = await db.execute(stmt_lesson)
     lesson = result_lesson.scalar_one_or_none()
@@ -1903,7 +2725,6 @@ async def lesson_suggestion_action(
     if not lesson or lesson.user_id != user.id:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
 
-    # Загружаем suggested_words
     suggested = list(exercise.suggested_words or [])
     if word_index >= len(suggested):
         raise HTTPException(status_code=404, detail="Подсказка не найдена")
@@ -1913,14 +2734,12 @@ async def lesson_suggestion_action(
     translation = word_data.get("translation", "")
 
     if action == "add":
-        # Ищем слово в глобальном словаре
         lemma_key = compute_lemma_key(lemma)
         stmt_word = select(Word).where(Word.lemma_key == lemma_key).limit(1)
         result_word = await db.execute(stmt_word)
         word = result_word.scalar_one_or_none()
 
         if word:
-            # Проверяем, нет ли уже в user_words
             stmt_uw = select(UserWord).where(
                 UserWord.user_id == user.id,
                 UserWord.word_id == word.id,
@@ -1943,10 +2762,9 @@ async def lesson_suggestion_action(
                 existing_uw.stage = 0
                 existing_uw.due_lesson_number = user.last_lesson_number + 1
 
-        word_data["state"] = "added"
+            word_data["state"] = "added"
 
     elif action == "ignore":
-        # Ищем слово и помечаем как ignored
         lemma_key = compute_lemma_key(lemma)
         stmt_word = select(Word).where(Word.lemma_key == lemma_key).limit(1)
         result_word = await db.execute(stmt_word)
@@ -1972,17 +2790,14 @@ async def lesson_suggestion_action(
             else:
                 existing_uw.status = "ignored"
 
-        word_data["state"] = "ignored"
+            word_data["state"] = "ignored"
     else:
         raise HTTPException(status_code=400, detail="Неизвестное действие")
 
-    # Обновляем JSON в упражнении
     suggested[word_index] = word_data
     exercise.suggested_words = suggested
-
     await db.flush()
 
-    # Возвращаем обновлённый HTML для карточки подсказки
     return templates.TemplateResponse(
         "lesson/_suggestion_card.html",
         {
@@ -2188,32 +3003,38 @@ async def onboarding_complete(
 from fastapi import APIRouter, Request, Depends, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.db import get_db
 from app.deps import require_auth
 from app.services.dashboard import get_dashboard_data
+from app.services.paywall import get_paywall_context
+from app.services.subscription import get_subscription_status
 from app.core.templates import templates
 from app.models.user import User
 
 router = APIRouter(tags=["pages"])
 
+
 @router.get("/dashboard")
 async def dashboard_page(
-    request: Request, 
+    request: Request,
     user: User = Depends(require_auth),
     db: AsyncSession = Depends(get_db)
 ):
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
-        
+
     data = await get_dashboard_data(db, user)
-    
+    paywall = await get_paywall_context(db, user)
+    subscription = await get_subscription_status(db, user.id)
+
     return templates.TemplateResponse(
-        "dashboard.html", 
+        "dashboard.html",
         {
-            "request": request, 
+            "request": request,
             "user": user,
-            **data
+            "paywall": paywall,
+            "subscription": subscription,
+            **data,
         }
     )
 ### end of app/routers/pages.py ########################################################################
@@ -2964,6 +3785,28 @@ async def delete_session(db: AsyncSession, session_token: str | None, response: 
     response.delete_cookie("csrf", path="/")
 ### end of app/services/auth.py ########################################################################
 
+### app/services/background_tasks.py ########################################################################
+"""Фоновые задачи: истечение подписок, очистка логов."""
+import logging
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.services.subscription import expire_subscriptions
+
+logger = logging.getLogger(__name__)
+
+
+async def run_periodic_tasks(db: AsyncSession) -> None:
+    """
+    Запускает все периодические задачи.
+    Вызывается из lifespan или cron.
+    """
+    try:
+        expired_count = await expire_subscriptions(db)
+        if expired_count > 0:
+            logger.info(f"[BG] Expired {expired_count} subscriptions")
+    except Exception as e:
+        logger.error(f"[BG] Error in periodic tasks: {e}")
+### end of app/services/background_tasks.py ########################################################################
+
 ### app/services/dashboard.py ########################################################################
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -3584,20 +4427,20 @@ async def get_resume_info(
 
 ### app/services/lesson_start.py ########################################################################
 """Идемпотентный старт урока с вызовом LLM."""
-
 import logging
 from datetime import datetime, timezone
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models.user import User
 from app.models.lesson import Lesson
 from app.models.lesson_exercise import LessonExercise
 from app.models.user_word import UserWord
 from app.models.word import Word
 from app.models.event import Event
+from app.config import settings
 from app.utils.clustering import cluster_words
 from app.utils.datetime_utils import get_user_today
+from app.services.paywall import check_lesson_access, get_effective_daily_limit
 from app.llm.helpers import generate_sentences
 from app.llm.gigachat import GigaChatError
 from app.llm.validation import LlmUsage
@@ -3607,7 +4450,6 @@ logger = logging.getLogger(__name__)
 
 class LessonStartError(Exception):
     """Ошибка при старте урока."""
-
     def __init__(self, message: str, code: str = "lesson_start_error"):
         super().__init__(message)
         self.code = code
@@ -3622,23 +4464,21 @@ async def start_lesson(
 ) -> Lesson:
     """
     Идемпотентный старт урока.
-
     1. Проверка идемпотентности.
     2. Проверка незавершённого урока.
-    3. Проверка дневного лимита.
-    4. 🔒 Проверка количества слов (<= words_per_lesson).
-    5. Кластеризация слов.
-    6. Вызов LLM.
-    7. Транзакция: создание записей.
-
+    3. Проверка пейволла (общий лимит для freemium).
+    4. Проверка дневного лимита.
+    5. 🔒 Проверка количества слов (<= words_per_lesson).
+    6. Кластеризация слов.
+    7. Вызов LLM.
+    8. Транзакция: создание записей.
     Returns:
         Созданный или существующий Lesson.
-
     Raises:
         LessonStartError: при ошибке.
         GigaChatError: при ошибке LLM.
     """
-    # 1. Идемпотентность: проверяем, не создан ли уже урок с этим ключом.
+    # 1. Идемпотентность
     stmt_idem = select(Lesson).where(
         Lesson.user_id == user.id,
         Lesson.idempotency_key == idempotency_key,
@@ -3649,11 +4489,8 @@ async def start_lesson(
     if existing_lesson:
         if existing_lesson.status == "in_progress":
             return existing_lesson
-        # Урок уже завершён — даём создать новый (новый idempotency_key
-        # должен использоваться на фронте).
-        # Но это норм — идемпотентность сработала.
 
-    # 2. Проверка незавершённого урока.
+    # 2. Проверка незавершённого урока
     stmt_in_progress = select(Lesson).where(
         Lesson.user_id == user.id,
         Lesson.status == "in_progress",
@@ -3667,7 +4504,18 @@ async def start_lesson(
             code="in_progress_exists",
         )
 
-    # 3. Проверка дневного лимита (первичная, вне блокировки).
+    # 3. Проверка пейволла (общий лимит для freemium)
+    access = await check_lesson_access(db, user)
+    if not access["allowed"]:
+        raise LessonStartError(
+            "Бесплатные уроки исчерпаны. Подключите Premium для продолжения.",
+            code="free_limit_reached",
+        )
+
+    # 4. Проверка дневного лимита
+    premium = access["is_premium"]
+    effective_daily_limit = get_effective_daily_limit(user, premium)
+
     today = get_user_today(user.timezone)
     stmt_today = select(func.count(Lesson.id)).where(
         Lesson.user_id == user.id,
@@ -3676,13 +4524,13 @@ async def start_lesson(
     result_today = await db.execute(stmt_today)
     lessons_today = result_today.scalar_one_or_none() or 0
 
-    if lessons_today >= user.daily_lesson_limit:
+    if lessons_today >= effective_daily_limit:
         raise LessonStartError(
             "Дневной лимит уроков исчерпан",
             code="limit_reached",
         )
 
-    # 🔒 4. Проверка количества слов.
+    # 🔒 5. Проверка количества слов
     if not word_ids:
         raise LessonStartError("Слова не выбраны", code="no_words")
 
@@ -3691,11 +4539,9 @@ async def start_lesson(
             f"[START] user_id={user.id} requested {len(word_ids)} words, "
             f"but words_per_lesson={user.words_per_lesson}. Truncating."
         )
-        # Обрезаем, а не падаем — фронт мог прислать stale данные.
-        # Сохраняем первые N (они имеют приоритет в превью: due → new).
         word_ids = word_ids[: user.words_per_lesson]
 
-    # 5. Загружаем слова для кластеризации.
+    # 6. Загружаем слова для кластеризации
     stmt_words = select(Word).where(Word.id.in_(word_ids))
     result_words = await db.execute(stmt_words)
     words = result_words.scalars().all()
@@ -3707,7 +4553,6 @@ async def start_lesson(
     if found_ids != set(word_ids):
         missing = set(word_ids) - found_ids
         logger.warning(f"[START] Missing words: {missing}")
-        # Продолжаем с теми, что нашли.
 
     word_dicts = [
         {
@@ -3719,11 +4564,11 @@ async def start_lesson(
         for w in words
     ]
 
-    # 6. Кластеризация.
+    # 7. Кластеризация
     next_lesson_number = user.last_lesson_number + 1
     groups = cluster_words(word_dicts, user.id, next_lesson_number)
 
-    # 7. Вызов LLM (ВНЕ транзакции, чтобы не держать блокировки).
+    # 8. Вызов LLM (ВНЕ транзакции)
     exercises_data, usage = await generate_sentences(
         db,
         level=user.level or "A1",
@@ -3731,24 +4576,29 @@ async def start_lesson(
         user_id=user.id,
     )
 
-    # 8. Транзакция: создаём записи.
-    # Перезагружаем пользователя с блокировкой.
+    # 9. Транзакция: создаём записи
     stmt_user_lock = select(User).where(User.id == user.id).with_for_update()
     locked_user = (await db.execute(stmt_user_lock)).scalar_one()
 
-    # Повторная проверка дневного лимита (под блокировкой).
+    # Повторная проверка дневного лимита (под блокировкой)
     result_today2 = await db.execute(stmt_today)
     lessons_today2 = result_today2.scalar_one_or_none() or 0
-    if lessons_today2 >= locked_user.daily_lesson_limit:
+    if lessons_today2 >= effective_daily_limit:
         raise LessonStartError(
             "Дневной лимит уроков исчерпан",
             code="limit_reached",
         )
 
-    # Обновляем last_lesson_number.
+    # Повторная проверка пейволла (под блокировкой)
+    access2 = await check_lesson_access(db, locked_user)
+    if not access2["allowed"]:
+        raise LessonStartError(
+            "Бесплатные уроки исчерпаны. Подключите Premium для продолжения.",
+            code="free_limit_reached",
+        )
+
     locked_user.last_lesson_number = next_lesson_number
 
-    # Создаём урок.
     lesson = Lesson(
         user_id=locked_user.id,
         lesson_number=next_lesson_number,
@@ -3760,9 +4610,8 @@ async def start_lesson(
         gen_total_tokens=usage.total_tokens,
     )
     db.add(lesson)
-    await db.flush()  # Получаем lesson.id.
+    await db.flush()
 
-    # Создаём упражнения.
     for idx, ex_data in enumerate(exercises_data):
         exercise = LessonExercise(
             lesson_id=lesson.id,
@@ -3774,7 +4623,6 @@ async def start_lesson(
         )
         db.add(exercise)
 
-    # Записываем новые слова в user_words.
     for wd in word_dicts:
         stmt_uw = select(UserWord).where(
             UserWord.user_id == locked_user.id,
@@ -3794,7 +4642,6 @@ async def start_lesson(
             )
             db.add(uw)
 
-    # Событие.
     event = Event(
         user_id=locked_user.id,
         type="lesson_started",
@@ -3805,7 +4652,6 @@ async def start_lesson(
         },
     )
     db.add(event)
-
     await db.flush()
 
     logger.info(
@@ -3942,6 +4788,366 @@ async def complete_onboarding(
     await db.refresh(db_user)
 ### end of app/services/onboarding.py ########################################################################
 
+### app/services/paywall.py ########################################################################
+"""Сервис проверки лимитов для Freemium / Premium."""
+import logging
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.config import settings
+from app.models.user import User
+from app.models.lesson import Lesson
+from app.models.subscription import Subscription
+from app.services.subscription import is_premium
+
+logger = logging.getLogger(__name__)
+
+
+async def get_total_lessons_count(db: AsyncSession, user_id: int) -> int:
+    """Возвращает общее количество уроков пользователя (все статусы)."""
+    stmt = select(func.count(Lesson.id)).where(Lesson.user_id == user_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none() or 0
+
+
+async def check_lesson_access(db: AsyncSession, user: User) -> dict:
+    """
+    Проверяет, может ли пользователь начать новый урок.
+
+    Возвращает:
+        {
+            "allowed": bool,
+            "reason": str | None,  # причина запрета
+            "is_premium": bool,
+            "total_lessons": int,
+            "free_lessons_remaining": int | None,  # только для freemium
+        }
+    """
+    premium = await is_premium(db, user.id)
+
+    # Для Premium — проверяем только дневной лимит
+    if premium:
+        return {
+            "allowed": True,
+            "reason": None,
+            "is_premium": True,
+            "total_lessons": await get_total_lessons_count(db, user.id),
+            "free_lessons_remaining": None,
+        }
+
+    # Для Freemium — проверяем общий лимит уроков
+    total = await get_total_lessons_count(db, user.id)
+    remaining = settings.FREE_LESSONS_TOTAL_LIMIT - total
+
+    if total >= settings.FREE_LESSONS_TOTAL_LIMIT:
+        return {
+            "allowed": False,
+            "reason": "free_limit_reached",
+            "is_premium": False,
+            "total_lessons": total,
+            "free_lessons_remaining": 0,
+        }
+
+    return {
+        "allowed": True,
+        "reason": None,
+        "is_premium": False,
+        "total_lessons": total,
+        "free_lessons_remaining": remaining,
+    }
+
+
+def get_effective_daily_limit(user: User, is_premium: bool) -> int:
+    """
+    Возвращает эффективный дневной лимит уроков.
+
+    - Freemium: FREE_LESSON_PER_DAY_LIMIT (1)
+    - Premium: user.daily_lesson_limit (из настроек, до DAILY_LESSON_LIMIT_MAX)
+    """
+    if is_premium:
+        return min(user.daily_lesson_limit, settings.DAILY_LESSON_LIMIT_MAX)
+    return settings.FREE_LESSON_PER_DAY_LIMIT
+
+
+async def get_paywall_context(db: AsyncSession, user: User) -> dict:
+    """
+    Контекст для отображения пейволла / информации о подписке в шаблонах.
+
+    Используется в дашборде, превью урока, настройках.
+    """
+    access = await check_lesson_access(db, user)
+    premium = access["is_premium"]
+
+    return {
+        "is_premium": premium,
+        "free_lessons_remaining": access.get("free_lessons_remaining"),
+        "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
+        "free_daily_limit": settings.FREE_LESSON_PER_DAY_LIMIT,
+        "effective_daily_limit": get_effective_daily_limit(user, premium),
+        "paywall_triggered": not access["allowed"],
+        "paywall_reason": access.get("reason"),
+    }
+### end of app/services/paywall.py ########################################################################
+
+### app/services/referral.py ########################################################################
+"""Сервис реферальной программы."""
+import logging
+import secrets
+import string
+from datetime import datetime, timezone
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.config import settings
+from app.models.user import User
+from app.models.promo_code import PromoCode
+from app.models.referral import Referral
+from app.models.event import Event
+from app.services.subscription import activate_subscription
+
+logger = logging.getLogger(__name__)
+
+# Алфавит для промокодов (без 0, O, 1, I, L для читаемости)
+_CODE_ALPHABET = string.ascii_uppercase.replace("O", "").replace("I", "").replace("L", "")
+_CODE_ALPHABET += string.digits.replace("0", "").replace("1", "")
+_CODE_LENGTH = 6
+
+
+def _generate_code() -> str:
+    """Генерирует случайный промокод из 6 символов."""
+    return "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LENGTH))
+
+
+async def get_or_create_promo_code(db: AsyncSession, user_id: int) -> PromoCode:
+    """
+    Возвращает промокод пользователя или создаёт новый.
+    """
+    # Ищем существующий
+    stmt = select(PromoCode).where(
+        PromoCode.owner_user_id == user_id,
+        PromoCode.type == "user_referral",
+        PromoCode.is_active == True,
+    )
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+    if existing:
+        return existing
+
+    # Генерируем уникальный код
+    for _ in range(10):  # Максимум 10 попыток
+        code = _generate_code()
+        stmt_check = select(PromoCode).where(PromoCode.code == code)
+        result_check = await db.execute(stmt_check)
+        if result_check.scalar_one_or_none() is None:
+            break
+    else:
+        raise RuntimeError("Не удалось сгенерировать уникальный промокод")
+
+    promo = PromoCode(
+        code=code,
+        owner_user_id=user_id,
+        type="user_referral",
+        is_active=True,
+        used_count=0,
+    )
+    db.add(promo)
+    await db.flush()
+
+    logger.info(f"[REFERRAL] Created promo code '{code}' for user_id={user_id}")
+    return promo
+
+
+async def apply_referral_code(
+    db: AsyncSession,
+    user: User,
+    code: str,
+) -> tuple[bool, str]:
+    """
+    Применяет реферальный код к пользователю при регистрации.
+
+    Возвращает:
+        (success: bool, message: str)
+    """
+    code = code.strip().upper()
+
+    # Проверка лимита попыток
+    if user.promo_code_attempts >= settings.REFERRAL_PROMO_MAX_ATTEMPTS:
+        return False, "Лимит попыток ввода промокода исчерпан"
+
+    # Увеличиваем счётчик попыток
+    user.promo_code_attempts += 1
+
+    # Проверка: нельзя использовать свой код
+    stmt_own = select(PromoCode).where(
+        PromoCode.owner_user_id == user.id,
+        PromoCode.code == code,
+    )
+    result_own = await db.execute(stmt_own)
+    if result_own.scalar_one_or_none():
+        return False, "Нельзя использовать свой промокод"
+
+    # Ищем промокод
+    stmt = select(PromoCode).where(
+        PromoCode.code == code,
+        PromoCode.is_active == True,
+        PromoCode.type == "user_referral",
+    )
+    result = await db.execute(stmt)
+    promo = result.scalar_one_or_none()
+
+    if not promo:
+        return False, "Промокод не найден"
+
+    # Проверка: пользователь ещё не привязан к рефереру
+    if user.referred_by_user_id is not None:
+        return False, "Промокод уже был применён"
+
+    # Привязываем
+    user.referred_by_user_id = promo.owner_user_id
+
+    # Создаём запись в referrals
+    referral = Referral(
+        referrer_user_id=promo.owner_user_id,
+        referred_user_id=user.id,
+        promo_code_id=promo.id,
+        status="pending",
+    )
+    db.add(referral)
+
+    # Увеличиваем счётчик использований промокода
+    promo.used_count += 1
+
+    event = Event(
+        user_id=user.id,
+        type="referral_code_applied",
+        payload={"code": code, "referrer_user_id": promo.owner_user_id},
+    )
+    db.add(event)
+    await db.flush()
+
+    logger.info(
+        f"[REFERRAL] Code '{code}' applied: "
+        f"user_id={user.id} referred by user_id={promo.owner_user_id}"
+    )
+    return True, "Промокод применён! Вы и ваш друг получите бонус после вашей подписки."
+
+
+async def reward_referrer_on_purchase(
+    db: AsyncSession,
+    buyer_user_id: int,
+) -> int | None:
+    """
+    Начисляет бонус рефереру И реферированному после покупки подписки.
+    Вызывается после успешной оплаты.
+
+    Оба получают +REFERRAL_BONUS_DAYS дней:
+    - Реферер: за привлечение платящего пользователя.
+    - Реферированный: за регистрацию по промокоду (бонус к первой покупке).
+
+    Возвращает:
+        user_id реферера или None если реферала нет.
+    """
+    # Ищем pending-реферал для этого пользователя
+    stmt = select(Referral).where(
+        Referral.referred_user_id == buyer_user_id,
+        Referral.status == "pending",
+    )
+    result = await db.execute(stmt)
+    referral = result.scalar_one_or_none()
+
+    if not referral:
+        return None
+
+    bonus_days = settings.REFERRAL_BONUS_DAYS
+
+    # 1. Начисляем бонус РЕФЕРЕРУ (пригласившему)
+    await activate_subscription(
+        db,
+        user_id=referral.referrer_user_id,
+        plan="referral_bonus",
+        source="referral",
+        extra_days=bonus_days,
+    )
+
+    # 2. Начисляем бонус РЕФЕРИРОВАННОМУ (покупателю)
+    #    Бонус добавляется к только что купленной подписке
+    await activate_subscription(
+        db,
+        user_id=buyer_user_id,
+        plan="referral_bonus",
+        source="referral",
+        extra_days=bonus_days,
+    )
+
+    # Обновляем реферал
+    referral.status = "rewarded"
+    referral.rewarded_at = datetime.now(timezone.utc)
+
+    # Событие для реферера
+    event = Event(
+        user_id=referral.referrer_user_id,
+        type="referral_reward_granted",
+        payload={
+            "referred_user_id": buyer_user_id,
+            "bonus_days": bonus_days,
+        },
+    )
+    db.add(event)
+
+    # Событие для реферированного
+    event2 = Event(
+        user_id=buyer_user_id,
+        type="referral_bonus_received",
+        payload={
+            "referrer_user_id": referral.referrer_user_id,
+            "bonus_days": bonus_days,
+        },
+    )
+    db.add(event2)
+    await db.flush()
+
+    logger.info(
+        f"[REFERRAL] Rewards granted: referrer user_id={referral.referrer_user_id} "
+        f"and referred user_id={buyer_user_id} each get +{bonus_days} days"
+    )
+    return referral.referrer_user_id
+
+
+async def get_referral_stats(db: AsyncSession, user_id: int) -> dict:
+    """
+    Статистика рефералов для личного кабинета.
+
+    Returns:
+        {
+            "promo_code": str,
+            "total_invited": int,
+            "total_rewarded": int,
+            "total_bonus_days": int,
+        }
+    """
+    promo = await get_or_create_promo_code(db, user_id)
+
+    # Считаем приглашённых
+    stmt_total = select(func.count(Referral.id)).where(
+        Referral.referrer_user_id == user_id,
+    )
+    result_total = await db.execute(stmt_total)
+    total_invited = result_total.scalar_one_or_none() or 0
+
+    # Считаем награждённых
+    stmt_rewarded = select(func.count(Referral.id)).where(
+        Referral.referrer_user_id == user_id,
+        Referral.status == "rewarded",
+    )
+    result_rewarded = await db.execute(stmt_rewarded)
+    total_rewarded = result_rewarded.scalar_one_or_none() or 0
+
+    return {
+        "promo_code": promo.code,
+        "total_invited": total_invited,
+        "total_rewarded": total_rewarded,
+        "total_bonus_days": total_rewarded * settings.REFERRAL_BONUS_DAYS,
+    }
+### end of app/services/referral.py ########################################################################
+
 ### app/services/settings.py ########################################################################
 """Сервис для обновления настроек пользователя."""
 from datetime import datetime, timezone
@@ -4002,6 +5208,264 @@ async def update_user_settings(
     await db.commit()
     await db.refresh(db_user)
 ### end of app/services/settings.py ########################################################################
+
+### app/services/subscription.py ########################################################################
+"""Сервис подписок: проверка, активация, истечение."""
+import logging
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.config import settings
+from app.models.user import User
+from app.models.subscription import Subscription
+from app.models.payment import Payment
+from app.models.event import Event
+
+logger = logging.getLogger(__name__)
+
+# Длительность подписок в днях
+# ВАЖНО: для "referral_bonus" базовых дней = 0,
+# добавляются только extra_days. Иначе бонус будет 30 + extra.
+PLAN_DAYS = {
+    "monthly": 30,
+    "six_months": 180,
+    "referral_bonus": 0,
+}
+
+
+async def get_active_subscription(db: AsyncSession, user_id: int) -> Subscription | None:
+    """Возвращает активную подписку пользователя или None."""
+    now = datetime.now(timezone.utc)
+    stmt = (
+        select(Subscription)
+        .where(
+            Subscription.user_id == user_id,
+            Subscription.status == "active",
+            Subscription.expires_at > now,
+        )
+        .order_by(Subscription.expires_at.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def is_premium(db: AsyncSession, user_id: int) -> bool:
+    """Проверяет, есть ли у пользователя активная подписка."""
+    sub = await get_active_subscription(db, user_id)
+    return sub is not None
+
+
+async def get_subscription_status(db: AsyncSession, user_id: int) -> dict:
+    """
+    Возвращает полную информацию о подписке для шаблонов.
+
+    Returns:
+        {
+            "is_premium": bool,
+            "plan": str | None,
+            "expires_at": datetime | None,
+            "days_left": int,
+            "source": str | None,
+        }
+    """
+    sub = await get_active_subscription(db, user_id)
+    if not sub:
+        return {
+            "is_premium": False,
+            "plan": None,
+            "expires_at": None,
+            "days_left": 0,
+            "source": None,
+        }
+
+    now = datetime.now(timezone.utc)
+    days_left = max((sub.expires_at - now).days, 0)
+
+    return {
+        "is_premium": True,
+        "plan": sub.plan,
+        "expires_at": sub.expires_at,
+        "days_left": days_left,
+        "source": sub.source,
+    }
+
+
+async def activate_subscription(
+    db: AsyncSession,
+    user_id: int,
+    plan: str,
+    source: str = "payment",
+    payment_id: int | None = None,
+    extra_days: int = 0,
+) -> Subscription:
+    """
+    Активирует подписку.
+    Если уже есть активная — продлевает её.
+
+    Для реферальных бонусов (plan="referral_bonus", source="referral")
+    базовых дней 0 — добавляются только extra_days.
+
+    Args:
+        plan: "monthly" | "six_months" | "referral_bonus"
+        source: "payment" | "referral"
+        payment_id: ID платежа (для оплаты)
+        extra_days: дополнительные дни (для рефералки)
+    """
+    now = datetime.now(timezone.utc)
+
+    # Для referral_bonus базовых дней нет (0), только бонусные.
+    # Для остальных планов берём из PLAN_DAYS.
+    base_days = PLAN_DAYS.get(plan, 0)
+    total_days = base_days + extra_days
+
+    # Защита от нулевого или отрицательного продления
+    if total_days <= 0:
+        raise ValueError(
+            f"activate_subscription: total_days={total_days} "
+            f"(base={base_days}, extra={extra_days}, plan={plan})"
+        )
+
+    # Проверяем, есть ли уже активная подписка
+    existing = await get_active_subscription(db, user_id)
+
+    if existing:
+        # Продлеваем: добавляем дни к текущему expires_at
+        existing.expires_at = existing.expires_at + timedelta(days=total_days)
+        # Обновляем план только если это НЕ реферальный бонус
+        # (чтобы не перезаписать "monthly" на "referral_bonus")
+        if source != "referral":
+            existing.plan = plan
+        if payment_id:
+            existing.payment_id = payment_id
+
+        event = Event(
+            user_id=user_id,
+            type="subscription_extended",
+            payload={
+                "subscription_id": existing.id,
+                "plan": plan,
+                "source": source,
+                "added_days": total_days,
+                "new_expires_at": existing.expires_at.isoformat(),
+            },
+        )
+        db.add(event)
+        await db.flush()
+
+        logger.info(
+            f"[SUBSCRIPTION] Extended for user_id={user_id}, "
+            f"plan={plan}, source={source}, +{total_days} days "
+            f"(base={base_days}, extra={extra_days}), "
+            f"expires={existing.expires_at}"
+        )
+        return existing
+
+    # Создаём новую подписку
+    expires_at = now + timedelta(days=total_days)
+
+    sub = Subscription(
+        user_id=user_id,
+        plan=plan,
+        status="active",
+        source=source,
+        payment_id=payment_id,
+        started_at=now,
+        expires_at=expires_at,
+    )
+    db.add(sub)
+    await db.flush()
+
+    event = Event(
+        user_id=user_id,
+        type="subscription_activated",
+        payload={
+            "subscription_id": sub.id,
+            "plan": plan,
+            "source": source,
+            "days": total_days,
+            "expires_at": expires_at.isoformat(),
+        },
+    )
+    db.add(event)
+    await db.flush()
+
+    logger.info(
+        f"[SUBSCRIPTION] Activated for user_id={user_id}, "
+        f"plan={plan}, source={source}, days={total_days}, "
+        f"expires={expires_at}"
+    )
+    return sub
+
+
+async def cancel_subscription(db: AsyncSession, user_id: int) -> bool:
+    """
+    Отменяет подписку (доступ сохраняется до expires_at).
+    Возвращает True если подписка была найдена и отменена.
+    """
+    sub = await get_active_subscription(db, user_id)
+    if not sub:
+        return False
+
+    sub.status = "canceled"
+    sub.canceled_at = datetime.now(timezone.utc)
+
+    event = Event(
+        user_id=user_id,
+        type="subscription_canceled",
+        payload={"subscription_id": sub.id},
+    )
+    db.add(event)
+    await db.flush()
+
+    logger.info(f"[SUBSCRIPTION] Canceled for user_id={user_id}, sub_id={sub.id}")
+    return True
+
+
+async def expire_subscriptions(db: AsyncSession) -> int:
+    """
+    Фоновая задача: переводит истёкшие подписки в статус 'expired'.
+    Вызывается периодически (например, каждый час).
+
+    Returns:
+        Количество переведённых подписок.
+    """
+    now = datetime.now(timezone.utc)
+    stmt = (
+        update(Subscription)
+        .where(
+            Subscription.status == "active",
+            Subscription.expires_at <= now,
+        )
+        .values(status="expired")
+    )
+    result = await db.execute(stmt)
+    count = result.rowcount
+
+    if count > 0:
+        logger.info(f"[SUBSCRIPTION] Expired {count} subscriptions")
+
+    return count
+
+
+def get_plan_price_kop(plan: str) -> int:
+    """Возвращает цену плана в копейках."""
+    if plan == "monthly":
+        return settings.SUBSCRIPTION_MONTHLY_PRICE_KOP
+    elif plan == "six_months":
+        return settings.SUBSCRIPTION_6M_PRICE_KOP
+    return 0
+
+
+def get_plan_label(plan: str) -> str:
+    """Человекочитаемое название плана."""
+    labels = {
+        "monthly": "Месячная подписка",
+        "six_months": "Подписка на 6 месяцев",
+        "referral_bonus": "Бонус по реферальной программе",
+    }
+    return labels.get(plan, plan)
+### end of app/services/subscription.py ########################################################################
 
 ### app/services/vocabulary.py ########################################################################
 """Сервис для работы со словарём пользователя."""
@@ -4485,6 +5949,198 @@ def _get_word_dictionaries(word: Word) -> list[str]:
         dicts.append("travel")
     return dicts or ["general"]
 ### end of app/services/vocabulary_add.py ########################################################################
+
+### app/services/yookassa_client.py ########################################################################
+"""Клиент ЮKassa API для приёма платежей."""
+import logging
+import httpx
+import uuid
+from app.config import settings
+from app.models.payment import Payment
+
+logger = logging.getLogger(__name__)
+
+YOOKASSA_API_URL = "https://api.yookassa.ru/v3"
+
+# IP-адреса ЮKassa для whitelist (webhooks)
+YOOKASSA_WEBHOOK_IPS = [
+    "185.71.76.0/27",
+    "185.71.77.0/27",
+    "77.75.153.0/25",
+    "77.75.156.11",
+    "77.75.156.35",
+    "77.75.154.128/25",
+    "2a02:5180::/32",
+]
+
+
+class YooKassaError(Exception):
+    """Ошибка при работе с ЮKassa API."""
+    def __init__(self, message: str, http_status: int | None = None):
+        super().__init__(message)
+        self.http_status = http_status
+
+
+async def create_payment(
+    payment: Payment,
+    return_url: str,
+) -> dict:
+    """
+    Создаёт платёж в ЮKassa.
+
+    Args:
+        payment: объект Payment из БД (с amount_kop, plan, description)
+        return_url: URL для редиректа после оплаты (например, /billing/success)
+
+    Returns:
+        dict с confirmation_url для редиректа пользователя
+
+    Raises:
+        YooKassaError: при ошибке API
+    """
+    if not settings.YOOKASSA_SHOP_ID or not settings.YOOKASSA_SECRET_KEY:
+        raise YooKassaError(
+            "ЮKassa не настроена: YOOKASSA_SHOP_ID или YOOKASSA_SECRET_KEY не заданы",
+        )
+
+    # Сумма в рублях (ЮKassa принимает строку с 2 знаками после запятой)
+    amount_value = f"{payment.amount_kop / 100:.2f}"
+
+    payload = {
+        "amount": {
+            "value": amount_value,
+            "currency": "RUB",
+        },
+        "capture": True,  # сразу списываем
+        "confirmation": {
+            "type": "redirect",
+            "return_url": return_url,
+        },
+        "description": payment.description or f"Подписка: {payment.plan}",
+        "metadata": {
+            "payment_id": payment.id,
+            "user_id": payment.user_id,
+            "plan": payment.plan,
+        },
+    }
+
+    # Idempotence key для идемпотентности
+    idempotence_key = str(uuid.uuid4())
+
+    headers = {
+        "Idempotence-Key": idempotence_key,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    logger.info(
+        f"[YOOKASSA] Creating payment | user_id={payment.user_id} | "
+        f"amount={amount_value} RUB | plan={payment.plan}"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{YOOKASSA_API_URL}/payments",
+                json=payload,
+                headers=headers,
+                auth=(settings.YOOKASSA_SHOP_ID, settings.YOOKASSA_SECRET_KEY),
+            )
+    except httpx.HTTPError as e:
+        logger.error(f"[YOOKASSA] HTTP error: {e}")
+        raise YooKassaError(f"Ошибка подключения к ЮKassa: {e}")
+
+    if resp.status_code not in (200, 201):
+        error_text = resp.text[:500]
+        logger.error(
+            f"[YOOKASSA] API error | HTTP {resp.status_code} | {error_text}"
+        )
+        raise YooKassaError(
+            f"ЮKassa вернула ошибку: HTTP {resp.status_code}",
+            http_status=resp.status_code,
+        )
+
+    try:
+        data = resp.json()
+    except Exception as e:
+        logger.error(f"[YOOKASSA] Invalid JSON response: {e}")
+        raise YooKassaError("Невалидный JSON от ЮKassa")
+
+    # Извлекаем confirmation_url
+    confirmation = data.get("confirmation", {})
+    confirmation_url = confirmation.get("confirmation_url")
+
+    if not confirmation_url:
+        logger.error(f"[YOOKASSA] No confirmation_url in response: {data}")
+        raise YooKassaError("ЮKassa не вернула confirmation_url")
+
+    # Сохраняем yookassa_payment_id
+    yookassa_payment_id = data.get("id")
+    logger.info(
+        f"[YOOKASSA] Payment created | yookassa_id={yookassa_payment_id} | "
+        f"confirmation_url={confirmation_url[:80]}..."
+    )
+
+    return {
+        "yookassa_payment_id": yookassa_payment_id,
+        "confirmation_url": confirmation_url,
+        "status": data.get("status", "pending"),
+    }
+
+
+async def get_payment_info(yookassa_payment_id: str) -> dict:
+    """
+    Получает информацию о платеже из ЮKassa.
+
+    Используется для проверки статуса после редиректа.
+    """
+    if not settings.YOOKASSA_SHOP_ID or not settings.YOOKASSA_SECRET_KEY:
+        raise YooKassaError("ЮKassa не настроена")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{YOOKASSA_API_URL}/payments/{yookassa_payment_id}",
+                auth=(settings.YOOKASSA_SHOP_ID, settings.YOOKASSA_SECRET_KEY),
+            )
+    except httpx.HTTPError as e:
+        logger.error(f"[YOOKASSA] Get payment HTTP error: {e}")
+        raise YooKassaError(f"Ошибка получения платежа: {e}")
+
+    if resp.status_code != 200:
+        logger.error(
+            f"[YOOKASSA] Get payment error | HTTP {resp.status_code} | {resp.text[:300]}"
+        )
+        raise YooKassaError(
+            f"Ошибка получения платежа: HTTP {resp.status_code}",
+            http_status=resp.status_code,
+        )
+
+    return resp.json()
+
+
+def is_webhook_ip_allowed(ip: str) -> bool:
+    """
+    Проверяет, входит ли IP в whitelist ЮKassa.
+    Используется для защиты webhook-эндпоинта.
+    """
+    import ipaddress
+
+    try:
+        ip_obj = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+
+    for network_str in YOOKASSA_WEBHOOK_IPS:
+        try:
+            network = ipaddress.ip_network(network_str, strict=False)
+            if ip_obj in network:
+                return True
+        except ValueError:
+            continue
+
+    return False
+### end of app/services/yookassa_client.py ########################################################################
 
 ### app/static/css/custom.css ########################################################################
 /* app/static/css/custom.css */
@@ -5513,19 +7169,20 @@ tbody tr:last-child td { border-bottom: none; }
 {% block content %}
 <div class="container--narrow" style="margin: 4rem auto;">
     <div class="card" style="max-width: 440px; margin: 0 auto; padding: 2.5rem;">
+
         <div class="text-center mb-4">
             <div style="font-size: 3rem; margin-bottom: 0.5rem;">🚀</div>
             <h2 style="margin: 0;">Создать аккаунт</h2>
             <p style="color: var(--text-muted); margin-top: 0.5rem;">Начните учить английский уже сегодня</p>
         </div>
-        
+
         {% if error %}
-            <div class="flash-error">
-                <i data-lucide="alert-circle" style="width: 18px; height: 18px;"></i>
-                {{ error }}
-            </div>
+        <div class="flash-error">
+            <i data-lucide="alert-circle" style="width: 18px; height: 18px;"></i>
+            {{ error }}
+        </div>
         {% endif %}
-        
+
         <form method="POST" action="/register">
             <div style="margin-bottom: 1rem;">
                 <label for="email">Email</label>
@@ -5535,13 +7192,19 @@ tbody tr:last-child td { border-bottom: none; }
                 <label for="password">Пароль (мин. 8 символов)</label>
                 <input type="password" id="password" name="password" minlength="8" maxlength="72" required placeholder="••••••••">
             </div>
-            <div style="margin-bottom: 1.5rem;">
+            <div style="margin-bottom: 1rem;">
                 <label for="password_confirm">Повторите пароль</label>
                 <input type="password" id="password_confirm" name="password_confirm" minlength="8" maxlength="72" required placeholder="••••••••">
             </div>
+            <div style="margin-bottom: 1.5rem;">
+                <label for="promo_code">Промокод (необязательно)</label>
+                <input type="text" id="promo_code" name="promo_code" value="{{ ref_code|default('') }}"
+                       placeholder="Если вас пригласил друг" maxlength="6"
+                       style="text-transform: uppercase;">
+            </div>
             <button type="submit" style="width: 100%; padding: 0.875rem;">Создать аккаунт</button>
         </form>
-        
+
         <p class="text-center mt-4" style="color: var(--text-muted); font-size: 0.925rem;">
             Уже есть аккаунт? <a href="/login" style="font-weight: 600;">Войти</a>
         </p>
@@ -5592,11 +7255,16 @@ tbody tr:last-child td { border-bottom: none; }
     <main class="container fade-in-up" style="padding-top: 2rem; padding-bottom: 4rem;">
         {% block content %}{% endblock %}
     </main>
-    
     <footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;">
-        <p>© 2026 101slovo • Учи английский умнее с ИИ</p>
+        <p style="margin-bottom: 0.75rem;">© 2026 101slovo • Изучай английский в контексте</p>
+        <p style="display: flex; justify-content: center; gap: 1.5rem; flex-wrap: wrap; font-size: 0.8125rem;">
+            <a href="/legal/offer" style="color: var(--text-muted); text-decoration: none;">Оферта</a>
+            <a href="/legal/privacy" style="color: var(--text-muted); text-decoration: none;">Конфиденциальность</a>
+            <a href="/legal/terms" style="color: var(--text-muted); text-decoration: none;">Условия использования</a>
+            <a href="/legal/consent" style="color: var(--text-muted); text-decoration: none;">Согласие на обработку ПД</a>
+        </p>
     </footer>
-    
+
     <script>
         document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
         document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
@@ -5616,18 +7284,285 @@ tbody tr:last-child td { border-bottom: none; }
 </html>
 ### end of app/templates/base.html ########################################################################
 
+### app/templates/billing/manage.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Подписка — 101slovo{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+        <h1 style="margin: 0;">💳 Подписка</h1>
+        <a href="/billing/plans" class="secondary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="crown" style="width: 16px; height: 16px;"></i>
+            Тарифы
+        </a>
+    </div>
+
+    <!-- Текущая подписка -->
+    <div class="card mb-4" style="padding: 2rem;">
+        <h3 style="margin-top: 0;">Текущий статус</h3>
+
+        {% if subscription.is_premium %}
+        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem;">
+            <span class="badge badge-mastered" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
+                <i data-lucide="crown" style="width: 14px; height: 14px;"></i>
+                Premium активна
+            </span>
+        </div>
+        <div class="grid grid-3" style="margin-bottom: 1.5rem;">
+            <div>
+                <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em;">Тариф</div>
+                <div style="font-weight: 700; font-size: 1.25rem;">{{ subscription.plan }}</div>
+            </div>
+            <div>
+                <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em;">Действует до</div>
+                <div style="font-weight: 700; font-size: 1.25rem;">{{ subscription.expires_at.strftime('%d.%m.%Y') }}</div>
+            </div>
+            <div>
+                <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em;">Осталось дней</div>
+                <div style="font-weight: 700; font-size: 1.25rem;">{{ subscription.days_left }}</div>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 1rem;">
+            <a href="/billing/plans" role="button">Продлить / Сменить тариф</a>
+            <form method="POST" action="/billing/cancel" style="display: inline;">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit" class="secondary" onclick="return confirm('Отменить подписку? Доступ сохранится до конца оплаченного периода.')">
+                    Отменить подписку
+                </button>
+            </form>
+        </div>
+
+        {% else %}
+        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+            <span class="badge badge-active" style="font-size: 0.875rem; padding: 0.5rem 1rem;">
+                Free
+            </span>
+        </div>
+        <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+            У вас бесплатный план: 1 урок в день, 5 уроков всего.
+        </p>
+        <a href="/billing/plans" role="button" style="background: var(--gradient-primary);">
+            <i data-lucide="crown" style="width: 16px; height: 16px;"></i>
+            Подключить Premium
+        </a>
+        {% endif %}
+    </div>
+
+    <!-- Реферальная программа -->
+    <div class="card mb-4" style="padding: 2rem;">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="gift" style="width: 20px; height: 20px; color: var(--brand-secondary);"></i>
+            Пригласи друга — получи месяц бесплатно
+        </h3>
+        <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+            Поделись промокодом с другом. Когда он купит подписку, ты получишь
+            <strong>+{{ referral_bonus_days }} дней Premium</strong>.
+            Твой друг тоже получит <strong>+{{ referral_bonus_days }} дней</strong> к своей подписке.
+        </p>
+
+        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+            <div style="background: var(--surface-100); border: 2px dashed var(--brand-primary); border-radius: var(--radius-md); padding: 0.75rem 1.5rem; font-size: 1.5rem; font-weight: 800; letter-spacing: 0.1em; color: var(--brand-primary);">
+                {{ referral.promo_code }}
+            </div>
+            <button onclick="navigator.clipboard.writeText('{{ referral.promo_code }}').then(() => this.textContent = '✅ Скопировано!')"
+                    class="secondary">
+                <i data-lucide="copy" style="width: 16px; height: 16px;"></i>
+                Скопировать
+            </button>
+        </div>
+
+        {% if referral.total_invited > 0 %}
+        <div class="grid grid-3">
+            <div class="stat-card" style="padding: 1rem;">
+                <div class="stat-card__value" style="font-size: 1.75rem;">{{ referral.total_invited }}</div>
+                <div class="stat-card__label">Приглашено</div>
+            </div>
+            <div class="stat-card" style="padding: 1rem;">
+                <div class="stat-card__value" style="font-size: 1.75rem;">{{ referral.total_rewarded }}</div>
+                <div class="stat-card__label">Подписались</div>
+            </div>
+            <div class="stat-card" style="padding: 1rem;">
+                <div class="stat-card__value" style="font-size: 1.75rem;">{{ referral.total_bonus_days }}</div>
+                <div class="stat-card__label">Бонусных дней</div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}
+### end of app/templates/billing/manage.html ########################################################################
+
+### app/templates/billing/plans.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Тарифы — 101slovo{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+
+    <div class="text-center mb-4">
+        <div style="font-size: 3rem; margin-bottom: 0.5rem;">👑</div>
+        <h1 style="margin: 0; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+            Premium подписка
+        </h1>
+        <p style="color: var(--text-muted); margin-top: 0.5rem; font-size: 1.0625rem;">
+            Безлимитные уроки, без ограничений по общему числу
+        </p>
+    </div>
+
+    {% if subscription.is_premium %}
+    <div class="flash-info mb-4">
+        <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
+        У вас уже активна подписка <strong>{{ subscription.plan }}</strong>
+        до {{ subscription.expires_at.strftime('%d.%m.%Y') }}.
+        При покупке нового тарифа оставшиеся дни будут добавлены.
+    </div>
+    {% endif %}
+
+    <div class="grid grid-3" style="align-items: stretch;">
+
+        <!-- Free -->
+        <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--border-light);">
+            <h3 style="margin-top: 0;">Free</h3>
+            <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">0 ₽</div>
+            <ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    1 урок в день
+                </li>
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    5 уроков всего
+                </li>
+                <li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    До 10 слов в уроке
+                </li>
+            </ul>
+            <button disabled class="secondary" style="width: 100%;">Текущий план</button>
+        </div>
+
+        <!-- Monthly -->
+        <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
+            <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
+            <h3 style="margin-top: 0;">Месячная</h3>
+            <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">
+                {{ "%.0f" | format(monthly_price) }} ₽
+                <span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span>
+            </div>
+            <ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    До 5 уроков в день
+                </li>
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    Безлимит по общему числу
+                </li>
+                <li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    До 10 слов в уроке
+                </li>
+            </ul>
+            <form method="POST" action="/billing/subscribe">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <input type="hidden" name="plan" value="monthly">
+                <label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer; line-height: 1.5;">
+                    <input type="checkbox" required style="width: auto; margin-top: 2px; flex-shrink: 0;">
+                    <span>
+                        Согласен с <a href="/legal/offer" target="_blank">публичной офертой</a>,
+                        <a href="/legal/privacy" target="_blank">политикой конфиденциальности</a>
+                        и даю согласие на
+                        <a href="/legal/consent" target="_blank">обработку персональных данных</a>
+                        и автоматическое списание средств
+                    </span>
+                </label>
+                <button type="submit" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</button>
+            </form>
+        </div>
+
+        <!-- 6 Months -->
+        <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981; position: relative;">
+            <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">
+                −{{ discount_percent }}%
+            </div>
+            <h3 style="margin-top: 0;">6 месяцев</h3>
+            <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">
+                {{ "%.0f" | format(six_month_price) }} ₽
+            </div>
+            <div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+                {{ "%.0f" | format(six_month_per_month) }} ₽/мес ·
+                <s>{{ "%.0f" | format(six_month_full) }} ₽</s> ·
+                экономия {{ "%.0f" | format(six_month_saving) }} ₽
+            </div>
+            <ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    До 5 уроков в день
+                </li>
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    Безлимит по общему числу
+                </li>
+                <li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    До 10 слов в уроке
+                </li>
+            </ul>
+            <form method="POST" action="/billing/subscribe">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <input type="hidden" name="plan" value="six_months">
+                <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer;">
+                    <input type="checkbox" required style="width: auto;">
+                    Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
+                </label>
+                <button type="submit" style="width: 100%; background: #10b981;">
+                    Подключить за {{ "%.0f" | format(six_month_price) }} ₽
+                </button>
+            </form>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+### end of app/templates/billing/plans.html ########################################################################
+
 ### app/templates/dashboard.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Дашборд — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-    
+
     <!-- Hero -->
     <div class="hero">
         <p class="hero__greeting">Привет! 👋</p>
         <h1 class="hero__title">Готов к уроку?</h1>
     </div>
-    
+
+    <!-- Subscription banner -->
+    {% if subscription.is_premium %}
+    <div class="flash-info mb-4" style="border-color: rgba(99, 102, 241, 0.3); background: rgba(99, 102, 241, 0.05);">
+        <i data-lucide="crown" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+        <span>
+            <strong>Premium</strong> активна до {{ subscription.expires_at.strftime('%d.%m.%Y') }}
+            ({{ subscription.days_left }} дн.)
+        </span>
+        <a href="/billing" style="margin-left: auto; font-weight: 600; font-size: 0.875rem;">Управление →</a>
+    </div>
+    {% elif paywall.paywall_triggered %}
+    <div class="flash-warning mb-4">
+        <i data-lucide="alert-triangle" style="width: 18px; height: 18px;"></i>
+        <span>Бесплатные уроки исчерпаны.</span>
+        <a href="/billing/plans" style="margin-left: auto; font-weight: 600; font-size: 0.875rem;">Подключить Premium →</a>
+    </div>
+    {% elif paywall.free_lessons_remaining is not none %}
+    <div class="flash-info mb-4" style="background: rgba(59, 130, 246, 0.05);">
+        <i data-lucide="info" style="width: 18px; height: 18px;"></i>
+        <span>Осталось бесплатных уроков: <strong>{{ paywall.free_lessons_remaining }}</strong> из {{ paywall.free_lessons_total }}</span>
+    </div>
+    {% endif %}
+
     <!-- Stats Grid -->
     <div class="grid grid-3 mb-4">
         <div class="stat-card">
@@ -5636,7 +7571,6 @@ tbody tr:last-child td { border-bottom: none; }
             <div class="stat-card__label">Дней подряд</div>
             <div class="stat-card__sublabel">Рекорд: {{ streak.longest }} дн.</div>
         </div>
-        
         <div class="stat-card">
             <div class="stat-card__icon stat-card__icon--book">📚</div>
             <div class="stat-card__value">{{ word_summary.active }}</div>
@@ -5645,62 +7579,63 @@ tbody tr:last-child td { border-bottom: none; }
                 Изучено: {{ word_summary.mastered }} • Игнор: {{ word_summary.ignored }}
             </div>
         </div>
-        
         <div class="stat-card">
             <div class="stat-card__icon stat-card__icon--calendar">📅</div>
-            <div class="stat-card__value">{{ lessons_today }}/{{ daily_lesson_limit }}</div>
+            <div class="stat-card__value">{{ lessons_today }}/{{ paywall.effective_daily_limit }}</div>
             <div class="stat-card__label">Уроков сегодня</div>
             <div class="stat-card__sublabel">
-                {% if lessons_today >= daily_lesson_limit %}
-                    Лимит достигнут ✓
+                {% if lessons_today >= paywall.effective_daily_limit %}
+                Лимит достигнут ✓
                 {% else %}
-                    Осталось: {{ daily_lesson_limit - lessons_today }}
+                Осталось: {{ paywall.effective_daily_limit - lessons_today }}
                 {% endif %}
             </div>
         </div>
     </div>
-    
+
     <!-- CTA Section -->
-    {% if cta == 'resume' %}
-        <div class="cta-section" style="background: var(--gradient-warning);">
-            <h3>⏳ У вас есть незавершённый урок!</h3>
-            <p>Продолжайте с того места, где остановились</p>
-            <a href="/lesson/{{ cta_lesson_id }}" role="button">
-                Продолжить урок →
-            </a>
-        </div>
+    {% if paywall.paywall_triggered %}
+    {% include "partials/paywall.html" %}
+    {% elif cta == 'resume' %}
+    <div class="cta-section" style="background: var(--gradient-warning);">
+        <h3>⏳ У вас есть незавершённый урок!</h3>
+        <p>Продолжайте с того места, где остановились</p>
+        <a href="/lesson/{{ cta_lesson_id }}" role="button">
+            Продолжить урок →
+        </a>
+    </div>
     {% elif cta == 'limit_reached' %}
-        <div class="cta-section" style="background: var(--gradient-success);">
-            <h3>🎉 Отличная работа!</h3>
-            <p>Лимит уроков на сегодня исчерпан. Отдохните — завтра новые вызовы!</p>
-            <a href="/vocabulary" role="button">Повторить слова</a>
-        </div>
+    <div class="cta-section" style="background: var(--gradient-success);">
+        <h3>🎉 Отличная работа!</h3>
+        <p>Лимит уроков на сегодня исчерпан. Отдохните — завтра новые вызовы!</p>
+        <a href="/vocabulary" role="button">Повторить слова</a>
+    </div>
     {% else %}
-        <div class="cta-section">
-            <h3>🚀 Начнём новый урок?</h3>
-            <p>Подберём слова специально для вашего уровня</p>
-            <a href="/lesson/preview" role="button">
-                Подготовиться к уроку
+    <div class="cta-section">
+        <h3>🚀 Начнём новый урок?</h3>
+        <p>Подберём слова специально для вашего уровня</p>
+        <a href="/lesson/preview" role="button">
+            Подготовиться к уроку
+        </a>
+    </div>
+    {% endif %}
+
+    {% if in_progress_lesson %}
+    <div class="card mt-4" style="background: var(--surface-0);">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <h4 style="margin: 0 0 0.25rem 0;">📝 Незавершённый урок #{{ in_progress_lesson.lesson_number }}</h4>
+                <p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">
+                    Начат {{ in_progress_lesson.started_at.strftime('%d.%m.%Y в %H:%M') }}
+                </p>
+            </div>
+            <a href="/lesson/{{ in_progress_lesson.id }}" role="button" class="secondary">
+                Продолжить
             </a>
         </div>
+    </div>
     {% endif %}
-    
-    {% if in_progress_lesson %}
-        <div class="card mt-4" style="background: var(--surface-0);">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div>
-                    <h4 style="margin: 0 0 0.25rem 0;">📝 Незавершённый урок #{{ in_progress_lesson.lesson_number }}</h4>
-                    <p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">
-                        Начат {{ in_progress_lesson.started_at.strftime('%d.%m.%Y в %H:%M') }}
-                    </p>
-                </div>
-                <a href="/lesson/{{ in_progress_lesson.id }}" role="button" class="secondary">
-                    Продолжить
-                </a>
-            </div>
-        </div>
-    {% endif %}
-    
+
 </div>
 {% endblock %}
 ### end of app/templates/dashboard.html ########################################################################
@@ -5760,79 +7695,876 @@ tbody tr:last-child td { border-bottom: none; }
 ### app/templates/landing.html ########################################################################
 {% extends "base.html" %}
 {% block title %}101slovo — Учи английский в контексте{% endblock %}
-
 {% block content %}
 <div class="container--medium" style="margin: 0 auto; text-align: center; padding-top: 2rem;">
 
-  <!-- Hero -->
-  <div style="padding: 4rem 1rem;">
-    <span class="badge badge-active" style="font-size: 0.875rem; padding: 0.5rem 1rem; margin-bottom: 1.5rem;">
-      🚀 Powered by GigaChat AI
-    </span>
-    <h1 style="font-size: 3.5rem; line-height: 1.1; margin-bottom: 1.5rem; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-      Забудь зубрёжку.<br>Учи слова в контексте.
-    </h1>
-    <p style="font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 2.5rem auto; line-height: 1.6;">
-      101slovo генерирует персонализированные предложения с помощью ИИ и использует интервальное повторение (SRS), чтобы слова запоминались навсегда.
-    </p>
-    <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-      <a href="/register" role="button" class="btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
-        Начать бесплатно
-      </a>
-      <a href="/login" role="button" class="secondary btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
-        У меня есть аккаунт
-      </a>
-    </div>
-  </div>
-
-  <!-- Features -->
-  <div class="grid grid-3" style="margin-top: 4rem; text-align: left;">
-    <div class="card">
-      <div class="stat-card__icon" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">
-        <i data-lucide="brain" style="width: 24px; height: 24px;"></i>
-      </div>
-      <h3>Интервальное повторение</h3>
-      <p style="color: var(--text-secondary);">Научно доказанный алгоритм SRS покажет слово именно тогда, когда ты почти его забыл.</p>
+    <!-- Hero -->
+    <div style="padding: 4rem 1rem;">
+        <span class="badge badge-active" style="font-size: 0.875rem; padding: 0.5rem 1rem; margin-bottom: 1.5rem;">
+            🚀 Powered by GigaChat AI
+        </span>
+        <h1 style="font-size: 3.5rem; line-height: 1.1; margin-bottom: 1.5rem; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+            Забудь зубрёжку.<br>Учи слова в контексте.
+        </h1>
+        <p style="font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 2.5rem auto; line-height: 1.6;">
+            101slovo генерирует персонализированные предложения с помощью ИИ и использует интервальное повторение (SRS), чтобы слова запоминались навсегда.
+        </p>
+        <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+            <a href="/register" role="button" class="btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
+                Начать бесплатно
+            </a>
+            <a href="/login" role="button" class="secondary btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
+                У меня есть аккаунт
+            </a>
+        </div>
     </div>
 
-    <div class="card">
-      <div class="stat-card__icon" style="background: rgba(236, 72, 153, 0.1); color: var(--brand-secondary);">
-        <i data-lucide="sparkles" style="width: 24px; height: 24px;"></i>
-      </div>
-      <h3>Контекст от ИИ</h3>
-      <p style="color: var(--text-secondary);">GigaChat создаёт уникальные, естественные предложения специально для твоего уровня (A1–C2).</p>
+    <!-- Features -->
+    <div class="grid grid-3" style="margin-top: 4rem; text-align: left;">
+        <div class="card">
+            <div class="stat-card__icon" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">
+                <i data-lucide="brain" style="width: 24px; height: 24px;"></i>
+            </div>
+            <h3>Интервальное повторение</h3>
+            <p style="color: var(--text-secondary);">Научно доказанный алгоритм SRS покажет слово именно тогда, когда ты почти его забыл.</p>
+        </div>
+        <div class="card">
+            <div class="stat-card__icon" style="background: rgba(236, 72, 153, 0.1); color: var(--brand-secondary);">
+                <i data-lucide="sparkles" style="width: 24px; height: 24px;"></i>
+            </div>
+            <h3>Контекст от ИИ</h3>
+            <p style="color: var(--text-secondary);">GigaChat создаёт уникальные, естественные предложения специально для твоего уровня (A1–C2).</p>
+        </div>
+        <div class="card">
+            <div class="stat-card__icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
+                <i data-lucide="target" style="width: 24px; height: 24px;"></i>
+            </div>
+            <h3>Тематические словари</h3>
+            <p style="color: var(--text-secondary);">Выбирай общий, IT или travel словарь. Учи только то, что реально нужно тебе.</p>
+        </div>
     </div>
 
-    <div class="card">
-      <div class="stat-card__icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
-        <i data-lucide="target" style="width: 24px; height: 24px;"></i>
-      </div>
-      <h3>Тематические словари</h3>
-      <p style="color: var(--text-secondary);">Выбирай общий, IT или travel словарь. Учи только то, что реально нужно тебе.</p>
-    </div>
-  </div>
+    <!-- Pricing -->
+    <div style="margin-top: 5rem;">
+        <h2 style="margin-bottom: 0.5rem;">Тарифы</h2>
+        <p style="color: var(--text-muted); margin-bottom: 2rem;">Начни бесплатно — 5 уроков без оплаты</p>
 
-  <!-- Social Proof / Stats -->
-  <div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium);">
-    <div class="grid grid-3" style="text-align: center;">
-      <div>
-        <div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-primary);">6</div>
-        <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Стадий SRS</div>
-      </div>
-      <div>
-        <div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-secondary);">15с</div>
-        <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Среднее время оценки</div>
-      </div>
-      <div>
-        <div style="font-size: 2.5rem; font-weight: 800; color: #10b981;">100%</div>
-        <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Серверный рендеринг</div>
-      </div>
+        <div class="grid grid-3" style="text-align: left; align-items: stretch;">
+            <!-- Free -->
+            <div class="card" style="display: flex; flex-direction: column; padding: 2rem;">
+                <h3 style="margin-top: 0;">Free</h3>
+                <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">0 ₽</div>
+                <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
+                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ 1 урок в день</li>
+                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ 5 уроков всего</li>
+                    <li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
+                </ul>
+                <a href="/register" role="button" class="secondary" style="margin-top: 1.5rem; width: 100%; text-align: center;">Начать бесплатно</a>
+            </div>
+
+            <!-- Monthly -->
+            <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
+                <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
+                <h3 style="margin-top: 0;">Месячная</h3>
+                <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">300 ₽<span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span></div>
+                <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
+                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До 5 уроков в день</li>
+                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ Безлимит по общему числу</li>
+                    <li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
+                </ul>
+                <a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center;">Подключить</a>
+            </div>
+
+            <!-- 6 Months -->
+            <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981;">
+                <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">−25%</div>
+                <h3 style="margin-top: 0;">6 месяцев</h3>
+                <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">1 350 ₽</div>
+                <div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1rem;">225 ₽/мес · экономия 450 ₽</div>
+                <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
+                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До 5 уроков в день</li>
+                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ Безлимит по общему числу</li>
+                    <li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
+                </ul>
+                <a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center; background: #10b981;">Подключить</a>
+            </div>
+        </div>
     </div>
-  </div>
+
+    <!-- Referral -->
+    <div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium); text-align: center; padding: 2.5rem;">
+        <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">🎁</div>
+        <h3 style="margin-bottom: 0.5rem;">Пригласи друга — получи бонус</h3>
+        <p style="color: var(--text-secondary); max-width: 500px; margin: 0 auto;">
+            Поделись своим промокодом. Когда друг купит подписку, ты получишь
+            +{{ referral_bonus_days }} дней Premium. Твой друг тоже получит
+            +{{ referral_bonus_days }} дней к своей подписке.
+            Без ограничений по количеству друзей.
+        </p>
+    </div>
+
+    <!-- Social Proof / Stats -->
+    <div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium);">
+        <div class="grid grid-3" style="text-align: center;">
+            <div>
+                <div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-primary);">6</div>
+                <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Стадий SRS</div>
+            </div>
+            <div>
+                <div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-secondary);">15с</div>
+                <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Среднее время оценки</div>
+            </div>
+            <div>
+                <div style="font-size: 2.5rem; font-weight: 800; color: #10b981;">100%</div>
+                <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Серверный рендеринг</div>
+            </div>
+        </div>
+    </div>
 
 </div>
 {% endblock %}
 ### end of app/templates/landing.html ########################################################################
+
+### app/templates/legal/consent.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Согласие на обработку персональных данных — 101slovo{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+
+    <div style="margin-bottom: 2rem;">
+        <h1 style="background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+            Согласие на обработку персональных данных
+        </h1>
+        <p style="color: var(--text-muted); font-size: 0.875rem;">
+            Редакция от 09 октября 2026 г.
+        </p>
+    </div>
+
+    <div class="card" style="padding: 2rem; line-height: 1.8;">
+
+        <p>
+            Регистрируясь на Сервисе «101slovo» (<a href="https://101slovo.ru">101slovo.ru</a>),
+            я, действуя свободно, своей волей и в своём интересе, в соответствии со
+            ст. 9 Федерального закона от 27.07.2006 № 152-ФЗ «О персональных данных»,
+            даю согласие на обработку моих персональных данных на следующих условиях:
+        </p>
+
+        <h3>1. Оператор</h3>
+        <p>
+            <strong>Индивидуальный предприниматель Астахов Владимир Владимирович</strong><br>
+            ИНН: 501723142274<br>
+            ОГРНИП: 325508100740497<br>
+            Адрес: МО, г. Раменское, тер. СНТ Старниково, д.48<br>
+            Email: <a href="mailto:support@101slovo.ru">support@101slovo.ru</a><br>
+            Телефон: +7 (925) 010-58-94
+        </p>
+
+        <h3>2. Перечень персональных данных</h3>
+        <ul>
+            <li>Адрес электронной почты (email);</li>
+            <li>Хеш пароля (пароль не хранится в открытом виде);</li>
+            <li>Данные профиля обучения (уровень языка, выбранный словарь, настройки);</li>
+            <li>Данные об использовании Сервиса (история уроков, прогресс);</li>
+            <li>Технические данные (IP-адрес, данные браузера);</li>
+            <li>Реферальные данные (промокод, связь с пригласившим пользователем).</li>
+        </ul>
+
+        <h3>3. Цели обработки</h3>
+        <ul>
+            <li>Регистрация и аутентификация на Сервисе;</li>
+            <li>Предоставление услуг по изучению английского языка;</li>
+            <li>Персонализация учебного процесса;</li>
+            <li>Управление подпиской и обработка платежей;</li>
+            <li>Реализация реферальной программы;</li>
+            <li>Обеспечение безопасности Сервиса;</li>
+            <li>Улучшение качества предоставляемых услуг.</li>
+        </ul>
+
+        <h3>4. Перечень действий с данными</h3>
+        <p>
+            Сбор, запись, систематизация, накопление, хранение, уточнение,
+            извлечение, использование, обезличивание, блокирование, удаление,
+            уничтожение персональных данных.
+        </p>
+
+        <h3>5. Способы обработки</h3>
+        <p>
+            Обработка осуществляется с использованием средств автоматизации на территории
+            Российской Федерации. Данные хранятся на серверах, расположенных в РФ.
+        </p>
+
+        <h3>6. Передача третьим лицам</h3>
+        <p>
+            Данные могут передаваться:
+        </p>
+        <ul>
+            <li>НКО «ЮМани» ООО (ЮKassa) — для обработки платежей;</li>
+            <li>ПАО «Сбербанк» (сервис GigaChat) — для генерации учебного контента
+                (в обезличенном виде, без персональных идентификаторов);</li>
+            <li>Хостинг-провайдеру — для хранения данных.</li>
+        </ul>
+
+        <h3>7. Срок действия согласия</h3>
+        <p>
+            Согласие действует с момента регистрации до момента удаления аккаунта
+            или отзыва согласия.
+        </p>
+
+        <h3>8. Отзыв согласия</h3>
+        <p>
+            Я вправе отозвать настоящее согласие в любой момент, направив письменное
+            заявление на <a href="mailto:support@101slovo.ru">support@101slovo.ru</a>.
+            После отзыва согласия обработка данных прекращается, за исключением случаев,
+            предусмотренных п. 2–11 ч. 1 ст. 6 152-ФЗ.
+        </p>
+
+        <h3>9. Автоматизированная обработка</h3>
+        <p>
+            Я даю согласие на использование алгоритмов искусственного интеллекта
+            (включая сервис GigaChat) для обработки моих учебных данных (переводы,
+            слова) в целях генерации учебного контента и оценки прогресса.
+        </p>
+
+        <div style="background: var(--surface-50); padding: 1.5rem; border-radius: var(--radius-md); margin-top: 2rem; border-left: 4px solid var(--brand-primary);">
+            <p style="margin: 0; font-weight: 600;">
+                ✅ Регистрируясь на Сервисе, я подтверждаю, что ознакомился(ась)
+                с настоящей Политикой конфиденциальности и даю согласие на обработку
+                моих персональных данных на указанных условиях.
+            </p>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+### end of app/templates/legal/consent.html ########################################################################
+
+### app/templates/legal/offer.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Публичная оферта — 101slovo{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+
+    <div style="margin-bottom: 2rem;">
+        <h1 style="background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+            Публичная оферта на подписку
+        </h1>
+        <p style="color: var(--text-muted); font-size: 0.875rem;">
+            Редакция от 09 октября 2026 г.
+        </p>
+    </div>
+
+    <div class="card" style="padding: 2rem; line-height: 1.8;">
+
+        <h3>1. Общие положения</h3>
+        <p>
+            1.1. Настоящий документ является официальным предложением (публичной офертой)
+            <strong>Индивидуального предпринимателя Астахова Владимира Владимировича</strong>
+            (далее — «Исполнитель»), в адрес любого физического лица, достигшего 18 лет
+            (далее — «Заказчик» или «Пользователь»), заключить договор на оказание
+            платных услуг по предоставлению доступа к онлайн-сервису для изучения
+            английского языка «101slovo» (далее — «Сервис»), расположенному по адресу
+            <a href="https://101slovo.ru">101slovo.ru</a>.
+        </p>
+        <p>
+            1.2. Акцептом настоящей оферты является совершение Пользователем оплаты
+            подписки на Сервис. С момента успешной оплаты договор считается заключённым
+            на условиях настоящей оферты (ст. 438 ГК РФ).
+        </p>
+        <p>
+            1.3. Исполнитель вправе в одностороннем порядке изменять условия настоящей
+            оферты. Изменения вступают в силу с момента публикации новой редакции на
+            Сервисе. Продолжение использования Сервиса после внесения изменений означает
+            согласие Пользователя с новой редакцией.
+        </p>
+
+        <h3>2. Термины и определения</h3>
+        <ul>
+            <li><strong>Сервис</strong> — веб-приложение «101slovo» для изучения английских слов методом интервального повторения с использованием генеративного искусственного интеллекта.</li>
+            <li><strong>Подписка</strong> — платный период доступа к расширенным функциям Сервиса.</li>
+            <li><strong>Freemium</strong> — бесплатный ограниченный доступ к Сервису (5 уроков всего, 1 урок в день).</li>
+            <li><strong>Premium</strong> — платный доступ без ограничений по общему количеству уроков.</li>
+            <li><strong>ЮKassa (НКО «ЮМани» ООО)</strong> — платёжная система, через которую осуществляется приём платежей.</li>
+            <li><strong>Реферальная программа</strong> — программа, по которой Пользователи получают бонусные дни подписки за привлечение новых платящих пользователей.</li>
+        </ul>
+
+        <h3>3. Предмет договора</h3>
+        <p>
+            3.1. Исполнитель обязуется предоставить Пользователю доступ к Сервису
+            в объёме выбранного тарифа, а Пользователь обязуется оплатить подписку.
+        </p>
+        <p>
+            3.2. Услуги оказываются дистанционно, посредством сети Интернет.
+        </p>
+        <p>
+            3.3. В рамках подписки Пользователю предоставляются:
+        </p>
+        <ul>
+            <li>Неограниченное количество уроков (до 5 уроков в день);</li>
+            <li>Генерация предложений с использованием ИИ (GigaChat);</li>
+            <li>Оценка переводов с использованием ИИ;</li>
+            <li>Алгоритм интервального повторения (SRS);</li>
+            <li>Доступ к тематическим словарям (general, IT, travel);</li>
+            <li>Личный кабинет со статистикой обучения.</li>
+        </ul>
+
+        <h3>4. Тарифы и стоимость</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Тариф</th>
+                    <th>Стоимость</th>
+                    <th>Период</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Месячная подписка</td>
+                    <td>300 рублей</td>
+                    <td>30 календарных дней</td>
+                </tr>
+                <tr>
+                    <td>Подписка на 6 месяцев</td>
+                    <td>1 350 рублей (скидка 25%)</td>
+                    <td>180 календарных дней</td>
+                </tr>
+            </tbody>
+        </table>
+        <p>
+            4.2. Все цены указаны в рублях Российской Федерации и включают все применимые налоги.
+        </p>
+        <p>
+            4.3. Исполнитель вправе изменять стоимость подписки. Изменение стоимости
+            не распространяется на уже оплаченные периоды.
+        </p>
+
+        <h3>5. Порядок оплаты</h3>
+        <p>
+            5.1. Оплата производится через платёжную систему ЮKassa банковскими картами
+            (Мир, Visa, Mastercard), электронными кошельками и иными способами,
+            доступными в ЮKassa.
+        </p>
+        <p>
+            5.2. Оплата производится на условиях предоплаты (100% стоимости выбранного тарифа).
+        </p>
+        <p>
+            5.3. Моментом оплаты считается поступление денежных средств на счёт Исполнителя.
+        </p>
+        <p>
+            5.4. Фискальный чек направляется Пользователю в соответствии с 54-ФЗ
+            автоматически через платёжную систему ЮKassa.
+        </p>
+
+        <h3>6. Автопродление подписки</h3>
+        <p>
+            6.1. При оформлении месячной подписки Пользователь даёт согласие на
+            автоматическое списание стоимости подписки по истечении оплаченного периода
+            с привязанной банковской карты (рекуррентный платёж).
+        </p>
+        <p>
+            6.2. Пользователь вправе отменить автопродление в любой момент через
+            раздел «Подписка» личного кабинета. В этом случае доступ сохраняется
+            до конца оплаченного периода, после чего подписка не продлевается.
+        </p>
+        <p>
+            6.3. При неудачной попытке списания Исполнитель предоставляет
+            льготный период (1 день), в течение которого доступ к Сервису сохраняется.
+            Если оплата не поступает, доступ ограничивается до уровня Freemium.
+        </p>
+        <p>
+            6.4. Подписка на 6 месяцев является разовой покупкой и не продлевается
+            автоматически.
+        </p>
+
+        <h3>7. Реферальная программа</h3>
+        <p>
+            7.1. Пользователь получает уникальный промокод для приглашения новых пользователей.
+        </p>
+        <p>
+            7.2. Бонус (+{{ referral_bonus_days }} дней Premium) начисляется пригласившему
+            Пользователю после успешной оплаты подписки приглашённым пользователем.
+        </p>
+        <p>
+            7.3. Приглашённый Пользователь, зарегистрировавшийся по промокоду, также
+            получает бонус (+{{ referral_bonus_days }} дней Premium), который добавляется
+            к его первой оплаченной подписке.
+        </p>
+        <p>
+            7.4. Бонусные дни не подлежат обмену на денежные средства.
+        </p>
+        <p>
+            7.5. Исполнитель вправе отказать в начислении бонуса при выявлении
+            признаков злоупотребления (множественные регистрации с одного устройства,
+            использование временных почтовых адресов и т.п.).
+        </p>
+
+        <h3>8. Возврат средств</h3>
+        <p>
+            8.1. В соответствии со ст. 32 Закона РФ «О защите прав потребителей»
+            Пользователь вправе отказаться от услуг в любое время.
+        </p>
+        <p>
+            8.2. Возврат средств осуществляется за неиспользованный период подписки.
+            Расчёт производится пропорционально оставшимся дням.
+        </p>
+        <p>
+            8.3. Для запроса возврата необходимо направить письмо на
+            <a href="mailto:support@101slovo.ru">support@101slovo.ru</a>
+            с указанием email аккаунта и причины возврата.
+        </p>
+        <p>
+            8.4. Возврат осуществляется тем же способом, которым была произведена оплата,
+            в течение 10 рабочих дней с момента одобрения запроса.
+        </p>
+
+        <h3>9. Права и обязанности сторон</h3>
+        <h4>Исполнитель обязуется:</h4>
+        <ul>
+            <li>Обеспечить работоспособность Сервиса 24/7 (за исключением плановых технических работ);</li>
+            <li>Предоставлять техническую поддержку по электронной почте;</li>
+            <li>Обеспечивать защиту персональных данных Пользователя;</li>
+            <li>Уведомлять Пользователя о существенных изменениях в работе Сервиса.</li>
+        </ul>
+        <h4>Пользователь обязуется:</h4>
+        <ul>
+            <li>Предоставлять достоверные данные при регистрации;</li>
+            <li>Не передавать доступ к аккаунту третьим лицам;</li>
+            <li>Не использовать Сервис в противоправных целях;</li>
+            <li>Не предпринимать действий, направленных на обход технических ограничений.</li>
+        </ul>
+
+        <h3>10. Ограничение ответственности</h3>
+        <p>
+            10.1. Сервис предоставляется «как есть» (as is). Исполнитель не гарантирует
+            достижение конкретного уровня владения языком.
+        </p>
+        <p>
+            10.2. Исполнитель не несёт ответственности за качество генерации контента
+            искусственным интеллектом. Сгенерированные предложения и оценки являются
+            вспомогательным инструментом обучения и не заменяют профессиональное
+            языковое образование.
+        </p>
+        <p>
+            10.3. Исполнитель не несёт ответственности за временную недоступность
+            Сервиса, вызванную техническими сбоями, действиями третьих лиц
+            (провайдеров, платёжных систем) или обстоятельствами непреодолимой силы.
+        </p>
+        <p>
+            10.4. Совокупная ответственность Исполнителя по настоящему договору
+            ограничена суммой, фактически уплаченной Пользователем за текущий
+            период подписки.
+        </p>
+
+        <h3>11. Интеллектуальная собственность</h3>
+        <p>
+            11.1. Все материалы Сервиса (код, дизайн, тексты, алгоритмы) являются
+            интеллектуальной собственностью Исполнителя и защищены законодательством РФ.
+        </p>
+        <p>
+            11.2. Пользователь получает неисключительное право использования Сервиса
+            на период действия подписки.
+        </p>
+
+        <h3>12. Порядок разрешения споров</h3>
+        <p>
+            12.1. Все споры разрешаются путём переговоров. Претензионный порядок обязателен.
+            Срок рассмотрения претензии — 30 календарных дней.
+        </p>
+        <p>
+            12.2. При невозможности разрешения спора путём переговоров спор передаётся
+            в суд по месту нахождения Исполнителя в соответствии с законодательством РФ.
+        </p>
+
+        <h3>13. Заключительные положения</h3>
+        <p>
+            13.1. Настоящая оферта вступает в силу с момента её публикации на Сервисе
+            и действует бессрочно.
+        </p>
+        <p>
+            13.2. Во всём, что не предусмотрено настоящей офертой, стороны руководствуются
+            действующим законодательством Российской Федерации.
+        </p>
+        <p>
+            13.3. Недействительность отдельных положений оферты не влечёт
+            недействительности остальных положений.
+        </p>
+
+        <h3>14. Реквизиты Исполнителя</h3>
+        <div style="background: var(--surface-50); padding: 1.5rem; border-radius: var(--radius-md); margin-top: 1rem;">
+            <p style="margin: 0.25rem 0;"><strong>ИП Астахов Владимир Владимирович</strong></p>
+            <p style="margin: 0.25rem 0;">ИНН: 501723142274</p>
+            <p style="margin: 0.25rem 0;">ОГРНИП: 325508100740497</p>
+            <p style="margin: 0.25rem 0;">Адрес: МО, г. Раменское, тер. СНТ Старниково, д.48</p>
+            <p style="margin: 0.25rem 0;">Email: <a href="mailto:support@101slovo.ru">support@101slovo.ru</a></p>
+            <p style="margin: 0.25rem 0;">Телефон: +7 (925) 010-58-94</p>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+### end of app/templates/legal/offer.html ########################################################################
+
+### app/templates/legal/privacy.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Политика конфиденциальности — 101slovo{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+
+    <div style="margin-bottom: 2rem;">
+        <h1 style="background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+            Политика конфиденциальности
+        </h1>
+        <p style="color: var(--text-muted); font-size: 0.875rem;">
+            Редакция от 09 октября 2026 г.
+        </p>
+    </div>
+
+    <div class="card" style="padding: 2rem; line-height: 1.8;">
+
+        <h3>1. Общие положения</h3>
+        <p>
+            1.1. Настоящая Политика конфиденциальности (далее — «Политика») определяет
+            порядок обработки и защиты персональных данных пользователей веб-сервиса
+            «101slovo» (далее — «Сервис»), расположенного по адресу
+            <a href="https://101slovo.ru">101slovo.ru</a>.
+        </p>
+        <p>
+            1.2. Оператором персональных данных является
+            <strong>Индивидуальный предприниматель Астахов Владимир Владимирович</strong>
+            (ИНН 501723142274, ОГРНИП 325508100740497), далее — «Оператор».
+        </p>
+        <p>
+            1.3. Обработка персональных данных осуществляется в соответствии с
+            Федеральным законом от 27.07.2006 № 152-ФЗ «О персональных данных».
+        </p>
+        <p>
+            1.4. Используя Сервис и регистрируясь на нём, Пользователь подтверждает
+            своё согласие с условиями настоящей Политики.
+        </p>
+
+        <h3>2. Персональные данные, которые мы собираем</h3>
+        <p>2.1. При регистрации и использовании Сервиса мы обрабатываем:</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Категория данных</th>
+                    <th>Примеры</th>
+                    <th>Цель</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Идентификационные</td>
+                    <td>Email, хеш пароля</td>
+                    <td>Регистрация и аутентификация</td>
+                </tr>
+                <tr>
+                    <td>Профиль обучения</td>
+                    <td>Уровень языка, словарь, настройки уроков</td>
+                    <td>Персонализация обучения</td>
+                </tr>
+                <tr>
+                    <td>Данные об использовании</td>
+                    <td>История уроков, переводы, прогресс</td>
+                    <td>Работа алгоритма SRS, статистика</td>
+                </tr>
+                <tr>
+                    <td>Платёжные данные</td>
+                    <td>Статус платежа, сумма (без данных карты)</td>
+                    <td>Управление подпиской</td>
+                </tr>
+                <tr>
+                    <td>Технические данные</td>
+                    <td>IP-адрес, User-Agent, Cookies</td>
+                    <td>Безопасность, аналитика</td>
+                </tr>
+                <tr>
+                    <td>Реферальные данные</td>
+                    <td>Промокод, связь «пригласивший — приглашённый»</td>
+                    <td>Реферальная программа</td>
+                </tr>
+            </tbody>
+        </table>
+        <p>
+            2.2. Мы <strong>не собираем</strong> данные банковских карт. Платёжные данные
+            обрабатываются исключительно на стороне платёжной системы ЮKassa.
+        </p>
+        <p>
+            2.3. Мы <strong>не собираем</strong> специальные категории персональных данных
+            (раса, здоровье, убеждения и т.д.).
+        </p>
+
+        <h3>3. Цели обработки данных</h3>
+        <ul>
+            <li>Регистрация и аутентификация Пользователя;</li>
+            <li>Предоставление услуг по изучению английского языка;</li>
+            <li>Генерация учебных материалов с использованием ИИ;</li>
+            <li>Оценка переводов Пользователя;</li>
+            <li>Управление подпиской и приём платежей;</li>
+            <li>Реализация реферальной программы;</li>
+            <li>Улучшение качества Сервиса;</li>
+            <li>Обеспечение безопасности и предотвращение мошенничества;</li>
+            <li>Исполнение требований законодательства РФ.</li>
+        </ul>
+
+        <h3>4. Правовые основания обработки</h3>
+        <ul>
+            <li><strong>Согласие субъекта</strong> (п. 1 ч. 1 ст. 6 152-ФЗ) — при регистрации;</li>
+            <li><strong>Исполнение договора</strong> (п. 5 ч. 1 ст. 6 152-ФЗ) — при оказании платных услуг;</li>
+            <li><strong>Законный интерес</strong> (п. 7 ч. 1 ст. 6 152-ФЗ) — обеспечение безопасности, предотвращение фрода.</li>
+        </ul>
+
+        <h3>5. Использование искусственного интеллекта</h3>
+        <p>
+            5.1. Для генерации учебных предложений и оценки переводов Сервис использует
+            сервис <strong>GigaChat</strong>, предоставляемый ПАО «Сбербанк».
+        </p>
+        <p>
+            5.2. При использовании GigaChat передаются:
+        </p>
+        <ul>
+            <li>Слова для генерации предложений (без привязки к личности Пользователя);</li>
+            <li>Текст перевода Пользователя для оценки.</li>
+        </ul>
+        <p>
+            5.3. Передаваемые данные <strong>не содержат</strong> email, имени или иных
+            идентифицирующих данных Пользователя. Данные передаются в обезличенном виде.
+        </p>
+        <p>
+            5.4. Обработка данных на стороне GigaChat осуществляется в соответствии
+            с политикой конфиденциальности ПАО «Сбербанк».
+        </p>
+
+        <h3>6. Передача данных третьим лицам</h3>
+        <p>6.1. Мы можем передавать данные следующим третьим лицам:</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Получатель</th>
+                    <th>Какие данные</th>
+                    <th>Цель</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>ЮKassa (НКО «ЮМани» ООО)</td>
+                    <td>Сумма платежа, описание, ID заказа</td>
+                    <td>Приём оплаты, фискализация</td>
+                </tr>
+                <tr>
+                    <td>GigaChat (ПАО «Сбербанк»)</td>
+                    <td>Текст для генерации/оценки (без персональных данных)</td>
+                    <td>Генерация контента</td>
+                </tr>
+                <tr>
+                    <td>Хостинг-провайдер</td>
+                    <td>Данные на сервере</td>
+                    <td>Хранение и обработка</td>
+                </tr>
+            </tbody>
+        </table>
+        <p>
+            6.2. Мы <strong>не продаём</strong> и <strong>не передаём</strong> персональные
+            данные Пользователей третьим лицам в маркетинговых целях.
+        </p>
+
+        <h3>7. Cookies</h3>
+        <p>7.1. Сервис использует следующие типы cookies:</p>
+        <ul>
+            <li><strong>Сессионные</strong> (обязательные) — для аутентификации и защиты от CSRF-атак. Хранятся до 30 дней.</li>
+            <li><strong>Функциональные</strong> — для сохранения настроек интерфейса (тема оформления). Хранятся бессрочно в localStorage браузера.</li>
+        </ul>
+        <p>
+            7.2. Мы <strong>не используем</strong> рекламные и трекинговые cookies.
+        </p>
+        <p>
+            7.3. Пользователь может отключить cookies в настройках браузера,
+            однако это приведёт к невозможности использования Сервиса.
+        </p>
+
+        <h3>8. Хранение и защита данных</h3>
+        <p>
+            8.1. Данные хранятся на серверах, расположенных на территории
+            Российской Федерации, в соответствии с ч. 5 ст. 18 152-ФЗ.
+        </p>
+        <p>8.2. Меры защиты:</p>
+        <ul>
+            <li>Шифрование паролей алгоритмом bcrypt;</li>
+            <li>Передача данных по протоколу HTTPS (TLS 1.2+);</li>
+            <li>Хеширование сессионных токенов;</li>
+            <li>CSRF-защита всех форм;</li>
+            <li>Ограничение доступа к серверу (файрвол, fail2ban);</li>
+            <li>Регулярное обновление программного обеспечения.</li>
+        </ul>
+        <p>
+            8.3. Данные аккаунта хранятся до момента удаления аккаунта Пользователем
+            или до истечения 3 лет неактивности.
+        </p>
+
+        <h3>9. Права Пользователя</h3>
+        <p>В соответствии с 152-ФЗ Пользователь имеет право:</p>
+        <ul>
+            <li>Получить информацию об обработке своих данных;</li>
+            <li>Требовать уточнения или блокирования данных;</li>
+            <li>Требовать удаления данных;</li>
+            <li>Отозвать согласие на обработку;</li>
+            <li>Обжаловать действия Оператора в Роскомнадзор или в суд.</li>
+        </ul>
+        <p>
+            Для реализации прав направьте запрос на
+            <a href="mailto:support@101slovo.ru">support@101slovo.ru</a>
+            с указанием email аккаунта. Срок ответа — 30 дней.
+        </p>
+
+        <h3>10. Трансграничная передача данных</h3>
+        <p>
+            10.1. Персональные данные Пользователей не передаются за пределы
+            Российской Федерации.
+        </p>
+
+        <h3>11. Изменение Политики</h3>
+        <p>
+            11.1. Оператор вправе изменять настоящую Политику. Новая редакция
+            публикуется на данной странице.
+        </p>
+        <p>
+            11.2. При существенных изменениях Пользователь будет уведомлён
+            посредством in-app уведомления.
+        </p>
+
+        <h3>12. Контакты</h3>
+        <div style="background: var(--surface-50); padding: 1.5rem; border-radius: var(--radius-md); margin-top: 1rem;">
+            <p style="margin: 0.25rem 0;"><strong>ИП Астахов Владимир Владимирович</strong></p>
+            <p style="margin: 0.25rem 0;">ИНН: 501723142274</p>
+            <p style="margin: 0.25rem 0;">ОГРНИП: 325508100740497</p>
+            <p style="margin: 0.25rem 0;">Адрес: МО, г. Раменское, тер. СНТ Старниково, д.48</p>
+            <p style="margin: 0.25rem 0;">Email: <a href="mailto:support@101slovo.ru">support@101slovo.ru</a></p>
+            <p style="margin: 0.25rem 0;">Телефон: +7 (925) 010-58-94</p>
+        </div>
+
+    </div>
+</div>
+{% endblock %}
+### end of app/templates/legal/privacy.html ########################################################################
+
+### app/templates/legal/terms.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Условия использования — 101slovo{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+
+    <div style="margin-bottom: 2rem;">
+        <h1 style="background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+            Условия использования сервиса
+        </h1>
+        <p style="color: var(--text-muted); font-size: 0.875rem;">
+            Редакция от 09 октября 2026 г.
+        </p>
+    </div>
+
+    <div class="card" style="padding: 2rem; line-height: 1.8;">
+
+        <h3>1. Принятие условий</h3>
+        <p>
+            Используя Сервис «101slovo» (далее — «Сервис»), вы соглашаетесь
+            с настоящими Условиями использования. Если вы не согласны с условиями,
+            прекратите использование Сервиса.
+        </p>
+
+        <h3>2. Описание сервиса</h3>
+        <p>
+            101slovo — образовательная платформа для изучения английских слов методом
+            интервального повторения с использованием генеративного искусственного
+            интеллекта. Сервис генерирует контекстные предложения и оценивает переводы.
+        </p>
+
+        <h3>3. Регистрация и аккаунт</h3>
+        <ul>
+            <li>Для регистрации необходим действующий адрес электронной почты;</li>
+            <li>Один пользователь — один аккаунт;</li>
+            <li>Пользователь несёт ответственность за сохранность своих учётных данных;</li>
+            <li>Запрещена регистрация под чужим именем или с использованием временных email-адресов для обхода ограничений.</li>
+        </ul>
+
+        <h3>4. Допустимое использование</h3>
+        <p>Пользователь обязуется НЕ:</p>
+        <ul>
+            <li>Использовать Сервис в противоправных целях;</li>
+            <li>Пытаться получить несанкционированный доступ к данным других пользователей;</li>
+            <li>Использовать ботов, скрипты, парсеры для автоматизированного взаимодействия с Сервисом;</li>
+            <li>Обходить технические ограничения (лимиты уроков, пейволл);</li>
+            <li>Создавать множественные аккаунты для злоупотребления реферальной программой;</li>
+            <li>Копировать, распространять или создавать производные работы на основе контента Сервиса;</li>
+            <li>Передавать доступ к аккаунту третьим лицам.</li>
+        </ul>
+
+        <h3>5. Контент, генерируемый ИИ</h3>
+        <p>
+            5.1. Предложения, генерируемые искусственным интеллектом, предназначены
+            исключительно для учебных целей.
+        </p>
+        <p>
+            5.2. ИИ может допускать ошибки в генерации и оценке. Сервис не несёт
+            ответственности за точность сгенерированного контента.
+        </p>
+        <p>
+            5.3. Пользователь не приобретает прав интеллектуальной собственности
+            на сгенерированный контент.
+        </p>
+
+        <h3>6. Подписка и оплата</h3>
+        <ul>
+            <li>Условия подписки регулируются <a href="/legal/offer">Публичной офертой</a>;</li>
+            <li>Все платежи обрабатываются через ЮKassa;</li>
+            <li>Стоимость подписки может изменяться с уведомлением Пользователя.</li>
+        </ul>
+
+        <h3>7. Реферальная программа</h3>
+        <ul>
+            <li>Запрещено создавать множественные аккаунты для получения бонусов;</li>
+            <li>Запрещено использование ботов и автоматизированных средств для регистрации;</li>
+            <li>Исполнитель вправе аннулировать бонусы при выявлении нарушений;</li>
+            <li>Бонусные дни не конвертируются в денежные средства.</li>
+        </ul>
+
+        <h3>8. Прекращение использования</h3>
+        <p>
+            Исполнитель вправе приостановить или прекратить доступ Пользователя
+            к Сервису в случае нарушения настоящих Условий, без предварительного
+            уведомления и без возврата средств за неиспользованный период.
+        </p>
+
+        <h3>9. Отказ от гарантий</h3>
+        <p>
+            Сервис предоставляется «как есть». Исполнитель не гарантирует:
+        </p>
+        <ul>
+            <li>Достижение конкретного уровня владения языком;</li>
+            <li>Бесперебойную работу Сервиса;</li>
+            <li>Абсолютную точность оценок ИИ.</li>
+        </ul>
+
+        <h3>10. Изменение условий</h3>
+        <p>
+            Исполнитель вправе изменять настоящие Условия. Новая редакция публикуется
+            на данной странице. Продолжение использования Сервиса после внесения
+            изменений означает согласие с новой редакцией.
+        </p>
+
+        <h3>11. Применимое право</h3>
+        <p>
+            Настоящие Условия регулируются законодательством Российской Федерации.
+        </p>
+
+        <h3>12. Контакты</h3>
+        <p>
+            По вопросам использования Сервиса обращайтесь:
+            <a href="mailto:support@101slovo.ru">support@101slovo.ru</a>
+        </p>
+
+    </div>
+</div>
+{% endblock %}
+### end of app/templates/legal/terms.html ########################################################################
 
 ### app/templates/lesson/_suggestion_card.html ########################################################################
 {# Частичный шаблон для обновления карточки подсказки #}
@@ -6094,9 +8826,8 @@ tbody tr:last-child td { border-bottom: none; }
 {% extends "base.html" %}
 {% block title %}Подготовка к уроку — 101slovo{% endblock %}
 {% block content %}
-
 <div class="container--medium" style="margin: 0 auto;">
-    
+
     <!-- Заголовок страницы -->
     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2.5rem; flex-wrap: wrap; gap: 1rem;">
         <div>
@@ -6111,139 +8842,160 @@ tbody tr:last-child td { border-bottom: none; }
             </p>
         </div>
         <a href="/dashboard" class="secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.625rem 1rem;">
-            <i data-lucide="x" style="width: 16px; height: 16px;"></i> 
+            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
             Отмена
         </a>
     </div>
 
     {% if error %}
-        <div class="flash-error" style="margin-bottom: 1.5rem;">
-            <i data-lucide="alert-circle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
-            <span>{{ error }}</span>
-        </div>
+    <div class="flash-error" style="margin-bottom: 1.5rem;">
+        <i data-lucide="alert-circle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
+        <span>{{ error }}</span>
+    </div>
     {% endif %}
 
-    {% if limit_reached %}
-        <div class="card text-center" style="padding: 3rem 2rem; border-color: rgba(16, 185, 129, 0.3);">
-            <div style="font-size: 3rem; margin-bottom: 1rem;">🎉</div>
-            <h3 style="margin-bottom: 0.5rem;">Лимит на сегодня исчерпан!</h3>
-            <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
-                Вы прошли {{ lessons_today }} из {{ daily_lesson_limit }} уроков. Отдохните, мозг тоже нуждается в перезагрузке.
+    {% if limit_reached and paywall_reason == 'free_limit_reached' %}
+    <!-- Полный пейволл: бесплатные уроки исчерпаны -->
+    {% include "partials/paywall.html" %}
+
+    {% elif limit_reached and paywall_reason == 'daily_limit' %}
+    <!-- Дневной лимит исчерпан -->
+    <div class="card text-center" style="padding: 3rem 2rem; border-color: rgba(16, 185, 129, 0.3);">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">🎉</div>
+        <h3 style="margin-bottom: 0.5rem;">Лимит на сегодня исчерпан!</h3>
+        <p style="color: var(--text-muted); margin-bottom: 1rem;">
+            Вы прошли {{ lessons_today }} из {{ daily_lesson_limit }} уроков. Отдохните, мозг тоже нуждается в перезагрузке.
+        </p>
+
+        {% if not is_premium %}
+        <div style="padding: 1.25rem 1.5rem; background: rgba(99, 102, 241, 0.05); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: var(--radius-md); margin-bottom: 1.5rem; text-align: left; max-width: 480px; margin-left: auto; margin-right: auto;">
+            <p style="margin: 0 0 0.5rem 0; color: var(--text-secondary); font-size: 0.9375rem; display: flex; align-items: flex-start; gap: 0.5rem;">
+                <span style="flex-shrink: 0;">💡</span>
+                <span>На <strong>бесплатном тарифе</strong> доступен <strong>1 урок в день</strong> и 5 уроков всего.</span>
             </p>
-            <a href="/dashboard" role="button">На дашборд</a>
+            <p style="margin: 0; color: var(--text-secondary); font-size: 0.9375rem; display: flex; align-items: flex-start; gap: 0.5rem;">
+                <span style="flex-shrink: 0;">👑</span>
+                <span>С <strong>Premium</strong> — до <strong>5 уроков в день</strong> и без ограничений по общему числу.</span>
+            </p>
         </div>
-        
+        <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+            <a href="/billing/plans" role="button" style="background: var(--gradient-primary); display: inline-flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="crown" style="width: 16px; height: 16px;"></i>
+                Подключить Premium
+            </a>
+            <a href="/dashboard" role="button" class="secondary">На дашборд</a>
+        </div>
+        {% else %}
+        <a href="/dashboard" role="button">На дашборд</a>
+        {% endif %}
+    </div>
+
     {% elif state == 'dictionary_exhausted' %}
-        <div class="card text-center" style="padding: 3rem 2rem; border-color: rgba(245, 158, 11, 0.3);">
-            <div style="font-size: 3rem; margin-bottom: 1rem;">🏆</div>
-            <h3 style="margin-bottom: 0.5rem;">Словарь исчерпан!</h3>
-            <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
-                Вы изучили все доступные слова для текущего уровня и словаря.
-            </p>
-            <a href="/settings" role="button" class="secondary">Сменить уровень или словарь</a>
-        </div>
-        
+    <div class="card text-center" style="padding: 3rem 2rem; border-color: rgba(245, 158, 11, 0.3);">
+        <div style="font-size: 3rem; margin-bottom: 1rem;">🏆</div>
+        <h3 style="margin-bottom: 0.5rem;">Словарь исчерпан!</h3>
+        <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+            Вы изучили все доступные слова для текущего уровня и словаря.
+        </p>
+        <a href="/settings" role="button" class="secondary">Сменить уровень или словарь</a>
+    </div>
+
     {% else %}
-        
-        {% if level_up %}
-            <div class="flash-success" style="justify-content: center; font-size: 1.0625rem; margin-bottom: 2rem;">
-                <i data-lucide="trending-up" style="width: 22px; height: 22px;"></i>
-                🎉 Уровень повышен до <strong>{{ new_level }}</strong>! Добавлены слова нового уровня.
+
+    {% if level_up %}
+    <div class="flash-success" style="justify-content: center; font-size: 1.0625rem; margin-bottom: 2rem;">
+        <i data-lucide="trending-up" style="width: 22px; height: 22px;"></i>
+        🎉 Уровень повышен до <strong>{{ new_level }}</strong>! Добавлены слова нового уровня.
+    </div>
+    {% endif %}
+
+    <form hx-post="/lesson/start"
+          hx-target="body"
+          hx-swap="innerHTML"
+          hx-indicator="#start-spinner"
+          x-data="{ idempotencyKey: crypto.randomUUID() }">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <input type="hidden" name="idempotency_key" :value="idempotencyKey">
+
+        {% for w in all_words %}
+        <input type="hidden" name="word_ids" value="{{ w.word_id }}">
+        {% endfor %}
+
+        <!-- Блок: На повторение -->
+        {% if due_words %}
+        <div class="mb-4">
+            <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: var(--text-primary);">
+                <i data-lucide="rotate-ccw" style="width: 20px; height: 20px; color: var(--brand-accent);"></i>
+                На повторение
+                <span class="badge badge-review" style="margin-left: 0.25rem;">{{ due_words | length }}</span>
+            </h3>
+            <div class="grid grid-3" style="gap: 1rem;">
+                {% for w in due_words %}
+                <div class="card fade-in-up" style="padding: 1.25rem; border-left: 4px solid var(--brand-accent); transition: all 0.2s ease; cursor: default;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
+                        <div>
+                            <div style="font-weight: 700; font-size: 1.25rem; color: var(--text-primary);">{{ w.lemma }}</div>
+                            <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
+                        </div>
+                        <span class="badge badge-active" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">Stage {{ w.stage }}</span>
+                    </div>
+                    <div style="padding-top: 0.75rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.5;">
+                        {{ w.translations | join(', ') }}
+                    </div>
+                </div>
+                {% endfor %}
             </div>
+        </div>
         {% endif %}
 
-        <form hx-post="/lesson/start" 
-              hx-target="body" 
-              hx-swap="innerHTML" 
-              hx-indicator="#start-spinner" 
-              x-data="{ idempotencyKey: crypto.randomUUID() }">
-            
-            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-            <input type="hidden" name="idempotency_key" :value="idempotencyKey">
-            {% for w in all_words %}
-                <input type="hidden" name="word_ids" value="{{ w.word_id }}">
-            {% endfor %}
-
-            <!-- Блок: На повторение -->
-            {% if due_words %}
-                <div class="mb-4">
-                    <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: var(--text-primary);">
-                        <i data-lucide="rotate-ccw" style="width: 20px; height: 20px; color: var(--brand-accent);"></i>
-                        На повторение 
-                        <span class="badge badge-review" style="margin-left: 0.25rem;">{{ due_words | length }}</span>
-                    </h3>
-                    <div class="grid grid-3" style="gap: 1rem;">
-                        {% for w in due_words %}
-                            <div class="card fade-in-up" style="padding: 1.25rem; border-left: 4px solid var(--brand-accent); transition: all 0.2s ease; cursor: default;">
-                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
-                                    <div>
-                                        <div style="font-weight: 700; font-size: 1.25rem; color: var(--text-primary);">{{ w.lemma }}</div>
-                                        <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
-                                    </div>
-                                    <span class="badge badge-active" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">Stage {{ w.stage }}</span>
-                                </div>
-                                <div style="padding-top: 0.75rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.5;">
-                                    {{ w.translations | join(', ') }}
-                                </div>
-                            </div>
-                        {% endfor %}
+        <!-- Блок: Новые слова -->
+        {% if new_words %}
+        <div class="mb-4">
+            <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: var(--text-primary);">
+                <i data-lucide="plus-circle" style="width: 20px; height: 20px; color: var(--brand-secondary);"></i>
+                Новые слова
+                <span class="badge badge-new" style="margin-left: 0.25rem;">{{ new_words | length }}</span>
+            </h3>
+            <div class="grid grid-3" style="gap: 1rem;">
+                {% for w in new_words %}
+                <div class="card fade-in-up" style="padding: 1.25rem; border-left: 4px solid var(--brand-secondary); transition: all 0.2s ease; cursor: default;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
+                        <div>
+                            <div style="font-weight: 700; font-size: 1.25rem; color: var(--text-primary);">{{ w.lemma }}</div>
+                            <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
+                        </div>
+                        <span class="badge badge-new">Новое</span>
+                    </div>
+                    <div style="padding-top: 0.75rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.5;">
+                        {{ w.translations | join(', ') }}
                     </div>
                 </div>
-            {% endif %}
-
-            <!-- Блок: Новые слова -->
-            {% if new_words %}
-                <div class="mb-4">
-                    <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: var(--text-primary);">
-                        <i data-lucide="plus-circle" style="width: 20px; height: 20px; color: var(--brand-secondary);"></i>
-                        Новые слова 
-                        <span class="badge badge-new" style="margin-left: 0.25rem;">{{ new_words | length }}</span>
-                    </h3>
-                    <div class="grid grid-3" style="gap: 1rem;">
-                        {% for w in new_words %}
-                            <div class="card fade-in-up" style="padding: 1.25rem; border-left: 4px solid var(--brand-secondary); transition: all 0.2s ease; cursor: default;">
-                                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
-                                    <div>
-                                        <div style="font-weight: 700; font-size: 1.25rem; color: var(--text-primary);">{{ w.lemma }}</div>
-                                        <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
-                                    </div>
-                                    <span class="badge badge-new">Новое</span>
-                                </div>
-                                <div style="padding-top: 0.75rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.5;">
-                                    {{ w.translations | join(', ') }}
-                                </div>
-                            </div>
-                        {% endfor %}
-                    </div>
-                </div>
-            {% endif %}
-
-            <!-- CTA Section -->
-            <div class="cta-section" style="margin-top: 3rem; position: relative; overflow: hidden;">
-                <!-- Декоративный элемент на фоне -->
-                <div style="position: absolute; top: -50%; right: -10%; width: 300px; height: 300px; background: rgba(255,255,255,0.1); border-radius: 50%; filter: blur(40px); pointer-events: none;"></div>
-                
-                <h3 style="position: relative; z-index: 1;">Готовы начать?</h3>
-                <p style="position: relative; z-index: 1; opacity: 0.9; max-width: 500px; margin: 0.5rem auto 1.5rem auto;">
-                    В этом уроке <strong>{{ all_words | length }}</strong> слов. ИИ сгенерирует для них уникальный контекст.
-                </p>
-                
-                <div style="position: relative; z-index: 1; display: inline-block;">
-                    <button type="submit" class="btn-lg" style="background: white; color: var(--brand-primary); border: none; box-shadow: 0 4px 14px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 0.75rem;">
-                        <i data-lucide="play" style="width: 20px; height: 20px; fill: currentColor;"></i>
-                        Начать урок
-                    </button>
-                    
-                    <span class="htmx-indicator" id="start-spinner" style="margin-left: 1rem; color: white; font-weight: 500; display: inline-flex; align-items: center; gap: 0.5rem;">
-                        <span class="spinner" style="border-color: rgba(255,255,255,0.3); border-top-color: white;"></span>
-                        Генерация контекста...
-                    </span>
-                </div>
+                {% endfor %}
             </div>
-            
-        </form>
+        </div>
+        {% endif %}
+
+        <!-- CTA Section -->
+        <div class="cta-section" style="margin-top: 3rem; position: relative; overflow: hidden;">
+            <div style="position: absolute; top: -50%; right: -10%; width: 300px; height: 300px; background: rgba(255,255,255,0.1); border-radius: 50%; filter: blur(40px); pointer-events: none;"></div>
+            <h3 style="position: relative; z-index: 1;">Готовы начать?</h3>
+            <p style="position: relative; z-index: 1; opacity: 0.9; max-width: 500px; margin: 0.5rem auto 1.5rem auto;">
+                В этом уроке <strong>{{ all_words | length }}</strong> слов. ИИ сгенерирует для них уникальный контекст.
+            </p>
+            <div style="position: relative; z-index: 1; display: inline-block;">
+                <button type="submit" class="btn-lg" style="background: white; color: var(--brand-primary); border: none; box-shadow: 0 4px 14px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 0.75rem;">
+                    <i data-lucide="play" style="width: 20px; height: 20px; fill: currentColor;"></i>
+                    Начать урок
+                </button>
+                <span class="htmx-indicator" id="start-spinner" style="margin-left: 1rem; color: white; font-weight: 500; display: inline-flex; align-items: center; gap: 0.5rem;">
+                    <span class="spinner" style="border-color: rgba(255,255,255,0.3); border-top-color: white;"></span>
+                    Генерация контекста...
+                </span>
+            </div>
+        </div>
+    </form>
     {% endif %}
-    
+
 </div>
 {% endblock %}
 ### end of app/templates/lesson/preview.html ########################################################################
@@ -6498,47 +9250,48 @@ tbody tr:last-child td { border-bottom: none; }
             <i data-lucide="book-open" style="width: 20px; height: 20px; vertical-align: middle; margin-right: 4px;"></i>
             101slovo
         </a>
-
         <div class="navbar-menu">
             {% if request.state.user %}
-                <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
-                    <i data-lucide="layout-dashboard" style="width: 16px; height: 16px;"></i> Дашборд
-                </a>
-                <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
-                    <i data-lucide="book" style="width: 16px; height: 16px;"></i> Словарь
-                </a>
-                <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
-                    <i data-lucide="settings" style="width: 16px; height: 16px;"></i> Настройки
-                </a>
+            <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
+                <i data-lucide="layout-dashboard" style="width: 16px; height: 16px;"></i> Дашборд
+            </a>
+            <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
+                <i data-lucide="book" style="width: 16px; height: 16px;"></i> Словарь
+            </a>
+            <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
+                <i data-lucide="crown" style="width: 16px; height: 16px;"></i> Подписка
+            </a>
+            <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
+                <i data-lucide="settings" style="width: 16px; height: 16px;"></i> Настройки
+            </a>
+            {% if request.state.user.is_admin %}
+            <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
+                <i data-lucide="shield" style="width: 16px; height: 16px;"></i> Промпты
+            </a>
+            <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
+                <i data-lucide="bar-chart-3" style="width: 16px; height: 16px;"></i> Статистика
+            </a>
+            {% endif %}
 
-                {% if request.state.user.is_admin %}
-                    <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
-                        <i data-lucide="shield" style="width: 16px; height: 16px;"></i> Промпты
-                    </a>
-                    <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
-                        <i data-lucide="bar-chart-3" style="width: 16px; height: 16px;"></i> Статистика
-                    </a>
-                {% endif %}
+            <!-- Переключатель темы -->
+            <button onclick="toggleTheme()" class="nav-link" style="border: none; background: transparent; cursor: pointer;" title="Сменить тему">
+                <i data-lucide="sun" class="theme-icon-sun" style="width: 18px; height: 18px; display: none;"></i>
+                <i data-lucide="moon" class="theme-icon-moon" style="width: 18px; height: 18px;"></i>
+            </button>
 
-                <!-- Переключатель темы -->
-                <button onclick="toggleTheme()" class="nav-link" style="border: none; background: transparent; cursor: pointer;" title="Сменить тему">
-                    <i data-lucide="sun" class="theme-icon-sun" style="width: 18px; height: 18px; display: none;"></i>
-                    <i data-lucide="moon" class="theme-icon-moon" style="width: 18px; height: 18px;"></i>
+            <form action="/logout" method="POST" style="display: inline; margin-left: 0.5rem;">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit" class="navbar-logout">
+                    <i data-lucide="log-out" style="width: 14px; height: 14px;"></i> Выйти
                 </button>
-
-                <form action="/logout" method="POST" style="display: inline; margin-left: 0.5rem;">
-                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-                    <button type="submit" class="navbar-logout">
-                        <i data-lucide="log-out" style="width: 14px; height: 14px;"></i> Выйти
-                    </button>
-                </form>
+            </form>
             {% else %}
-                <button onclick="toggleTheme()" class="nav-link" style="border: none; background: transparent; cursor: pointer;" title="Сменить тему">
-                    <i data-lucide="sun" class="theme-icon-sun" style="width: 18px; height: 18px; display: none;"></i>
-                    <i data-lucide="moon" class="theme-icon-moon" style="width: 18px; height: 18px;"></i>
-                </button>
-                <a href="/login" class="nav-link">Войти</a>
-                <a href="/register" class="nav-link" style="background: var(--brand-primary); color: white;">Регистрация</a>
+            <button onclick="toggleTheme()" class="nav-link" style="border: none; background: transparent; cursor: pointer;" title="Сменить тему">
+                <i data-lucide="sun" class="theme-icon-sun" style="width: 18px; height: 18px; display: none;"></i>
+                <i data-lucide="moon" class="theme-icon-moon" style="width: 18px; height: 18px;"></i>
+            </button>
+            <a href="/login" class="nav-link">Войти</a>
+            <a href="/register" class="nav-link" style="background: var(--brand-primary); color: white;">Регистрация</a>
             {% endif %}
         </div>
     </div>
@@ -6566,7 +9319,6 @@ function updateThemeIcons(theme) {
     }
 }
 
-// Инициализация иконок при загрузке
 document.addEventListener('DOMContentLoaded', () => {
     updateThemeIcons(document.documentElement.getAttribute('data-theme'));
 });
@@ -6600,6 +9352,30 @@ document.addEventListener('DOMContentLoaded', () => {
     </nav>
 {% endif %}
 ### end of app/templates/partials/pagination.html ########################################################################
+
+### app/templates/partials/paywall.html ########################################################################
+{# Пейволл — показывается когда бесплатные уроки исчерпаны #}
+<div class="card text-center" style="padding: 3rem 2rem; border-color: rgba(99, 102, 241, 0.3);">
+    <div style="font-size: 3.5rem; margin-bottom: 1rem;">🔒</div>
+    <h3 style="margin-bottom: 0.5rem;">Бесплатные уроки исчерпаны</h3>
+    <p style="color: var(--text-muted); margin-bottom: 0.5rem;">
+        Вы прошли {{ free_lessons_total }} из {{ free_lessons_total }} бесплатных уроков.
+    </p>
+    <p style="color: var(--text-secondary); margin-bottom: 2rem; font-size: 1.0625rem;">
+        Подключите <strong>Premium</strong>, чтобы продолжить обучение без ограничений.
+    </p>
+    <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+        <a href="/billing/plans" role="button" class="btn-lg" style="background: var(--gradient-primary);">
+            <i data-lucide="crown" style="width: 18px; height: 18px;"></i>
+            Подключить Premium
+        </a>
+        <a href="/vocabulary" role="button" class="secondary btn-lg">
+            <i data-lucide="book" style="width: 18px; height: 18px;"></i>
+            Повторить слова
+        </a>
+    </div>
+</div>
+### end of app/templates/partials/paywall.html ########################################################################
 
 ### app/templates/partials/spinner.html ########################################################################
 <span class="htmx-indicator" id="{{ spinner_id | default('spinner') }}">
@@ -8837,6 +11613,126 @@ def downgrade() -> None:
     # ### end Alembic commands ###
 ### end of migrations/versions/4ff3f0ad8020_increase_pos_column_length_to_16.py ########################################################################
 
+### migrations/versions/add_monetization_tables.py ########################################################################
+"""add monetization tables
+
+Revision ID: a1b2c3d4e5f6
+Revises: 5a8c3d7e9f12
+Create Date: 2026-10-09 10:00:00.000000
+
+"""
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+# revision identifiers, used by Alembic.
+revision = 'a1b2c3d4e5f6'
+down_revision = '5a8c3d7e9f12'
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    # === Таблица payments ===
+    op.create_table('payments',
+        sa.Column('id', sa.BigInteger(), sa.Identity(always=False), nullable=False),
+        sa.Column('user_id', sa.BigInteger(), nullable=False),
+        sa.Column('plan', sa.String(length=20), nullable=False),
+        sa.Column('amount_kop', sa.Integer(), nullable=False),
+        sa.Column('status', sa.String(length=16), nullable=False),
+        sa.Column('yookassa_payment_id', sa.String(length=64), nullable=True),
+        sa.Column('description', sa.String(length=256), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('paid_at', sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('ix_payments_user_id', 'payments', ['user_id'], unique=False)
+    op.create_index('ix_payments_status', 'payments', ['status'], unique=False)
+    op.create_index('ix_payments_yookassa_id', 'payments', ['yookassa_payment_id'], unique=False)
+
+    # === Таблица subscriptions ===
+    op.create_table('subscriptions',
+        sa.Column('id', sa.BigInteger(), sa.Identity(always=False), nullable=False),
+        sa.Column('user_id', sa.BigInteger(), nullable=False),
+        sa.Column('plan', sa.String(length=20), nullable=False),
+        sa.Column('status', sa.String(length=16), nullable=False),
+        sa.Column('source', sa.String(length=16), nullable=False),
+        sa.Column('payment_id', sa.BigInteger(), nullable=True),
+        sa.Column('started_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('canceled_at', sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['payment_id'], ['payments.id'], ondelete='SET NULL'),
+        sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('ix_subscriptions_user_status', 'subscriptions', ['user_id', 'status'], unique=False)
+    op.create_index('ix_subscriptions_expires_at', 'subscriptions', ['expires_at'], unique=False)
+
+    # === Таблица promo_codes ===
+    op.create_table('promo_codes',
+        sa.Column('id', sa.BigInteger(), sa.Identity(always=False), nullable=False),
+        sa.Column('code', sa.String(length=6), nullable=False),
+        sa.Column('owner_user_id', sa.BigInteger(), nullable=False),
+        sa.Column('type', sa.String(length=20), nullable=False),
+        sa.Column('is_active', sa.Boolean(), nullable=False),
+        sa.Column('used_count', sa.Integer(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.ForeignKeyConstraint(['owner_user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('code', name='uq_promo_codes_code')
+    )
+    op.create_index('ix_promo_codes_owner', 'promo_codes', ['owner_user_id'], unique=False)
+
+    # === Таблица referrals ===
+    op.create_table('referrals',
+        sa.Column('id', sa.BigInteger(), sa.Identity(always=False), nullable=False),
+        sa.Column('referrer_user_id', sa.BigInteger(), nullable=False),
+        sa.Column('referred_user_id', sa.BigInteger(), nullable=False),
+        sa.Column('promo_code_id', sa.BigInteger(), nullable=False),
+        sa.Column('status', sa.String(length=16), nullable=False),
+        sa.Column('rewarded_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.ForeignKeyConstraint(['referrer_user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['referred_user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['promo_code_id'], ['promo_codes.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('referred_user_id', name='uq_referrals_referred_user')
+    )
+    op.create_index('ix_referrals_referrer', 'referrals', ['referrer_user_id'], unique=False)
+    op.create_index('ix_referrals_status', 'referrals', ['status'], unique=False)
+
+    # === Новые поля в users ===
+    op.add_column('users', sa.Column('referred_by_user_id', sa.BigInteger(), nullable=True))
+    op.add_column('users', sa.Column('promo_code_attempts', sa.SmallInteger(), nullable=False, server_default='0'))
+    op.create_foreign_key(
+        'fk_users_referred_by', 'users', 'users',
+        ['referred_by_user_id'], ['id'], ondelete='SET NULL'
+    )
+
+
+def downgrade() -> None:
+    op.drop_constraint('fk_users_referred_by', 'users', type_='foreignkey')
+    op.drop_column('users', 'promo_code_attempts')
+    op.drop_column('users', 'referred_by_user_id')
+
+    op.drop_index('ix_referrals_status', table_name='referrals')
+    op.drop_index('ix_referrals_referrer', table_name='referrals')
+    op.drop_table('referrals')
+
+    op.drop_index('ix_promo_codes_owner', table_name='promo_codes')
+    op.drop_table('promo_codes')
+
+    op.drop_index('ix_subscriptions_expires_at', table_name='subscriptions')
+    op.drop_index('ix_subscriptions_user_status', table_name='subscriptions')
+    op.drop_table('subscriptions')
+
+    op.drop_index('ix_payments_yookassa_id', table_name='payments')
+    op.drop_index('ix_payments_status', table_name='payments')
+    op.drop_index('ix_payments_user_id', table_name='payments')
+    op.drop_table('payments')
+### end of migrations/versions/add_monetization_tables.py ########################################################################
+
 ### migrations/versions/add_total_tokens_fields.py ########################################################################
 """add total_tokens fields
 
@@ -9416,6 +12312,10 @@ def main():
 if __name__ == "__main__":
     main()
 ### end of scripts/import_words.py ########################################################################
+
+### scripts/reset_for_monetization.py ########################################################################
+
+### end of scripts/reset_for_monetization.py ########################################################################
 
 ### scripts/seed.py ########################################################################
 # scripts/seed.py

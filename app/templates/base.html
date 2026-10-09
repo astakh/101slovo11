@@ -1,10 +1,11 @@
 <!-- app/templates/base.html -->
 <!DOCTYPE html>
-<html lang="ru" data-theme="light">
+<html lang="ru" data-theme="light" class="notranslate" translate="no">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#6366f1">
+    <meta name="google" content="notranslate">
     <title>{% block title %}101slovo{% endblock %}</title>
 
     <!-- Инициализация темы до рендера (предотвращает FOUC) -->
@@ -30,15 +31,22 @@
     <script defer src="/static/vendor/alpine.min.js"></script>
     <script defer src="/static/vendor/lucide.min.js"></script>
 
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+
     {% block head %}{% endblock %}
 </head>
 <body>
     {% include "partials/nav.html" %}
     {% include "partials/flash.html" %}
-    
+
     <main class="container fade-in-up" style="padding-top: 2rem; padding-bottom: 4rem;">
         {% block content %}{% endblock %}
     </main>
+
     <footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;">
         <p style="margin-bottom: 0.75rem;">© 2026 101slovo • Изучай английский в контексте</p>
         <p style="display: flex; justify-content: center; gap: 1.5rem; flex-wrap: wrap; font-size: 0.8125rem;">
@@ -52,7 +60,7 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
         document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
-        
+
         // Глобальный Alpine store для модалок
         document.addEventListener('alpine:init', () => {
             Alpine.store('addWordModal', {
@@ -62,7 +70,7 @@
             });
         });
     </script>
-    
+
     {% block scripts %}{% endblock %}
 </body>
 </html>
