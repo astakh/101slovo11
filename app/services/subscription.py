@@ -12,9 +12,12 @@ from app.models.event import Event
 logger = logging.getLogger(__name__)
 
 # Длительность подписок в днях
+# ВАЖНО: для "referral_bonus" базовых дней = 0,
+# добавляются только extra_days. Иначе бонус будет 30 + extra.
 PLAN_DAYS = {
     "monthly": 30,
     "six_months": 180,
+    "referral_bonus": 0,
 }
 
 
@@ -88,6 +91,9 @@ async def activate_subscription(
     Активирует подписку.
     Если уже есть активная — продлевает её.
 
+    Для реферальных бонусов (plan="referral_bonus", source="referral")
+    базовых дней 0 — добавляются только extra_days.
+
     Args:
         plan: "monthly" | "six_months" | "referral_bonus"
         source: "payment" | "referral"
@@ -95,8 +101,18 @@ async def activate_subscription(
         extra_days: дополнительные дни (для рефералки)
     """
     now = datetime.now(timezone.utc)
-    base_days = PLAN_DAYS.get(plan, 30)
+
+    # Для referral_bonus базовых дней нет (0), только бонусные.
+    # Для остальных планов берём из PLAN_DAYS.
+    base_days = PLAN_DAYS.get(plan, 0)
     total_days = base_days + extra_days
+
+    # Защита от нулевого или отрицательного продления
+    if total_days <= 0:
+        raise ValueError(
+            f"activate_subscription: total_days={total_days} "
+            f"(base={base_days}, extra={extra_days}, plan={plan})"
+        )
 
     # Проверяем, есть ли уже активная подписка
     existing = await get_active_subscription(db, user_id)
@@ -127,7 +143,8 @@ async def activate_subscription(
 
         logger.info(
             f"[SUBSCRIPTION] Extended for user_id={user_id}, "
-            f"plan={plan}, source={source}, +{total_days} days, "
+            f"plan={plan}, source={source}, +{total_days} days "
+            f"(base={base_days}, extra={extra_days}), "
             f"expires={existing.expires_at}"
         )
         return existing
@@ -163,7 +180,8 @@ async def activate_subscription(
 
     logger.info(
         f"[SUBSCRIPTION] Activated for user_id={user_id}, "
-        f"plan={plan}, source={source}, expires={expires_at}"
+        f"plan={plan}, source={source}, days={total_days}, "
+        f"expires={expires_at}"
     )
     return sub
 

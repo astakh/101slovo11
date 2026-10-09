@@ -34,13 +34,35 @@
     {% include "partials/paywall.html" %}
 
     {% elif limit_reached and paywall_reason == 'daily_limit' %}
+    <!-- Дневной лимит исчерпан -->
     <div class="card text-center" style="padding: 3rem 2rem; border-color: rgba(16, 185, 129, 0.3);">
         <div style="font-size: 3rem; margin-bottom: 1rem;">🎉</div>
         <h3 style="margin-bottom: 0.5rem;">Лимит на сегодня исчерпан!</h3>
-        <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
+        <p style="color: var(--text-muted); margin-bottom: 1rem;">
             Вы прошли {{ lessons_today }} из {{ daily_lesson_limit }} уроков. Отдохните, мозг тоже нуждается в перезагрузке.
         </p>
+
+        {% if not is_premium %}
+        <div style="padding: 1.25rem 1.5rem; background: rgba(99, 102, 241, 0.05); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: var(--radius-md); margin-bottom: 1.5rem; text-align: left; max-width: 480px; margin-left: auto; margin-right: auto;">
+            <p style="margin: 0 0 0.5rem 0; color: var(--text-secondary); font-size: 0.9375rem; display: flex; align-items: flex-start; gap: 0.5rem;">
+                <span style="flex-shrink: 0;">💡</span>
+                <span>На <strong>бесплатном тарифе</strong> доступен <strong>1 урок в день</strong> и 5 уроков всего.</span>
+            </p>
+            <p style="margin: 0; color: var(--text-secondary); font-size: 0.9375rem; display: flex; align-items: flex-start; gap: 0.5rem;">
+                <span style="flex-shrink: 0;">👑</span>
+                <span>С <strong>Premium</strong> — до <strong>5 уроков в день</strong> и без ограничений по общему числу.</span>
+            </p>
+        </div>
+        <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+            <a href="/billing/plans" role="button" style="background: var(--gradient-primary); display: inline-flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="crown" style="width: 16px; height: 16px;"></i>
+                Подключить Premium
+            </a>
+            <a href="/dashboard" role="button" class="secondary">На дашборд</a>
+        </div>
+        {% else %}
         <a href="/dashboard" role="button">На дашборд</a>
+        {% endif %}
     </div>
 
     {% elif state == 'dictionary_exhausted' %}

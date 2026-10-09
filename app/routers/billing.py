@@ -205,8 +205,9 @@ async def billing_success(
     Страница успеха после оплаты (return_url от ЮKassa).
     Проверяет статус платежа и активирует подписку если нужно.
 
-    ВАЖНО: Бонус рефереру начисляется ТОЛЬКО через webhook,
-    чтобы избежать двойного начисления.
+    ВАЖНО: Бонус рефереру НЕ начисляется здесь.
+    Бонус начисляется ТОЛЬКО через webhook, чтобы избежать
+    двойного начисления и проблемы с пропуском.
     """
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
@@ -247,11 +248,12 @@ async def billing_success(
                     source="payment",
                     payment_id=payment.id,
                 )
-                # ❌ НЕ вызываем reward_referrer_on_purchase здесь!
-                # Webhook придёт и начислит бонус.
+                # ❌ НЕ начисляем бонус здесь.
+                # Это сделает webhook.
                 logger.info(
                     f"[BILLING] Payment succeeded (via API check) | "
-                    f"payment_id={payment.id} | user_id={user.id}"
+                    f"payment_id={payment.id} | user_id={user.id} | "
+                    f"referral bonus will be granted by webhook"
                 )
             elif yookassa_status == "canceled":
                 payment.status = "failed"
@@ -308,8 +310,10 @@ async def billing_webhook(
 
     Защита: проверка IP-адреса отправителя.
 
-    ВАЖНО: Бонус рефереру начисляется ТОЛЬКО здесь,
-    чтобы избежать двойного начисления.
+    ВАЖНО: Бонус рефереру и реферированному начисляется
+    ТОЛЬКО здесь. Функция reward_referrer_on_purchase сама
+    защищена от повторного начисления (ищет только рефералы
+    со статусом "pending").
     """
     # 1. Проверка IP
     client_ip = request.client.host if request.client else ""
@@ -354,6 +358,7 @@ async def billing_webhook(
 
     # 4. Обрабатываем событие
     if event == "payment.succeeded":
+        # Активация подписки — только если платёж ещё не помечен
         if payment.status != "succeeded":
             payment.status = "succeeded"
             paid_at_raw = obj.get("captured_at") or obj.get("created_at")
@@ -366,9 +371,6 @@ async def billing_webhook(
                 source="payment",
                 payment_id=payment.id,
             )
-
-            # ✅ Начисляем бонус рефереру И реферированному ТОЛЬКО здесь
-            await reward_referrer_on_purchase(db, payment.user_id)
 
             logger.info(
                 f"[WEBHOOK] Payment succeeded | payment_id={payment.id} | "
@@ -386,6 +388,13 @@ async def billing_webhook(
                 },
             )
             db.add(event_record)
+
+        # ✅ Начисление бонуса — ВНЕ блока проверки статуса платежа.
+        # Это решает проблему, когда /billing/success уже пометил
+        # платёж как "succeeded", но бонус ещё не начислен.
+        # Функция сама защищена от повторного начисления
+        # (ищет только рефералы со статусом "pending").
+        await reward_referrer_on_purchase(db, payment.user_id)
 
     elif event == "payment.canceled":
         if payment.status not in ("succeeded", "failed"):
