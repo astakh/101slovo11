@@ -6,14 +6,15 @@
       101slovo
     </a>
 
-    <!-- Бургер — для ВСЕХ пользователей -->
+    <!-- Бургер — для ВСЕХ пользователей, виден только на мобильных -->
     <button class="navbar-burger"
+            type="button"
             @click="mobileMenuOpen = !mobileMenuOpen"
-            :aria-expanded="mobileMenuOpen"
+            :aria-expanded="mobileMenuOpen.toString()"
             aria-controls="mobile-menu"
-            aria-label="Открыть меню навигации">
+            aria-label="Меню навигации">
       <i data-lucide="menu" x-show="!mobileMenuOpen" style="width: 22px; height: 22px;" aria-hidden="true"></i>
-      <i data-lucide="x"    x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
+      <i data-lucide="x" x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
     </button>
 
     <!-- ===== ДЕСКТОПНОЕ МЕНЮ ===== -->
@@ -39,34 +40,33 @@
             <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
           </a>
         {% endif %}
-        <button onclick="toggleTheme()" class="nav-link" style="border:none;background:transparent;cursor:pointer;" aria-label="Сменить тему">
-          <i data-lucide="sun"  class="theme-icon-sun"  style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+        <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+          <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
           <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
         </button>
         <form action="/logout" method="POST" style="display:inline;margin-left:0.5rem;">
           <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-          <button type="submit" class="navbar-logout" aria-label="Выйти">
+          <button type="submit" class="navbar-logout" aria-label="Выйти из аккаунта">
             <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
           </button>
         </form>
       {% else %}
-        <button onclick="toggleTheme()" class="nav-link" style="border:none;background:transparent;cursor:pointer;" aria-label="Сменить тему">
-          <i data-lucide="sun"  class="theme-icon-sun"  style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+        <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+          <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
           <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
         </button>
         <a href="/login" class="nav-link">Войти</a>
-        <a href="/register" class="nav-link" style="background:var(--brand-primary);color:white;">Регистрация</a>
+        <a href="/register" class="nav-link nav-link--primary">Регистрация</a>
       {% endif %}
     </div>
 
   </div><!-- /.navbar-inner -->
 
   <!-- ===== МОБИЛЬНОЕ МЕНЮ ===== -->
-  <!-- :style управляет display напрямую; по умолчанию скрыто через CSS -->
+  <!-- Видимость управляется через класс .is-open (Alpine :class) -->
   <div class="navbar-mobile-menu"
        id="mobile-menu"
-       :style="{ display: mobileMenuOpen ? 'flex' : 'none' }"
-       x-cloak
+       :class="{ 'is-open': mobileMenuOpen }"
        @click.outside="mobileMenuOpen = false">
 
     {% if request.state.user %}
@@ -90,8 +90,8 @@
           <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
         </a>
       {% endif %}
-      <button onclick="toggleTheme(); mobileMenuOpen = false" class="nav-link" style="border:none;background:transparent;cursor:pointer;width:100%;text-align:left;" aria-label="Сменить тему">
-        <i data-lucide="sun"  class="theme-icon-sun"  style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+      <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
+        <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
         <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
         Сменить тему
       </button>
@@ -103,9 +103,9 @@
       </form>
     {% else %}
       <a href="/login" class="nav-link" @click="mobileMenuOpen = false">Войти</a>
-      <a href="/register" class="nav-link" style="background:var(--brand-primary);color:white;" @click="mobileMenuOpen = false">Регистрация</a>
-      <button onclick="toggleTheme(); mobileMenuOpen = false" class="nav-link" style="border:none;background:transparent;cursor:pointer;width:100%;text-align:left;" aria-label="Сменить тему">
-        <i data-lucide="sun"  class="theme-icon-sun"  style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+      <a href="/register" class="nav-link nav-link--primary" @click="mobileMenuOpen = false">Регистрация</a>
+      <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
+        <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
         <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
         Сменить тему
       </button>
@@ -117,15 +117,21 @@
 
 <script>
 function toggleTheme() {
-  const html = document.documentElement;
-  const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  var html = document.documentElement;
+  var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
   html.setAttribute('data-theme', next);
   localStorage.setItem('theme', next);
   updateThemeIcons(next);
 }
 function updateThemeIcons(theme) {
-  document.querySelectorAll('.theme-icon-sun').forEach(el => el.style.display = theme === 'dark' ? 'block' : 'none');
-  document.querySelectorAll('.theme-icon-moon').forEach(el => el.style.display = theme === 'dark' ? 'none' : 'block');
+  document.querySelectorAll('.theme-icon-sun').forEach(function(el) {
+    el.style.display = theme === 'dark' ? 'block' : 'none';
+  });
+  document.querySelectorAll('.theme-icon-moon').forEach(function(el) {
+    el.style.display = theme === 'dark' ? 'none' : 'block';
+  });
 }
-document.addEventListener('DOMContentLoaded', () => updateThemeIcons(document.documentElement.getAttribute('data-theme')));
+document.addEventListener('DOMContentLoaded', function() {
+  updateThemeIcons(document.documentElement.getAttribute('data-theme'));
+});
 </script>
