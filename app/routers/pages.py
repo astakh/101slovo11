@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, Depends, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db import get_db
 from app.deps import require_auth
 from app.services.dashboard import get_dashboard_data
@@ -21,8 +22,17 @@ async def dashboard_page(
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
 
-    data = await get_dashboard_data(db, user)
+    # ✅ ФИКС: Сначала получаем контекст пейволла, чтобы узнать
+    # эффективный дневной лимит (для freemium = 1, для premium = настройка).
     paywall = await get_paywall_context(db, user)
+
+    # Передаём эффективный лимит в дашборд для корректного CTA.
+    data = await get_dashboard_data(
+        db,
+        user,
+        effective_daily_limit=paywall["effective_daily_limit"],
+    )
+
     subscription = await get_subscription_status(db, user.id)
 
     return templates.TemplateResponse(
@@ -32,6 +42,8 @@ async def dashboard_page(
             "user": user,
             "paywall": paywall,
             "subscription": subscription,
+            # ✅ ФИКС: передаём явно для partials/paywall.html
+            "free_lessons_total": paywall.get("free_lessons_total"),
             **data,
         }
     )

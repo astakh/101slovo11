@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Дашборд — 101slovo{% endblock %}
+
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
 
@@ -11,8 +12,8 @@
 
     <!-- Subscription banner -->
     {% if subscription.is_premium %}
-    <div class="flash-info mb-4" style="border-color: rgba(99, 102, 241, 0.3); background: rgba(99, 102, 241, 0.05);">
-        <i data-lucide="crown" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
+    <div class="flash-info mb-4" style="border-color: var(--bg-info-border); background: var(--bg-info);" role="status">
+        <i data-lucide="crown" style="width: 18px; height: 18px; color: var(--brand-primary);" aria-hidden="true"></i>
         <span>
             <strong>Premium</strong> активна до {{ subscription.expires_at.strftime('%d.%m.%Y') }}
             ({{ subscription.days_left }} дн.)
@@ -20,14 +21,14 @@
         <a href="/billing" style="margin-left: auto; font-weight: 600; font-size: 0.875rem;">Управление →</a>
     </div>
     {% elif paywall.paywall_triggered %}
-    <div class="flash-warning mb-4">
-        <i data-lucide="alert-triangle" style="width: 18px; height: 18px;"></i>
+    <div class="flash-warning mb-4" role="alert">
+        <i data-lucide="alert-triangle" style="width: 18px; height: 18px;" aria-hidden="true"></i>
         <span>Бесплатные уроки исчерпаны.</span>
         <a href="/billing/plans" style="margin-left: auto; font-weight: 600; font-size: 0.875rem;">Подключить Premium →</a>
     </div>
     {% elif paywall.free_lessons_remaining is not none %}
-    <div class="flash-info mb-4" style="background: rgba(59, 130, 246, 0.05);">
-        <i data-lucide="info" style="width: 18px; height: 18px;"></i>
+    <div class="flash-info mb-4" style="background: var(--bg-info);" role="status">
+        <i data-lucide="info" style="width: 18px; height: 18px;" aria-hidden="true"></i>
         <span>Осталось бесплатных уроков: <strong>{{ paywall.free_lessons_remaining }}</strong> из {{ paywall.free_lessons_total }}</span>
     </div>
     {% endif %}
@@ -35,13 +36,13 @@
     <!-- Stats Grid -->
     <div class="grid grid-3 mb-4">
         <div class="stat-card">
-            <div class="stat-card__icon stat-card__icon--fire">🔥</div>
+            <div class="stat-card__icon stat-card__icon--fire" aria-hidden="true">🔥</div>
             <div class="stat-card__value">{{ streak.current }}</div>
             <div class="stat-card__label">Дней подряд</div>
             <div class="stat-card__sublabel">Рекорд: {{ streak.longest }} дн.</div>
         </div>
         <div class="stat-card">
-            <div class="stat-card__icon stat-card__icon--book">📚</div>
+            <div class="stat-card__icon stat-card__icon--book" aria-hidden="true">📚</div>
             <div class="stat-card__value">{{ word_summary.active }}</div>
             <div class="stat-card__label">Активных слов</div>
             <div class="stat-card__sublabel">
@@ -49,14 +50,14 @@
             </div>
         </div>
         <div class="stat-card">
-            <div class="stat-card__icon stat-card__icon--calendar">📅</div>
+            <div class="stat-card__icon stat-card__icon--calendar" aria-hidden="true">📅</div>
             <div class="stat-card__value">{{ lessons_today }}/{{ paywall.effective_daily_limit }}</div>
             <div class="stat-card__label">Уроков сегодня</div>
             <div class="stat-card__sublabel">
                 {% if lessons_today >= paywall.effective_daily_limit %}
-                Лимит достигнут ✓
+                    Лимит достигнут ✓
                 {% else %}
-                Осталось: {{ paywall.effective_daily_limit - lessons_today }}
+                    Осталось: {{ paywall.effective_daily_limit - lessons_today }}
                 {% endif %}
             </div>
         </div>
@@ -64,7 +65,7 @@
 
     <!-- CTA Section -->
     {% if paywall.paywall_triggered %}
-    {% include "partials/paywall.html" %}
+        {% include "partials/paywall.html" %}
     {% elif cta == 'resume' %}
     <div class="cta-section" style="background: var(--gradient-warning);">
         <h3>⏳ У вас есть незавершённый урок!</h3>
@@ -104,6 +105,5 @@
         </div>
     </div>
     {% endif %}
-
 </div>
 {% endblock %}

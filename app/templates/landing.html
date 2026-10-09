@@ -2,129 +2,134 @@
 {% block title %}101slovo — Учи английский в контексте{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto; text-align: center; padding-top: 2rem;">
-
-    <!-- Hero -->
-    <div style="padding: 4rem 1rem;">
-        <span class="badge badge-active" style="font-size: 0.875rem; padding: 0.5rem 1rem; margin-bottom: 1.5rem;">
-            🚀 Powered by GigaChat AI
-        </span>
-        <h1 style="font-size: 3.5rem; line-height: 1.1; margin-bottom: 1.5rem; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-            Забудь зубрёжку.<br>Учи слова в контексте.
-        </h1>
-        <p style="font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 2.5rem auto; line-height: 1.6;">
-            101slovo генерирует персонализированные предложения с помощью ИИ и использует интервальное повторение (SRS), чтобы слова запоминались навсегда.
-        </p>
-        <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-            <a href="/register" role="button" class="btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
-                Начать бесплатно
-            </a>
-            <a href="/login" role="button" class="secondary btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
-                У меня есть аккаунт
-            </a>
-        </div>
-    </div>
-
-    <!-- Features -->
-    <div class="grid grid-3" style="margin-top: 4rem; text-align: left;">
-        <div class="card">
-            <div class="stat-card__icon" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">
-                <i data-lucide="brain" style="width: 24px; height: 24px;"></i>
-            </div>
-            <h3>Интервальное повторение</h3>
-            <p style="color: var(--text-secondary);">Научно доказанный алгоритм SRS покажет слово именно тогда, когда ты почти его забыл.</p>
-        </div>
-        <div class="card">
-            <div class="stat-card__icon" style="background: rgba(236, 72, 153, 0.1); color: var(--brand-secondary);">
-                <i data-lucide="sparkles" style="width: 24px; height: 24px;"></i>
-            </div>
-            <h3>Контекст от ИИ</h3>
-            <p style="color: var(--text-secondary);">GigaChat создаёт уникальные, естественные предложения специально для твоего уровня (A1–C2).</p>
-        </div>
-        <div class="card">
-            <div class="stat-card__icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
-                <i data-lucide="target" style="width: 24px; height: 24px;"></i>
-            </div>
-            <h3>Тематические словари</h3>
-            <p style="color: var(--text-secondary);">Выбирай общий, IT или travel словарь. Учи только то, что реально нужно тебе.</p>
-        </div>
-    </div>
-
-    <!-- Pricing -->
-    <div style="margin-top: 5rem;">
-        <h2 style="margin-bottom: 0.5rem;">Тарифы</h2>
-        <p style="color: var(--text-muted); margin-bottom: 2rem;">Начни бесплатно — 5 уроков без оплаты</p>
-
-        <div class="grid grid-3" style="text-align: left; align-items: stretch;">
-            <!-- Free -->
-            <div class="card" style="display: flex; flex-direction: column; padding: 2rem;">
-                <h3 style="margin-top: 0;">Free</h3>
-                <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">0 ₽</div>
-                <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
-                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ 1 урок в день</li>
-                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ 5 уроков всего</li>
-                    <li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
-                </ul>
-                <a href="/register" role="button" class="secondary" style="margin-top: 1.5rem; width: 100%; text-align: center;">Начать бесплатно</a>
-            </div>
-
-            <!-- Monthly -->
-            <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
-                <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
-                <h3 style="margin-top: 0;">Месячная</h3>
-                <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">300 ₽<span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span></div>
-                <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
-                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До 5 уроков в день</li>
-                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ Безлимит по общему числу</li>
-                    <li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
-                </ul>
-                <a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center;">Подключить</a>
-            </div>
-
-            <!-- 6 Months -->
-            <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981;">
-                <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">−25%</div>
-                <h3 style="margin-top: 0;">6 месяцев</h3>
-                <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">1 350 ₽</div>
-                <div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1rem;">225 ₽/мес · экономия 450 ₽</div>
-                <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
-                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До 5 уроков в день</li>
-                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ Безлимит по общему числу</li>
-                    <li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
-                </ul>
-                <a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center; background: #10b981;">Подключить</a>
-            </div>
-        </div>
-    </div>
-
-    <!-- Referral -->
-    <div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium); text-align: center; padding: 2.5rem;">
-        <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">🎁</div>
-        <h3 style="margin-bottom: 0.5rem;">Пригласи друга — получи бонус</h3>
-        <p style="color: var(--text-secondary); max-width: 500px; margin: 0 auto;">
-            Поделись своим промокодом. Когда друг купит подписку, ты получишь
-            +{{ referral_bonus_days }} дней Premium. Твой друг тоже получит
-            +{{ referral_bonus_days }} дней к своей подписке.
-            Без ограничений по количеству друзей.
-        </p>
-    </div>
-
-    <!-- Social Proof / Stats -->
-    <div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium);">
-        <div class="grid grid-3" style="text-align: center;">
-            <div>
-                <div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-primary);">6</div>
-                <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Стадий SRS</div>
-            </div>
-            <div>
-                <div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-secondary);">15с</div>
-                <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Среднее время оценки</div>
-            </div>
-            <div>
-                <div style="font-size: 2.5rem; font-weight: 800; color: #10b981;">100%</div>
-                <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Серверный рендеринг</div>
-            </div>
-        </div>
-    </div>
-
+<!-- Hero -->
+<div style="padding: 4rem 1rem;">
+<span class="badge badge-active" style="font-size: 0.875rem; padding: 0.5rem 1rem; margin-bottom: 1.5rem;">
+🚀 Powered by GigaChat AI
+</span>
+<h1 style="font-size: 3.5rem; line-height: 1.1; margin-bottom: 1.5rem; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+Забудь зубрёжку.<br>Учи слова в контексте.
+</h1>
+<p style="font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 2.5rem auto; line-height: 1.6;">
+101slovo генерирует персонализированные предложения с помощью ИИ и использует интервальное повторение (SRS), чтобы слова запоминались навсегда.
+</p>
+<div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+<a href="/register" role="button" class="btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
+Начать бесплатно
+</a>
+<a href="/login" role="button" class="secondary btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
+У меня есть аккаунт
+</a>
+</div>
+</div>
+<!-- Features -->
+<div class="grid grid-3" style="margin-top: 4rem; text-align: left;">
+<div class="card">
+<div class="stat-card__icon" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">
+<i data-lucide="brain" style="width: 24px; height: 24px;"></i>
+</div>
+<h3>Интервальное повторение</h3>
+<p style="color: var(--text-secondary);">Научно доказанный алгоритм SRS покажет слово именно тогда, когда ты почти его забыл.</p>
+</div>
+<div class="card">
+<div class="stat-card__icon" style="background: rgba(236, 72, 153, 0.1); color: var(--brand-secondary);">
+<i data-lucide="sparkles" style="width: 24px; height: 24px;"></i>
+</div>
+<h3>Контекст от ИИ</h3>
+<p style="color: var(--text-secondary);">GigaChat создаёт уникальные, естественные предложения специально для твоего уровня (A1–C2).</p>
+</div>
+<div class="card">
+<div class="stat-card__icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
+<i data-lucide="target" style="width: 24px; height: 24px;"></i>
+</div>
+<h3>Тематические словари</h3>
+<p style="color: var(--text-secondary);">Выбирай общий, IT или travel словарь. Учи только то, что реально нужно тебе.</p>
+</div>
+</div>
+<!-- Pricing -->
+<div style="margin-top: 5rem;">
+<h2 style="margin-bottom: 0.5rem;">Тарифы</h2>
+<p style="color: var(--text-muted); margin-bottom: 2rem;">
+Начни бесплатно — {{ free_lessons_total }} уроков без оплаты
+</p>
+<div class="grid grid-3" style="text-align: left; align-items: stretch;">
+<!-- Free -->
+<div class="card" style="display: flex; flex-direction: column; padding: 2rem;">
+<h3 style="margin-top: 0;">Free</h3>
+<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">0 ₽</div>
+<ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
+<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">
+✅ {{ free_daily_limit }} урок в день
+</li>
+<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">
+✅ {{ free_lessons_total }} уроков всего
+</li>
+<li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
+</ul>
+<a href="/register" role="button" class="secondary" style="margin-top: 1.5rem; width: 100%; text-align: center;">Начать бесплатно</a>
+</div>
+<!-- Monthly -->
+<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
+<div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
+<h3 style="margin-top: 0;">Месячная</h3>
+<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">
+{{ "%.0f" | format(monthly_price) }} ₽<span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span>
+</div>
+<ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
+<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До 5 уроков в день</li>
+<li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
+</ul>
+<a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center;">
+Подключить за {{ "%.0f" | format(monthly_price) }} ₽
+</a>
+</div>
+<!-- 6 Months -->
+<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981;">
+<div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">−{{ discount_percent }}%</div>
+<h3 style="margin-top: 0;">6 месяцев</h3>
+<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">
+{{ "{:,.0f}".format(six_month_price) | replace(",", " ") }} ₽
+</div>
+<div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1rem;">
+{{ "%.0f" | format(six_month_per_month) }} ₽/мес · экономия {{ "%.0f" | format(six_month_saving) }} ₽
+</div>
+<ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
+<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До 5 уроков в день</li>
+<li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
+</ul>
+<a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center; background: #10b981;">
+Подключить за {{ "{:,.0f}".format(six_month_price) | replace(",", " ") }} ₽
+</a>
+</div>
+</div>
+</div>
+<!-- Referral -->
+<div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium); text-align: center; padding: 2.5rem;">
+<div style="font-size: 2.5rem; margin-bottom: 0.75rem;">🎁</div>
+<h3 style="margin-bottom: 0.5rem;">Пригласи друга — получи бонус</h3>
+<p style="color: var(--text-secondary); max-width: 500px; margin: 0 auto;">
+Поделись своим промокодом. Когда друг купит подписку, ты получишь
++{{ referral_bonus_days }} дней Premium. Твой друг тоже получит
++{{ referral_bonus_days }} дней к своей подписке.
+Без ограничений по количеству друзей.
+</p>
+</div>
+<!-- Social Proof / Stats -->
+<div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium);">
+<div class="grid grid-3" style="text-align: center;">
+<div>
+<div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-primary);">6</div>
+<div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Стадий SRS</div>
+</div>
+<div>
+<div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-secondary);">15с</div>
+<div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Среднее время оценки</div>
+</div>
+<div>
+<div style="font-size: 2.5rem; font-weight: 800; color: #10b981;">100%</div>
+<div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Серверный рендеринг</div>
+</div>
+</div>
+</div>
 </div>
 {% endblock %}

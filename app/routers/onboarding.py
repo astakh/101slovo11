@@ -10,7 +10,6 @@ from app.models.user import User
 from app.utils.timezones import get_available_timezones, is_valid_timezone
 from app.config import settings
 
-
 router = APIRouter(tags=["onboarding"])
 
 LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
@@ -39,9 +38,7 @@ def render_onboarding(
     form: dict | None = None,
 ):
     form = form or {}
-
     selected_timezone = form.get("timezone") or user.timezone or "UTC"
-
     return templates.TemplateResponse(
         "onboarding.html",
         {
@@ -52,6 +49,8 @@ def render_onboarding(
             "user": user,
             "error": error,
             "form": form,
+            # ✅ ФИКС: передаём settings для подсказки о лимите
+            "settings": settings,
         },
     )
 
@@ -63,7 +62,6 @@ async def onboarding_page(
 ):
     if user.is_onboarded:
         return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
-
     return render_onboarding(request, user)
 
 

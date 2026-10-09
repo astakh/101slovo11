@@ -1,9 +1,8 @@
 {% extends "base.html" %}
-
 {% block title %}Админ — Промпты{% endblock %}
 
 {% block content %}
-<div style="max-width: 900px; margin: 2rem auto;">
+<div class="container--medium" style="margin: 2rem auto;">
     <h2>🛠 Управление промптами</h2>
 
     {% if error %}
@@ -11,14 +10,16 @@
     {% endif %}
 
     {% for prompt in prompts %}
-    <div style="border: 1px solid var(--border); border-radius: 8px; margin-bottom: 1.5rem; padding: 1rem;"
+    <div class="card" style="margin-bottom: 1.5rem;"
          x-data="{ open: {% if edit_key == prompt.key %}true{% else %}false{% endif %} }">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
+
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
             <h4 style="margin: 0;">{{ prompt.key }}</h4>
             <button @click="open = !open" class="secondary" style="padding: 0.2rem 0.8rem;">
                 <span x-text="open ? 'Свернуть' : 'Редактировать'"></span>
             </button>
         </div>
+
         <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">
             Обновлён: {{ prompt.updated_at.strftime('%d.%m.%Y %H:%M') }}
         </p>
@@ -26,7 +27,8 @@
         <div x-show="open" x-transition style="margin-top: 1rem;">
             <form method="POST" action="/admin/prompts/{{ prompt.key }}">
                 <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-                <textarea name="system_template" rows="15" style="width: 100%; font-family: monospace; font-size: 0.9rem;">{% if edit_key == prompt.key %}{{ edit_value }}{% else %}{{ prompt.system_template }}{% endif %}</textarea>
+                <textarea name="system_template" rows="15"
+                          style="width: 100%; font-family: monospace; font-size: 0.9rem;">{% if edit_key == prompt.key %}{{ edit_value }}{% else %}{{ prompt.system_template }}{% endif %}</textarea>
                 <button type="submit">💾 Сохранить</button>
             </form>
         </div>

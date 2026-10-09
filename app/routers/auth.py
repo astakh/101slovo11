@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, Depends, Form, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db import get_db
 from app.services.auth import register_user, authenticate_user, create_session, delete_session
 from app.services.referral import apply_referral_code
@@ -48,20 +49,29 @@ async def register_post(
             {"request": request, "error": str(e), "email": email, "ref_code": promo_code}
         )
 
-    # Применяем реферальный код (если указан)
-    referral_message = None
+    # ✅ ФИКС: Применяем реферальный код (если указан)
+    # и показываем результат пользователю в любом случае.
+    referral_flash_category = None
+    referral_flash_message = None
+
     if promo_code.strip():
         success, message = await apply_referral_code(db, user, promo_code)
         if success:
-            referral_message = message
-        # Если не удалось — не блокируем регистрацию, просто логируем
-        # (пользователь сможет ввести код позже до первой оплаты)
+            referral_flash_category = "success"
+            referral_flash_message = message
+        else:
+            # ✅ Показываем ошибку промокода пользователю.
+            # Регистрация прошла успешно, но промокод не применён —
+            # используем "warning", чтобы не создавать ощущение провала.
+            referral_flash_category = "warning"
+            referral_flash_message = f"Промокод не применён: {message}"
 
     response = RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
     await create_session(db, user.id, response)
 
-    if referral_message:
-        add_flash(response, "success", referral_message)
+    # ✅ Добавляем flash-сообщение о результате промокода
+    if referral_flash_message:
+        add_flash(response, referral_flash_category, referral_flash_message)
 
     return response
 

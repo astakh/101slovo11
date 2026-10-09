@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 BG_TASK_INTERVAL = 3600
 
-
 async def _background_scheduler():
     """Фоновый планировщик периодических задач."""
     while True:
@@ -28,7 +27,6 @@ async def _background_scheduler():
                 await db.commit()
         except Exception as e:
             logger.error(f"[BG SCHEDULER] Error: {e}")
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -42,9 +40,7 @@ async def lifespan(app: FastAPI):
         pass
     logger.info("[LIFESPAN] Background scheduler stopped")
 
-
 app = FastAPI(title="101slovo", lifespan=lifespan)
-
 
 @app.middleware("http")
 async def bot_protection_middleware(request: Request, call_next):
@@ -56,7 +52,6 @@ async def bot_protection_middleware(request: Request, call_next):
                 "Cache-Control": "no-store",
             },
         )
-
     if request.method == "HEAD":
         if request.url.path == "/health":
             return await call_next(request)
@@ -64,9 +59,7 @@ async def bot_protection_middleware(request: Request, call_next):
             status_code=200,
             headers={"Cache-Control": "no-store"},
         )
-
     return await call_next(request)
-
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.add_middleware(AppMiddleware)
@@ -82,34 +75,47 @@ app.include_router(admin.router)
 app.include_router(billing.router)
 app.include_router(legal.router)
 
-
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if request.headers.get("HX-Request") and exc.headers and "HX-Redirect" in exc.headers:
         return Response(status_code=200, headers=exc.headers)
-
     if exc.status_code == 404:
         return templates.TemplateResponse("errors/404.html", {"request": request}, status_code=404)
     if exc.status_code in [401, 403]:
         return templates.TemplateResponse("errors/403.html", {"request": request}, status_code=exc.status_code)
     if exc.status_code == 503:
         return templates.TemplateResponse("errors/503.html", {"request": request}, status_code=503)
-
     return templates.TemplateResponse("errors/500.html", {"request": request}, status_code=500)
-
 
 @app.get("/")
 async def root(request: Request):
     if request.state.user:
         return Response(status_code=303, headers={"Location": "/dashboard"})
+
+    # ✅ ФИКС: вычисляем цены из settings вместо хардкода в шаблоне
+    monthly_price = app_settings.SUBSCRIPTION_MONTHLY_PRICE_KOP / 100
+    six_month_price = app_settings.SUBSCRIPTION_6M_PRICE_KOP / 100
+    six_month_per_month = six_month_price / 6
+    six_month_full = monthly_price * 6
+    six_month_saving = six_month_full - six_month_price
+
     return templates.TemplateResponse(
         "landing.html",
         {
             "request": request,
             "referral_bonus_days": app_settings.REFERRAL_BONUS_DAYS,
+            # Цены
+            "monthly_price": monthly_price,
+            "six_month_price": six_month_price,
+            "six_month_per_month": six_month_per_month,
+            "six_month_full": six_month_full,
+            "six_month_saving": six_month_saving,
+            "discount_percent": app_settings.SUBSCRIPTION_6M_DISCOUNT_PERCENT,
+            # Freemium лимиты
+            "free_lessons_total": app_settings.FREE_LESSONS_TOTAL_LIMIT,
+            "free_daily_limit": app_settings.FREE_LESSON_PER_DAY_LIMIT,
         },
     )
-
 
 @app.get("/health")
 async def health():

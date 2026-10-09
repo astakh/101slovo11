@@ -1,8 +1,14 @@
 {# Частичный шаблон для обновления карточки подсказки #}
-<div class="suggestion-card" style="padding: 0.5rem; border: 1px solid var(--border); border-radius: 4px; margin-bottom: 0.5rem;">
+<div class="suggestion-card" role="status" aria-live="polite">
     {% if word.state == 'added' %}
-    <span>✅ <strong>{{ word.lemma }}</strong> — {{ word.translation }} (добавлено)</span>
+        <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-success-strong);">
+            <i data-lucide="check-circle" style="width: 18px; height: 18px;" aria-hidden="true"></i>
+            <strong>{{ word.lemma }}</strong> — {{ word.translation }} (добавлено)
+        </div>
     {% elif word.state == 'ignored' %}
-    <span>🚫 <strong>{{ word.lemma }}</strong> — {{ word.translation }} (пропущено)</span>
+        <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-muted);">
+            <i data-lucide="x-circle" style="width: 18px; height: 18px;" aria-hidden="true"></i>
+            <s>{{ word.lemma }}</s> — <s>{{ word.translation }}</s> (пропущено)
+        </div>
     {% endif %}
 </div>

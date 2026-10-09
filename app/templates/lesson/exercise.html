@@ -1,25 +1,20 @@
 {% extends "base.html" %}
-
 {% block title %}Урок #{{ lesson.lesson_number }} — 101slovo{% endblock %}
-
 {% block head %}
 <style>
-    button:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-        transform: none !important;
-        box-shadow: none !important;
-    }
-
-    button[type="submit"] {
-        touch-action: manipulation;
-    }
+button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none !important;
+}
+button[type="submit"] {
+    touch-action: manipulation;
+}
 </style>
 {% endblock %}
-
 {% block content %}
 <div class="container--narrow" style="margin: 0 auto;">
-
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
         <div>
             <h2 style="margin: 0;">Урок #{{ lesson.lesson_number }}</h2>
@@ -27,24 +22,24 @@
                 Упражнение {{ exercise.order_index + 1 }}
             </p>
         </div>
-        <a href="/dashboard" class="secondary" style="padding: 0.5rem 1rem;">
-            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
+        <a href="/dashboard" class="secondary" style="padding: 0.5rem 1rem;" aria-label="Завершить урок и вернуться на дашборд">
+            <i data-lucide="x" style="width: 16px; height: 16px;" aria-hidden="true"></i>
             Завершить
         </a>
     </div>
 
-    <div id="exercise-container" translate="no">
+    <div id="exercise-container" translate="no" aria-live="polite" aria-atomic="true">
         <div class="exercise-card">
             <div style="margin-bottom: 0.5rem;">
                 <span class="badge badge-active">
-                    <i data-lucide="message-circle" style="width: 12px; height: 12px;"></i>
+                    <i data-lucide="message-circle" style="width: 12px; height: 12px;" aria-hidden="true"></i>
                     Предложение
                 </span>
             </div>
 
             <p class="exercise-sentence" lang="en" translate="no">{{ exercise.target_sentence }}</p>
 
-            <div class="exercise-words">
+            <div class="exercise-words" aria-label="Целевые слова упражнения">
                 {% for tw in exercise.target_words %}
                 <span class="badge badge-active" translate="no">
                     <strong>{{ tw.lemma }}</strong>
@@ -61,16 +56,15 @@
                   hx-swap="innerHTML"
                   hx-indicator="#eval-spinner"
                   translate="no"
-                  autocomplete="off">
-
+                  autocomplete="off"
+                  aria-label="Форма перевода предложения">
                 <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
                 <input type="hidden" name="exercise_id" value="{{ exercise.id }}">
 
                 <label for="user_translation" style="display: flex; align-items: center; gap: 0.5rem;">
-                    <i data-lucide="pen-line" style="width: 16px; height: 16px;"></i>
+                    <i data-lucide="pen-line" style="width: 16px; height: 16px;" aria-hidden="true"></i>
                     Ваш перевод на русский
                 </label>
-
                 <textarea id="user_translation"
                           name="user_translation"
                           rows="4"
@@ -81,20 +75,22 @@
                           autocapitalize="sentences"
                           autocorrect="off"
                           spellcheck="false"
-                          translate="no"></textarea>
+                          translate="no"
+                          aria-describedby="translation-hint"></textarea>
+                <span id="translation-hint" class="visually-hidden">
+                    Переведите английское предложение на русский язык, используя целевые слова.
+                </span>
 
                 <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 1rem;">
                     <button type="submit" style="flex: 1;" hx-disabled-elt="this">
-                        <i data-lucide="check" style="width: 16px; height: 16px;"></i>
+                        <i data-lucide="check" style="width: 16px; height: 16px;" aria-hidden="true"></i>
                         Проверить перевод
                     </button>
-
                     {% set spinner_id = "eval-spinner" %}
                     {% include "partials/spinner.html" %}
                 </div>
             </form>
         </div>
     </div>
-
 </div>
 {% endblock %}

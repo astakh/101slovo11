@@ -6,10 +6,11 @@ from app.models.prompt import Prompt
 from app.models.event import Event
 from app.models.user import User
 
-ALLOWED_KEYS = {"generate_sentences", "evaluate_translation"}
+ALLOWED_KEYS = {"generate_sentences", "evaluate_translation", "enrich_word"}
 
 # Обязательные плейсхолдеры для каждого ключа.
 # Для evaluate_translation плейсхолдеры требуются, т.к. они подставляются в helpers.py.
+# Для enrich_word плейсхолдер {word} подставляется в vocabulary_add.py.
 REQUIRED_PLACEHOLDERS = {
     "generate_sentences": {"{level}"},
     "evaluate_translation": {
@@ -18,6 +19,7 @@ REQUIRED_PLACEHOLDERS = {
         "{target_words_json}",
         "{uuid}",
     },
+    "enrich_word": {"{word}"},
 }
 
 # Все допустимые плейсхолдеры (чтобы не было лишних).
@@ -29,6 +31,7 @@ ALLOWED_PLACEHOLDERS = {
         "{target_words_json}",
         "{uuid}",
     },
+    "enrich_word": {"{word}"},
 }
 
 
@@ -61,7 +64,6 @@ def validate_prompt_template(key: str, template: str) -> list[str]:
 
     # Поиск плейсхолдеров вида {something}
     found = set(re.findall(r"\{[a-zA-Z_]+\}", template))
-
     required = REQUIRED_PLACEHOLDERS.get(key, set())
     allowed = ALLOWED_PLACEHOLDERS.get(key, set())
 
@@ -86,11 +88,14 @@ def validate_prompt_template(key: str, template: str) -> list[str]:
         "reference_translation": "Тестовый перевод.",
         "target_words_json": "[]",
         "uuid": "testuuid123",
+        "word": "run",
     }
+
     try:
         rendered = template
         for k, v in test_values.items():
             rendered = rendered.replace("{" + k + "}", v)
+
         # После замены не должно остаться незаполненных плейсхолдеров
         remaining = re.findall(r"\{[a-zA-Z_]+\}", rendered)
         if remaining:

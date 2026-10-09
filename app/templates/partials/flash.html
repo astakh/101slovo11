@@ -1,18 +1,18 @@
 {% if request.state.flashes %}
-    <div class="container" style="margin-top: 1.5rem;">
-        {% for flash in request.state.flashes %}
-            <div class="flash-{{ flash.category }}" role="alert">
-                {% if flash.category == 'success' %}
-                    <i data-lucide="check-circle" style="width: 20px; height: 20px; flex-shrink: 0;"></i>
-                {% elif flash.category == 'error' %}
-                    <i data-lucide="alert-circle" style="width: 20px; height: 20px; flex-shrink: 0;"></i>
-                {% elif flash.category == 'info' %}
-                    <i data-lucide="info" style="width: 20px; height: 20px; flex-shrink: 0;"></i>
-                {% elif flash.category == 'warning' %}
-                    <i data-lucide="alert-triangle" style="width: 20px; height: 20px; flex-shrink: 0;"></i>
-                {% endif %}
-                <span>{{ flash.message }}</span>
-            </div>
-        {% endfor %}
+<div class="container" style="margin-top: 1.5rem;" aria-live="polite" aria-atomic="true">
+    {% for flash in request.state.flashes %}
+    <div class="flash-{{ flash.category }}" role="alert">
+        {% if flash.category == 'success' %}
+        <i data-lucide="check-circle" style="width: 20px; height: 20px; flex-shrink: 0;" aria-hidden="true"></i>
+        {% elif flash.category == 'error' %}
+        <i data-lucide="alert-circle" style="width: 20px; height: 20px; flex-shrink: 0;" aria-hidden="true"></i>
+        {% elif flash.category == 'info' %}
+        <i data-lucide="info" style="width: 20px; height: 20px; flex-shrink: 0;" aria-hidden="true"></i>
+        {% elif flash.category == 'warning' %}
+        <i data-lucide="alert-triangle" style="width: 20px; height: 20px; flex-shrink: 0;" aria-hidden="true"></i>
+        {% endif %}
+        <span>{{ flash.message }}</span>
     </div>
+    {% endfor %}
+</div>
 {% endif %}

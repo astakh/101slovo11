@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request, Depends, Form, status, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.db import get_db
 from app.deps import require_auth, require_csrf
@@ -37,12 +38,8 @@ def _non_htmx_evaluate_success_redirect(result: dict) -> RedirectResponse:
     """
     Фолбэк-редирект для нативного POST-запроса, если по какой-то причине
     не сработал HTMX.
-
-    Вместо того чтобы отдавать голый фрагмент `exercise_result.html`,
-    переводим пользователя на следующий шаг урока и показываем flash-сообщение.
     """
     lesson_id = result["lesson_id"]
-
     if result.get("lesson_completed"):
         url = f"/lesson/{lesson_id}/summary"
     else:
@@ -186,7 +183,6 @@ async def lesson_start_post(
 
     # === ПРОВЕРКА ПЕЙВОЛЛА (общий лимит для freemium) ===
     access = await check_lesson_access(db, user)
-
     if not access["allowed"]:
         if request.headers.get("HX-Request"):
             return templates.TemplateResponse(
@@ -198,7 +194,6 @@ async def lesson_start_post(
                 },
                 status_code=422,
             )
-
         raise HTTPException(status_code=422, detail="Бесплатные уроки исчерпаны")
 
     logger.info(
@@ -215,28 +210,24 @@ async def lesson_start_post(
         )
     except LessonStartError as e:
         logger.warning(f"⚠️ LessonStartError: {e.code} - {e}")
-
         if request.headers.get("HX-Request"):
             return templates.TemplateResponse(
                 "lesson/preview.html",
                 {"request": request, "user": user, "error": str(e)},
                 status_code=422,
             )
-
         raise HTTPException(status_code=422, detail=str(e))
     except GigaChatError as e:
         logger.error(
             f"🚨 GigaChatError during lesson start | Code: {e.code} | "
             f"Message: {e} | HTTP Status: {e.http_status}"
         )
-
         if request.headers.get("HX-Request"):
             return templates.TemplateResponse(
                 "errors/503.html",
                 {"request": request, "error": str(e)},
                 status_code=503,
             )
-
         raise HTTPException(status_code=503, detail="LLM недоступен. Попробуйте позже.")
 
     logger.info(
@@ -268,7 +259,6 @@ async def lesson_exercise_page(
         )
 
     exercise = info["exercise"]
-
     if not exercise:
         return RedirectResponse(
             url=f"/lesson/{lesson_id}/summary",
@@ -296,20 +286,10 @@ async def lesson_evaluate_post(
 ):
     """
     Оценка перевода.
-
-    Основной сценарий — HTMX: возвращаем фрагмент `lesson/exercise_result.html`.
-
-    Дополнительная защита: если браузер по какой-то причине сделал обычный
-    нативный POST без заголовка `HX-Request`, не отдаём голый фрагмент,
-    а делаем redirect на следующее упражнение или на итоги урока.
     """
     is_htmx = bool(request.headers.get("HX-Request"))
-
     logger.info(f"📝 Оценка перевода | user_id={user.id} | exercise_id={exercise_id}")
 
-    # Небольшая предварительная загрузка только для нативного фолбэка.
-    # Если оценка упадёт с ошибкой, нам всё равно нужно знать,
-    # куда вернуть пользователя.
     stmt_fallback = select(LessonExercise).where(LessonExercise.id == exercise_id)
     result_fallback = await db.execute(stmt_fallback)
     fallback_exercise = result_fallback.scalar_one_or_none()
@@ -324,39 +304,24 @@ async def lesson_evaluate_post(
         )
     except LessonEvaluateError as e:
         logger.warning(f"⚠️ LessonEvaluateError: {e.code} - {e}")
-
         if is_htmx:
             return templates.TemplateResponse(
                 "lesson/exercise_result.html",
                 {"request": request, "user": user, "error": str(e)},
                 status_code=422,
             )
-
-        # Нативный фолбэк
         if e.code == "forbidden" or fallback_lesson_id is None:
-            return _non_htmx_evaluate_error_redirect(
-                None,
-                str(e),
-            )
-
+            return _non_htmx_evaluate_error_redirect(None, str(e))
         if e.code == "lesson_completed":
             return _non_htmx_evaluate_error_redirect(
-                fallback_lesson_id,
-                str(e),
-                to_summary=True,
-                category="info",
+                fallback_lesson_id, str(e), to_summary=True, category="info",
             )
-
-        return _non_htmx_evaluate_error_redirect(
-            fallback_lesson_id,
-            str(e),
-        )
+        return _non_htmx_evaluate_error_redirect(fallback_lesson_id, str(e))
     except GigaChatError as e:
         logger.error(
             f"🚨 GigaChatError during evaluation | Code: {e.code} | "
             f"Message: {e} | HTTP Status: {e.http_status}"
         )
-
         if is_htmx:
             return templates.TemplateResponse(
                 "lesson/exercise_result.html",
@@ -367,8 +332,6 @@ async def lesson_evaluate_post(
                 },
                 status_code=503,
             )
-
-        # Нативный фолбэк
         return _non_htmx_evaluate_error_redirect(
             fallback_lesson_id,
             "Сервис оценки временно недоступен. Попробуйте ещё раз.",
@@ -379,8 +342,6 @@ async def lesson_evaluate_post(
         f"status={result['evaluation']['status']}"
     )
 
-    # Если это был нативный запрос без HTMX — не отдаём фрагмент,
-    # а переводим пользователя на следующий шаг урока.
     if not is_htmx:
         return _non_htmx_evaluate_success_redirect(result)
 
@@ -424,25 +385,21 @@ async def lesson_suggestion_action(
         raise HTTPException(status_code=403, detail="Доступ запрещён")
 
     suggested = list(exercise.suggested_words or [])
-
     if word_index >= len(suggested):
         raise HTTPException(status_code=404, detail="Подсказка не найдена")
 
     word_data = suggested[word_index]
-    lemma = word_data.get("lemma", "")
-    translation = word_data.get("translation", "")
+
+    # ✅ ФИКС: Используем word_id, сохранённый при фильтрации,
+    # вместо повторного поиска по lemma (который мог не учитывать pos).
+    word_id = word_data.get("word_id")
 
     if action == "add":
-        lemma_key = compute_lemma_key(lemma)
-
-        stmt_word = select(Word).where(Word.lemma_key == lemma_key).limit(1)
-        result_word = await db.execute(stmt_word)
-        word = result_word.scalar_one_or_none()
-
-        if word:
+        if word_id:
+            # Проверяем, что запись ещё не создана (защита от повторного нажатия)
             stmt_uw = select(UserWord).where(
                 UserWord.user_id == user.id,
-                UserWord.word_id == word.id,
+                UserWord.word_id == word_id,
             )
             result_uw = await db.execute(stmt_uw)
             existing_uw = result_uw.scalar_one_or_none()
@@ -450,7 +407,7 @@ async def lesson_suggestion_action(
             if not existing_uw:
                 uw = UserWord(
                     user_id=user.id,
-                    word_id=word.id,
+                    word_id=word_id,
                     status="active",
                     stage=0,
                     due_lesson_number=user.last_lesson_number + 1,
@@ -461,20 +418,22 @@ async def lesson_suggestion_action(
                 existing_uw.status = "active"
                 existing_uw.stage = 0
                 existing_uw.due_lesson_number = user.last_lesson_number + 1
+            # Если уже active или mastered — ничего не делаем
+        else:
+            # word_id отсутствует (не должно происходить после фильтрации,
+            # но защищаемся от старых данных)
+            logger.warning(
+                f"[SUGGESTION] word_id missing for suggestion "
+                f"exercise_id={exercise_id}, word_index={word_index}"
+            )
 
-            word_data["state"] = "added"
+        word_data["state"] = "added"
 
     elif action == "ignore":
-        lemma_key = compute_lemma_key(lemma)
-
-        stmt_word = select(Word).where(Word.lemma_key == lemma_key).limit(1)
-        result_word = await db.execute(stmt_word)
-        word = result_word.scalar_one_or_none()
-
-        if word:
+        if word_id:
             stmt_uw = select(UserWord).where(
                 UserWord.user_id == user.id,
-                UserWord.word_id == word.id,
+                UserWord.word_id == word_id,
             )
             result_uw = await db.execute(stmt_uw)
             existing_uw = result_uw.scalar_one_or_none()
@@ -482,7 +441,7 @@ async def lesson_suggestion_action(
             if not existing_uw:
                 uw = UserWord(
                     user_id=user.id,
-                    word_id=word.id,
+                    word_id=word_id,
                     status="ignored",
                     stage=0,
                     source="suggestion",
@@ -491,13 +450,14 @@ async def lesson_suggestion_action(
             else:
                 existing_uw.status = "ignored"
 
-            word_data["state"] = "ignored"
-
+        word_data["state"] = "ignored"
     else:
         raise HTTPException(status_code=400, detail="Неизвестное действие")
 
+    # ✅ ФИКС: Явно помечаем JSON-колонку как изменённую
     suggested[word_index] = word_data
     exercise.suggested_words = suggested
+    flag_modified(exercise, "suggested_words")
     await db.flush()
 
     return templates.TemplateResponse(

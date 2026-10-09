@@ -1,9 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Итоги урока #{{ lesson.lesson_number }} — 101slovo{% endblock %}
+
 {% block content %}
 <div class="container--narrow" style="margin: 0 auto; text-align: center;">
+
     <div style="margin-bottom: 2rem;">
-        <div style="font-size: 4rem; margin-bottom: 0.5rem;">🎉</div>
+        <div style="font-size: 4rem; margin-bottom: 0.5rem;" aria-hidden="true">🎉</div>
         <h1 style="margin: 0; background: var(--gradient-success); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
             Урок #{{ lesson.lesson_number }} завершён!
         </h1>
@@ -15,28 +17,28 @@
             <div class="stat-card__value">{{ total_exercises }}</div>
             <div class="stat-card__label">Упражнений</div>
         </div>
-        <div class="stat-card" style="border-color: rgba(16, 185, 129, 0.3);">
-            <div class="stat-card__value" style="color: #059669;">{{ correct_words }}</div>
+        <div class="stat-card" style="border-color: var(--bg-success-border);">
+            <div class="stat-card__value" style="color: var(--text-success-strong);">{{ correct_words }}</div>
             <div class="stat-card__label">Верно</div>
         </div>
-        <div class="stat-card" style="border-color: rgba(245, 158, 11, 0.3);">
-            <div class="stat-card__value" style="color: #d97706;">{{ typo_words }}</div>
+        <div class="stat-card" style="border-color: var(--bg-warning-border);">
+            <div class="stat-card__value" style="color: var(--text-warning-strong);">{{ typo_words }}</div>
             <div class="stat-card__label">Опечатки</div>
         </div>
-        <div class="stat-card" style="border-color: rgba(239, 68, 68, 0.3);">
-            <div class="stat-card__value" style="color: #dc2626;">{{ failed_words }}</div>
+        <div class="stat-card" style="border-color: var(--bg-error-border);">
+            <div class="stat-card__value" style="color: var(--text-error-strong);">{{ failed_words }}</div>
             <div class="stat-card__label">Ошибки</div>
         </div>
     </div>
 
     <div class="card" style="background: var(--gradient-primary); color: white; border: none; padding: 2rem;">
-        <div style="display: flex; justify-content: center; gap: 3rem; align-items: center; flex-wrap: wrap;">
+        <div class="summary-streak-flex" style="display: flex; justify-content: center; gap: 3rem; align-items: center; flex-wrap: wrap;">
             <div>
-                <div style="font-size: 2.5rem; font-weight: 800; line-height: 1;">🔥 {{ streak.current }}</div>
+                <div style="font-size: 2.5rem; font-weight: 800; line-height: 1;" aria-hidden="true">🔥 {{ streak.current }}</div>
                 <div style="opacity: 0.9; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Дней подряд</div>
             </div>
             <div>
-                <div style="font-size: 2.5rem; font-weight: 800; line-height: 1;">🏆 {{ streak.longest }}</div>
+                <div style="font-size: 2.5rem; font-weight: 800; line-height: 1;" aria-hidden="true">🏆 {{ streak.longest }}</div>
                 <div style="opacity: 0.9; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Рекорд</div>
             </div>
         </div>
@@ -44,11 +46,11 @@
 
     <div style="display: flex; gap: 0.75rem; justify-content: center; margin-top: 2rem; flex-wrap: wrap;">
         <a href="/dashboard" role="button" class="btn-lg">
-            <i data-lucide="home" style="width: 16px; height: 16px;"></i>
+            <i data-lucide="home" style="width: 16px; height: 16px;" aria-hidden="true"></i>
             На дашборд
         </a>
         <a href="/vocabulary" role="button" class="secondary btn-lg">
-            <i data-lucide="book" style="width: 16px; height: 16px;"></i>
+            <i data-lucide="book" style="width: 16px; height: 16px;" aria-hidden="true"></i>
             В словарь
         </a>
     </div>

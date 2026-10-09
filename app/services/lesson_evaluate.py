@@ -1,5 +1,4 @@
 """Оценка перевода пользователя с обновлением SRS."""
-
 import logging
 from datetime import datetime, timezone
 from sqlalchemy import select
@@ -12,7 +11,6 @@ from app.models.lesson_exercise import LessonExercise
 from app.models.user_word import UserWord
 from app.models.word import Word
 from app.models.event import Event
-
 from app.utils.srs import srs_update
 from app.utils.text_validation import validate_user_translation, compute_lemma_key
 from app.llm.helpers import evaluate_translation as llm_evaluate
@@ -48,7 +46,6 @@ async def _find_user_word(
     if pos:
         stmt_word = stmt_word.where(Word.pos == pos)
     stmt_word = stmt_word.limit(1)
-
     word = (await db.execute(stmt_word)).scalar_one_or_none()
 
     if not word and pos:
@@ -65,6 +62,75 @@ async def _find_user_word(
     return (await db.execute(stmt_uw)).scalar_one_or_none()
 
 
+async def _filter_suggested_words(
+    db: AsyncSession,
+    user: User,
+    suggested_words: list[dict],
+) -> list[dict]:
+    """
+    ✅ ФИКС: Фильтрует предложенные слова, исключая те,
+    которые уже есть у пользователя в словаре (любой статус).
+
+    Логика:
+    - Для каждого предложенного слова ищем его в таблице `words` по lemma.
+    - Если слово найдено и УЖЕ есть в `user_words` пользователя — исключаем.
+    - Если слово не найдено в `words` — тоже исключаем (нельзя добавить
+      то, чего нет в базе; добавление через suggestions работает только
+      с существующими словами).
+
+    Args:
+        db: сессия БД.
+        user: пользователь.
+        suggested_words: список слов от LLM.
+
+    Returns:
+        Отфильтрованный список (только новые для пользователя слова,
+        существующие в таблице words).
+    """
+    if not suggested_words:
+        return []
+
+    filtered = []
+
+    for sw in suggested_words:
+        lemma = sw.get("lemma", "")
+        if not lemma:
+            continue
+
+        lemma_key = compute_lemma_key(lemma)
+
+        # Ищем слово в глобальной таблице
+        stmt_word = select(Word).where(Word.lemma_key == lemma_key).limit(1)
+        word = (await db.execute(stmt_word)).scalar_one_or_none()
+
+        if not word:
+            # Слова нет в базе — не можем добавить, пропускаем
+            logger.debug(
+                f"[FILTER] Suggested word '{lemma}' not in words table, skipping"
+            )
+            continue
+
+        # Проверяем, есть ли уже у пользователя
+        stmt_uw = select(UserWord).where(
+            UserWord.user_id == user.id,
+            UserWord.word_id == word.id,
+        )
+        existing_uw = (await db.execute(stmt_uw)).scalar_one_or_none()
+
+        if existing_uw:
+            # Слово уже в словаре пользователя (любой статус) — исключаем
+            logger.debug(
+                f"[FILTER] Suggested word '{lemma}' already in user_words "
+                f"(status={existing_uw.status}), skipping"
+            )
+            continue
+
+        # Слово новое и есть в базе — оставляем
+        filtered.append({**sw, "word_id": word.id})
+
+    return filtered
+
+
 async def evaluate_exercise(
     db: AsyncSession,
     user: User,
@@ -75,6 +141,7 @@ async def evaluate_exercise(
     """
     Оценивает перевод упражнения.
     """
+    # 1. Загружаем упражнение и урок
     stmt_ex = select(LessonExercise).where(LessonExercise.id == exercise_id)
     result_ex = await db.execute(stmt_ex)
     exercise = result_ex.scalar_one_or_none()
@@ -89,12 +156,15 @@ async def evaluate_exercise(
     if not lesson or lesson.user_id != user.id:
         raise LessonEvaluateError("Доступ запрещён", code="forbidden")
 
+    # Идемпотентность: если уже оценено — возвращаем сохранённые данные
     if exercise.status == "evaluated":
         return _build_result(exercise, lesson, is_repeat=True)
 
+    # Проверка статуса урока
     if lesson.status != "in_progress":
         raise LessonEvaluateError("Урок уже завершён", code="lesson_completed")
 
+    # Проверка порядка: это должно быть первое pending-упражнение
     stmt_first_pending = (
         select(LessonExercise)
         .where(
@@ -110,11 +180,13 @@ async def evaluate_exercise(
     if not first_pending or first_pending.id != exercise.id:
         raise LessonEvaluateError("Нарушена последовательность упражнений", code="order_violation")
 
+    # 2. Валидация ввода
     try:
         clean_translation = validate_user_translation(user_translation)
     except ValueError as e:
         raise LessonEvaluateError(str(e), code="validation_error")
 
+    # 3. Вызов LLM
     target_words = exercise.target_words or []
 
     evaluation, usage = await llm_evaluate(
@@ -126,6 +198,7 @@ async def evaluate_exercise(
         user_id=user.id,
     )
 
+    # 4. Блокировка упражнения
     stmt_ex_lock = (
         select(LessonExercise)
         .where(LessonExercise.id == exercise.id)
@@ -141,11 +214,11 @@ async def evaluate_exercise(
     locked_exercise.eval_completion_tokens = usage.completion_tokens
     locked_exercise.eval_total_tokens = usage.total_tokens
 
+    # 5. Обработка оценок целевых слов
     evaluations = evaluation.get("evaluations", [])
     eval_map = {e["lemma"].casefold(): e for e in evaluations}
 
     updated_target_words = []
-
     for tw in target_words:
         lemma = tw.get("lemma", "")
         pos = tw.get("pos")
@@ -185,19 +258,28 @@ async def evaluate_exercise(
     locked_exercise.target_words = updated_target_words
     flag_modified(locked_exercise, "target_words")
 
-    # 🔥 ЛОГИРОВАНИЕ: Обработка suggested_words
+    # 6. ✅ ФИКС: Обработка suggested_words с фильтрацией
     suggested = evaluation.get("suggested_words", [])
     logger.info(f"[SERVICE EVAL] Raw suggested from LLM: {suggested}")
 
+    # Фильтруем: исключаем слова, уже есть у пользователя,
+    # и слова, которых нет в таблице words.
+    filtered_suggested = await _filter_suggested_words(db, user, suggested)
+
+    logger.info(
+        f"[SERVICE EVAL] After filtering: {len(filtered_suggested)} "
+        f"(was {len(suggested)} from LLM)"
+    )
+
     suggested_with_state = [
-        {**s, "state": "pending", "word_id": None}
-        for s in suggested
+        {**s, "state": "pending"}
+        for s in filtered_suggested
     ]
-    logger.info(f"[SERVICE EVAL] Processed suggested_with_state: {suggested_with_state}")
 
     locked_exercise.suggested_words = suggested_with_state
     flag_modified(locked_exercise, "suggested_words")
 
+    # 7. Проверка завершения урока
     stmt_remaining = (
         select(LessonExercise)
         .where(

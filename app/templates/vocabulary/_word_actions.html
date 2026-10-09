@@ -1,9 +1,10 @@
-<div class="word-actions" style="display: flex; gap: 0.5rem;">
+<div class="word-actions" style="display: flex; gap: 0.5rem;" aria-live="polite" aria-atomic="true">
     {% if not user_word %}
     <button hx-post="/vocabulary/{{ word.id }}/status"
             hx-target="closest .word-actions"
             hx-swap="outerHTML"
-            hx-vals='{"action": "activate", "csrf_token": "{{ request.state.csrf_token }}"}'>
+            hx-vals='{"action": "activate", "csrf_token": "{{ request.state.csrf_token }}"}'
+            aria-label="Добавить слово {{ word.lemma }} в изучение">
         ➕ Добавить в изучение
     </button>
     {% elif user_word.status == 'active' %}
@@ -11,14 +12,16 @@
             hx-target="closest .word-actions"
             hx-swap="outerHTML"
             hx-vals='{"action": "ignore", "csrf_token": "{{ request.state.csrf_token }}"}'
-            class="secondary">
+            class="secondary"
+            aria-label="Игнорировать слово {{ word.lemma }}">
         🚫 Игнорировать
     </button>
     {% else %}
     <button hx-post="/vocabulary/{{ word.id }}/status"
             hx-target="closest .word-actions"
             hx-swap="outerHTML"
-            hx-vals='{"action": "activate", "csrf_token": "{{ request.state.csrf_token }}"}'>
+            hx-vals='{"action": "activate", "csrf_token": "{{ request.state.csrf_token }}"}'
+            aria-label="Вернуть слово {{ word.lemma }} в изучение">
         ↩️ Вернуть в изучение
     </button>
     {% endif %}
