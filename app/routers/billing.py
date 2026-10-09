@@ -45,8 +45,6 @@ def _parse_yookassa_datetime(value) -> datetime | None:
         return value
     if isinstance(value, str):
         try:
-            # Python 3.11+ fromisoformat поддерживает 'Z'
-            # Для совместимости заменяем 'Z' на '+00:00'
             iso_str = value.replace("Z", "+00:00")
             return datetime.fromisoformat(iso_str)
         except (ValueError, TypeError) as e:
@@ -155,6 +153,7 @@ async def subscribe_post(
             source="payment",
             payment_id=payment.id,
         )
+        # В DEV-режиме начисляем бонус здесь (нет webhook)
         await reward_referrer_on_purchase(db, user.id)
 
         response = RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
@@ -204,6 +203,9 @@ async def billing_success(
     """
     Страница успеха после оплаты (return_url от ЮKassa).
     Проверяет статус платежа и активирует подписку если нужно.
+    
+    ВАЖНО: Бонус рефереру начисляется ТОЛЬКО через webhook,
+    чтобы избежать двойного начисления.
     """
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
@@ -234,7 +236,6 @@ async def billing_success(
 
             if yookassa_status == "succeeded":
                 payment.status = "succeeded"
-                # Парсим дату из ISO-строки ЮKassa
                 paid_at_raw = info.get("captured_at") or info.get("created_at")
                 payment.paid_at = _parse_yookassa_datetime(paid_at_raw)
 
@@ -245,7 +246,8 @@ async def billing_success(
                     source="payment",
                     payment_id=payment.id,
                 )
-                await reward_referrer_on_purchase(db, user.id)
+                # ❌ НЕ вызываем reward_referrer_on_purchase здесь!
+                # Webhook придёт и начислит бонус.
                 logger.info(
                     f"[BILLING] Payment succeeded (via API check) | "
                     f"payment_id={payment.id} | user_id={user.id}"
@@ -304,10 +306,12 @@ async def billing_webhook(
     - payment.canceled — платёж отменён
 
     Защита: проверка IP-адреса отправителя.
+    
+    ВАЖНО: Бонус рефереру начисляется ТОЛЬКО здесь,
+    чтобы избежать двойного начисления.
     """
     # 1. Проверка IP
     client_ip = request.client.host if request.client else ""
-    # X-Forwarded-For для reverse proxy (Nginx)
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
         client_ip = forwarded.split(",")[0].strip()
@@ -335,7 +339,7 @@ async def billing_webhook(
     # 3. Находим платёж в БД
     if not yookassa_payment_id:
         logger.warning("[WEBHOOK] No payment id in notification")
-        return JSONResponse({"status": "ok"})  # 200 чтобы не было ретраев
+        return JSONResponse({"status": "ok"})
 
     stmt = select(Payment).where(Payment.yookassa_payment_id == yookassa_payment_id)
     result = await db.execute(stmt)
@@ -351,7 +355,6 @@ async def billing_webhook(
     if event == "payment.succeeded":
         if payment.status != "succeeded":
             payment.status = "succeeded"
-            # Парсим дату из ISO-строки ЮKassa
             paid_at_raw = obj.get("captured_at") or obj.get("created_at")
             payment.paid_at = _parse_yookassa_datetime(paid_at_raw)
 
@@ -363,7 +366,7 @@ async def billing_webhook(
                 payment_id=payment.id,
             )
 
-            # Начисляем бонус рефереру
+            # ✅ Начисляем бонус рефереру ТОЛЬКО здесь
             await reward_referrer_on_purchase(db, payment.user_id)
 
             logger.info(
@@ -371,7 +374,6 @@ async def billing_webhook(
                 f"user_id={payment.user_id} | plan={payment.plan}"
             )
 
-            # Логируем событие
             event_record = Event(
                 user_id=payment.user_id,
                 type="payment_succeeded",
@@ -407,5 +409,5 @@ async def billing_webhook(
     else:
         logger.info(f"[WEBHOOK] Unhandled event: {event}")
 
-    # 5. Всегда возвращаем 200 (иначе ЮKassa будет ретраить 24 часа)
+    # 5. Всегда возвращаем 200
     return JSONResponse({"status": "ok"})

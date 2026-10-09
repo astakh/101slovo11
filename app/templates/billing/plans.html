@@ -70,9 +70,15 @@
             <form method="POST" action="/billing/subscribe">
                 <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
                 <input type="hidden" name="plan" value="monthly">
-                <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer;">
-                    <input type="checkbox" required style="width: auto;">
-                    Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
+                <label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer; line-height: 1.5;">
+                    <input type="checkbox" required style="width: auto; margin-top: 2px; flex-shrink: 0;">
+                    <span>
+                        Согласен с <a href="/legal/offer" target="_blank">публичной офертой</a>,
+                        <a href="/legal/privacy" target="_blank">политикой конфиденциальности</a>
+                        и даю согласие на
+                        <a href="/legal/consent" target="_blank">обработку персональных данных</a>
+                        и автоматическое списание средств
+                    </span>
                 </label>
                 <button type="submit" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</button>
             </form>

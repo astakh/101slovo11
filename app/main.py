@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing
+from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal
 from app.middleware import AppMiddleware
 from app.core.templates import templates
 from app.db import AsyncSessionLocal
@@ -14,8 +14,7 @@ from app.services.background_tasks import run_periodic_tasks
 
 logger = logging.getLogger(__name__)
 
-# Интервал запуска фоновых задач (секунды)
-BG_TASK_INTERVAL = 3600  # 1 час
+BG_TASK_INTERVAL = 3600
 
 
 async def _background_scheduler():
@@ -32,11 +31,9 @@ async def _background_scheduler():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Запуск фонового планировщика
     bg_task = asyncio.create_task(_background_scheduler())
     logger.info(f"[LIFESPAN] Background scheduler started (interval={BG_TASK_INTERVAL}s)")
     yield
-    # Остановка
     bg_task.cancel()
     try:
         await bg_task
@@ -48,7 +45,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="101slovo", lifespan=lifespan)
 
 
-# Middleware для защиты от ботов (HEAD/OPTIONS)
 @app.middleware("http")
 async def bot_protection_middleware(request: Request, call_next):
     if request.method == "OPTIONS":
@@ -71,10 +67,7 @@ async def bot_protection_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# Статика
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
-
-# Middleware
 app.add_middleware(AppMiddleware)
 
 # Роутеры
@@ -86,9 +79,9 @@ app.include_router(settings.router)
 app.include_router(vocabulary.router)
 app.include_router(admin.router)
 app.include_router(billing.router)
+app.include_router(legal.router)
 
 
-# Обработчик ошибок
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if request.headers.get("HX-Request") and exc.headers and "HX-Redirect" in exc.headers:

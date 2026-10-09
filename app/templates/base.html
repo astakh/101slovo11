@@ -39,11 +39,16 @@
     <main class="container fade-in-up" style="padding-top: 2rem; padding-bottom: 4rem;">
         {% block content %}{% endblock %}
     </main>
-    
     <footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;">
-        <p>© 2026 101slovo • Учи английский умнее с ИИ</p>
+        <p style="margin-bottom: 0.75rem;">© 2026 101slovo • Изучай английский в контексте</p>
+        <p style="display: flex; justify-content: center; gap: 1.5rem; flex-wrap: wrap; font-size: 0.8125rem;">
+            <a href="/legal/offer" style="color: var(--text-muted); text-decoration: none;">Оферта</a>
+            <a href="/legal/privacy" style="color: var(--text-muted); text-decoration: none;">Конфиденциальность</a>
+            <a href="/legal/terms" style="color: var(--text-muted); text-decoration: none;">Условия использования</a>
+            <a href="/legal/consent" style="color: var(--text-muted); text-decoration: none;">Согласие на обработку ПД</a>
+        </p>
     </footer>
-    
+
     <script>
         document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
         document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });

@@ -41,24 +41,24 @@ class Settings(BaseSettings):
     ENV: str = "development"  # "production" или "development"
 
     # ============================================
-    # Monetization
+    # Monetization (обязательные параметры)
     # ============================================
 
     # Freemium limits
-    FREE_LESSON_PER_DAY_LIMIT: int = 1
-    FREE_LESSONS_TOTAL_LIMIT: int = 5
+    FREE_LESSON_PER_DAY_LIMIT: int
+    FREE_LESSONS_TOTAL_LIMIT: int
 
     # Subscription pricing (в копейках)
-    SUBSCRIPTION_MONTHLY_PRICE_KOP: int = 30000
-    SUBSCRIPTION_6M_PRICE_KOP: int = 135000
-    SUBSCRIPTION_6M_DISCOUNT_PERCENT: int = 25
+    SUBSCRIPTION_MONTHLY_PRICE_KOP: int
+    SUBSCRIPTION_6M_PRICE_KOP: int
+    SUBSCRIPTION_6M_DISCOUNT_PERCENT: int
 
-    # Grace period
-    GRACE_PERIOD_DAYS: int = 1
+    # Grace period (для будущих рекуррентов)
+    GRACE_PERIOD_DAYS: int
 
     # Referral
-    REFERRAL_BONUS_DAYS: int = 30
-    REFERRAL_PROMO_MAX_ATTEMPTS: int = 3
+    REFERRAL_BONUS_DAYS: int
+    REFERRAL_PROMO_MAX_ATTEMPTS: int
 
     # YooKassa
     YOOKASSA_SHOP_ID: str = ""
