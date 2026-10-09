@@ -2,19 +2,18 @@
 from fastapi import APIRouter, Request, Depends, Form, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.services.settings import update_user_settings
 from app.core.templates import templates
 from app.models.user import User
-from app.utils.timezones import get_available_timezones, is_valid_timezone
 from app.config import settings
 from app.utils.flash import add_flash
 
 router = APIRouter(tags=["settings"])
 
 LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
-
 DICT_LABELS = {
     "general": "Общий",
     "it": "IT",
@@ -39,12 +38,10 @@ def render_settings(
     form: dict | None = None,
 ):
     form = form or {}
-    selected_timezone = form.get("timezone") or user.timezone or "UTC"
     return templates.TemplateResponse(
         "settings.html",
         {
             "request": request,
-            "timezones": get_available_timezones(selected_timezone),
             "levels": LEVELS,
             "dictionaries": get_dictionaries(),
             "user": user,
@@ -63,6 +60,7 @@ async def settings_page(
     """Страница настроек."""
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
     return render_settings(request, user)
 
 
@@ -71,7 +69,6 @@ async def settings_post(
     request: Request,
     level: str = Form(...),
     dictionary_code: str = Form(...),
-    timezone: str = Form(...),
     words_per_lesson: int = Form(...),
     daily_lesson_limit: int = Form(...),
     user: User = Depends(require_auth),
@@ -80,15 +77,14 @@ async def settings_post(
     """Обновление настроек."""
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
-    
+
     form = {
         "level": level,
         "dictionary_code": dictionary_code,
-        "timezone": timezone,
         "words_per_lesson": words_per_lesson,
         "daily_lesson_limit": daily_lesson_limit,
     }
-    
+
     # Валидация уровня
     if level not in LEVELS:
         return render_settings(
@@ -97,7 +93,7 @@ async def settings_post(
             error="Некорректный уровень английского языка.",
             form=form,
         )
-    
+
     # Валидация словаря
     if dictionary_code not in settings.AVAILABLE_DICTIONARIES:
         return render_settings(
@@ -106,16 +102,7 @@ async def settings_post(
             error="Некорректный словарь.",
             form=form,
         )
-    
-    # Валидация таймзоны
-    if not is_valid_timezone(timezone):
-        return render_settings(
-            request,
-            user,
-            error="Некорректный часовой пояс. Выберите другой из списка.",
-            form=form,
-        )
-    
+
     # Валидация слов в уроке
     if not (
         settings.WORDS_PER_LESSON_MIN
@@ -132,7 +119,7 @@ async def settings_post(
             ),
             form=form,
         )
-    
+
     # Валидация лимита уроков
     if not (1 <= daily_lesson_limit <= settings.DAILY_LESSON_LIMIT_MAX):
         return render_settings(
@@ -144,7 +131,7 @@ async def settings_post(
             ),
             form=form,
         )
-    
+
     # Обновление настроек
     try:
         await update_user_settings(
@@ -152,7 +139,6 @@ async def settings_post(
             user=user,
             level=level,
             dictionary_code=dictionary_code,
-            tz=timezone,
             words_per_lesson=words_per_lesson,
             daily_lesson_limit=daily_lesson_limit,
         )
@@ -163,7 +149,7 @@ async def settings_post(
             error=str(e),
             form=form,
         )
-    
+
     response = RedirectResponse(url="/settings", status_code=status.HTTP_303_SEE_OTHER)
     add_flash(response, "success", "Настройки успешно сохранены!")
     return response

@@ -6576,11 +6576,9 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   /* Text */
   --text-primary: #0f172a;
   --text-secondary: #475569;
-  /* ✅ Спринт 3: контрастность повышена с #94a3b8 (~2.8:1) до #64748b (~4.6:1) */
   --text-muted: #64748b;
   --text-inverse: #ffffff;
 
-  /* ✅ Спринт 3: семантические цвета текста (адаптируются в тёмной теме) */
   --text-success: #065f46;
   --text-success-strong: #059669;
   --text-error: #991b1b;
@@ -6593,7 +6591,6 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   --text-brand-secondary: #db2777;
   --text-accent: #0891b2;
 
-  /* ✅ Спринт 3: фоны для статусов */
   --bg-success: rgba(16, 185, 129, 0.08);
   --bg-success-border: rgba(16, 185, 129, 0.2);
   --bg-error: rgba(239, 68, 68, 0.08);
@@ -6606,9 +6603,7 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   /* Borders & Shadows */
   --border-light: #e2e8f0;
   --border-medium: #cbd5e1;
-  /* Алиас для совместимости со старыми шаблонами */
   --border: #e2e8f0;
-
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.05);
@@ -6638,13 +6633,9 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   --surface-100: #334155;
   --surface-200: #475569;
   --surface-300: #64748b;
-
   --text-primary: #f1f5f9;
   --text-secondary: #cbd5e1;
-  /* ✅ Спринт 3: контрастность повышена с #64748b (~2.5:1 на тёмном) до #94a3b8 (~4.5:1) */
   --text-muted: #94a3b8;
-
-  /* ✅ Спринт 3: светлые варианты для тёмной темы */
   --text-success: #6ee7b7;
   --text-success-strong: #34d399;
   --text-error: #fca5a5;
@@ -6656,8 +6647,6 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   --text-brand: #a5b4fc;
   --text-brand-secondary: #f9a8d4;
   --text-accent: #67e8f9;
-
-  /* ✅ Спринт 3: фоны для статусов в тёмной теме */
   --bg-success: rgba(16, 185, 129, 0.12);
   --bg-success-border: rgba(16, 185, 129, 0.3);
   --bg-error: rgba(239, 68, 68, 0.12);
@@ -6666,7 +6655,6 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   --bg-info-border: rgba(59, 130, 246, 0.3);
   --bg-warning: rgba(245, 158, 11, 0.12);
   --bg-warning-border: rgba(245, 158, 11, 0.3);
-
   --border-light: #334155;
   --border-medium: #475569;
   --border: #334155;
@@ -6707,6 +6695,7 @@ h4 { font-size: 1.25rem; }
 }
 
 /* === NAVBAR === */
+
 .navbar {
   position: sticky;
   top: 0;
@@ -6718,7 +6707,6 @@ h4 { font-size: 1.25rem; }
   padding: 0.875rem 0;
 }
 
-/* ✅ Спринт 3: навбар в тёмной теме */
 [data-theme="dark"] .navbar {
   background: rgba(15, 23, 42, 0.8);
 }
@@ -6776,8 +6764,13 @@ h4 { font-size: 1.25rem; }
   color: var(--brand-primary);
 }
 
-/* Мобильное меню (выпадающее) */
+/* ============================================
+   ✅ ФИКС 1: Мобильное меню СКРЫТО по умолчанию.
+   Было: display: flex → меню рендерилось всегда,
+   создавая визуальный дубль навбара.
+   ============================================ */
 .navbar-mobile-menu {
+  display: none;
   position: absolute;
   top: 100%;
   left: 0;
@@ -6786,10 +6779,15 @@ h4 { font-size: 1.25rem; }
   border-bottom: 1px solid var(--border-light);
   box-shadow: var(--shadow-lg);
   padding: 0.75rem 1rem;
-  display: flex;
   flex-direction: column;
   gap: 0.25rem;
   z-index: 99;
+}
+
+/* ✅ ФИКС 2: Показываем меню при добавлении класса .is-open
+   (Alpine.js добавляет его при клике на бургер) */
+.navbar-mobile-menu.is-open {
+  display: flex;
 }
 
 [data-theme="dark"] .navbar-mobile-menu {
@@ -6857,6 +6855,7 @@ h4 { font-size: 1.25rem; }
 }
 
 /* === BUTTONS === */
+
 button, .button, [role="button"], input[type="submit"] {
   display: inline-flex;
   align-items: center;
@@ -6913,6 +6912,7 @@ button:active, .button:active, [role="button"]:active { transform: translateY(0)
 }
 
 /* === FORMS === */
+
 input[type="text"], input[type="email"], input[type="password"],
 input[type="number"], input[type="search"], textarea, select {
   padding: 0.75rem 1rem;
@@ -6956,6 +6956,7 @@ fieldset {
 legend { font-weight: 600; padding: 0 0.5rem; font-size: 0.95rem; }
 
 /* === RANGE INPUT (кроссбраузерно) === */
+
 input[type="range"] {
   height: 6px;
   background: var(--surface-200);
@@ -7005,6 +7006,7 @@ input[type="range"]::-moz-range-track {
 }
 
 /* === BADGES === */
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -7017,7 +7019,6 @@ input[type="range"]::-moz-range-track {
   text-transform: uppercase;
 }
 
-/* ✅ Спринт 3: используем семантические переменные */
 .badge-active { background: rgba(99, 102, 241, 0.12); color: var(--text-brand); }
 .badge-mastered { background: var(--bg-success); color: var(--text-success-strong); }
 .badge-ignored { background: var(--bg-error); color: var(--text-error-strong); }
@@ -7025,6 +7026,7 @@ input[type="range"]::-moz-range-track {
 .badge-review { background: rgba(6, 182, 212, 0.12); color: var(--text-accent); }
 
 /* === FLASH === */
+
 .flash-success, .flash-error, .flash-info, .flash-warning {
   padding: 1rem 1.25rem;
   border-radius: var(--radius-lg);
@@ -7038,13 +7040,13 @@ input[type="range"]::-moz-range-track {
   animation: slideInDown 0.3s ease-out;
 }
 
-/* ✅ Спринт 3: используем семантические переменные вместо фиксированных цветов */
 .flash-success { background: var(--bg-success); border-color: var(--bg-success-border); color: var(--text-success); }
 .flash-error { background: var(--bg-error); border-color: var(--bg-error-border); color: var(--text-error); }
 .flash-info { background: var(--bg-info); border-color: var(--bg-info-border); color: var(--text-info); }
 .flash-warning { background: var(--bg-warning); border-color: var(--bg-warning-border); color: var(--text-warning); }
 
 /* === TABLES === */
+
 table {
   width: 100%;
   border-collapse: separate;
@@ -7085,6 +7087,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === STAT CARDS === */
+
 .stat-card {
   position: relative;
   overflow: hidden;
@@ -7125,7 +7128,6 @@ tbody tr:last-child td { border-bottom: none; }
   font-size: 1.5rem;
 }
 
-/* ✅ Спринт 3: адаптивные цвета иконок */
 .stat-card__icon--fire { background: var(--bg-warning); color: var(--text-warning-strong); }
 .stat-card__icon--book { background: var(--bg-success); color: var(--text-success-strong); }
 .stat-card__icon--calendar { background: var(--bg-info); color: var(--text-info-strong); }
@@ -7153,6 +7155,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === CARD === */
+
 .card {
   background: var(--surface-0);
   border: 1px solid var(--border-light);
@@ -7162,6 +7165,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === EXERCISE === */
+
 .exercise-card {
   background: var(--surface-0);
   border: 1px solid var(--border-light);
@@ -7186,7 +7190,6 @@ tbody tr:last-child td { border-bottom: none; }
   margin-bottom: 1.5rem;
 }
 
-/* Адаптивная сетка результата упражнения */
 .exercise-result-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -7194,6 +7197,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === SUGGESTION === */
+
 .suggestion-card {
   padding: 1rem 1.25rem;
   border: 1px solid var(--border-light);
@@ -7220,13 +7224,13 @@ tbody tr:last-child td { border-bottom: none; }
   opacity: 0.7;
 }
 
-/* ✅ Спринт 3: статусные цвета для текста в результатах */
 .text-success { color: var(--text-success-strong); }
 .text-error { color: var(--text-error-strong); }
 .text-warning { color: var(--text-warning-strong); }
 .text-info { color: var(--text-info-strong); }
 
 /* === SPINNER === */
+
 .htmx-indicator {
   display: none;
   align-items: center;
@@ -7252,6 +7256,7 @@ tbody tr:last-child td { border-bottom: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* === PAGINATION === */
+
 .pagination {
   display: flex;
   justify-content: center;
@@ -7282,6 +7287,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === WORD ITEM (vocabulary) === */
+
 .word-item {
   display: flex;
   align-items: center;
@@ -7347,7 +7353,6 @@ tbody tr:last-child td { border-bottom: none; }
   white-space: nowrap;
 }
 
-/* Адаптивные фильтры словаря */
 .vocab-filters {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -7356,6 +7361,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === CTA SECTION === */
+
 .cta-section {
   text-align: center;
   padding: 3rem 2rem;
@@ -7385,6 +7391,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === HERO === */
+
 .hero {
   padding: 2rem 0;
   margin-bottom: 2rem;
@@ -7409,26 +7416,24 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === UTILS === */
+
 .container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
 .container--narrow { max-width: 720px; }
 .container--medium { max-width: 960px; }
-
 .text-center { text-align: center; }
-
 .mt-1 { margin-top: 0.5rem; }
 .mt-2 { margin-top: 1rem; }
 .mt-3 { margin-top: 1.5rem; }
 .mt-4 { margin-top: 2rem; }
-
 .mb-2 { margin-bottom: 1rem; }
 .mb-3 { margin-bottom: 1.5rem; }
 .mb-4 { margin-bottom: 2rem; }
-
 .grid { display: grid; gap: 1rem; }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
 
 /* === Skeleton Loading === */
+
 .skeleton {
   background: linear-gradient(
     90deg,
@@ -7454,7 +7459,6 @@ tbody tr:last-child td { border-bottom: none; }
 
 .skeleton-text.short { width: 60%; }
 .skeleton-text.title { height: 1.5rem; width: 40%; margin-bottom: 1rem; }
-
 .skeleton-card {
   height: 120px;
   width: 100%;
@@ -7474,6 +7478,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === ADD WORD MODAL === */
+
 [x-cloak] {
   display: none !important;
 }
@@ -7530,6 +7535,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === ANIMATIONS === */
+
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
 @keyframes fadeInUp {
@@ -7550,6 +7556,7 @@ tbody tr:last-child td { border-bottom: none; }
 :focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
 
 /* === SCROLLBAR === */
+
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--surface-100); }
 ::-webkit-scrollbar-thumb { background: var(--surface-300); border-radius: var(--radius-full); }
@@ -7585,25 +7592,19 @@ tbody tr:last-child td { border-bottom: none; }
 
   .navbar-menu--desktop { display: none; }
   .navbar-burger { display: flex; }
-
   .navbar-inner { gap: 0.75rem; }
 
   .exercise-result-grid { grid-template-columns: 1fr; }
   .vocab-filters { grid-template-columns: 1fr; }
   .vocab-filters select { min-width: unset; }
-
   .exercise-card { padding: 1.5rem; }
   .exercise-sentence { font-size: 1.25rem; }
-
   .cta-section { padding: 2.5rem 1.5rem; }
   .cta-section h3 { font-size: 1.5rem; }
-
   .modal-overlay { padding: 5vh 0.75rem 1.5rem 0.75rem; }
   .modal-panel { padding: 1.5rem; }
-
   .word-item { flex-wrap: wrap; gap: 0.5rem; }
   .word-item__meta { width: 100%; justify-content: flex-start; }
-
   .summary-streak-flex { gap: 1.5rem !important; }
 }
 
@@ -7613,21 +7614,17 @@ tbody tr:last-child td { border-bottom: none; }
   .exercise-card { padding: 1.25rem; }
   .stat-card { padding: 1rem; }
   .cta-section { padding: 2rem 1rem; }
-
   .modal-overlay { padding: 3vh 0.5rem 1rem 0.5rem; }
   .modal-panel { padding: 1.25rem; }
-
   h1 { font-size: 1.75rem; }
   h2 { font-size: 1.375rem; }
   .hero__title { font-size: 1.75rem; }
   .stat-card__value { font-size: 1.75rem; }
   .exercise-sentence { font-size: 1.125rem; }
-
   .flash-success, .flash-error, .flash-info, .flash-warning {
     padding: 0.875rem 1rem;
     font-size: 0.875rem;
   }
-
   .pagination { gap: 0.25rem; }
   .pagination a { min-width: 32px; height: 32px; font-size: 0.875rem; }
 }
@@ -9999,9 +9996,11 @@ aria-label="Пропустить слово {{ sw.lemma }}">
     </a>
 
     <!-- Бургер — ВСЕГДА рендерится, виден только на мобильных через CSS -->
+    <!-- ✅ ФИКС: @click.stop предотвращает всплытие до document,
+         иначе @click.outside на мобильном меню мгновенно закроет его -->
     <button class="navbar-burger"
             type="button"
-            @click="mobileMenuOpen = !mobileMenuOpen"
+            @click.stop="mobileMenuOpen = !mobileMenuOpen"
             :aria-expanded="mobileMenuOpen.toString()"
             aria-controls="mobile-menu"
             aria-label="Открыть меню навигации">
@@ -10012,100 +10011,96 @@ aria-label="Пропустить слово {{ sw.lemma }}">
     <!-- ===== ДЕСКТОПНОЕ МЕНЮ (скрыто на мобильных через CSS) ===== -->
     <div class="navbar-menu--desktop">
       {% if request.state.user %}
-        <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
-          <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
-        </a>
-        <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
-          <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
-        </a>
-        <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
-          <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
-        </a>
-        <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
-          <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
-        </a>
-        {% if request.state.user.is_admin %}
-          <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
-            <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
-          </a>
-          <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
-            <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
-          </a>
-        {% endif %}
-        <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
-          <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-          <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+      <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
+        <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
+      </a>
+      <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
+        <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+      </a>
+      <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
+        <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
+      </a>
+      <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
+        <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
+      </a>
+      {% if request.state.user.is_admin %}
+      <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
+        <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
+      </a>
+      <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
+        <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
+      </a>
+      {% endif %}
+      <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+        <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+        <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+      </button>
+      <form action="/logout" method="POST" style="display:inline;margin-left:0.5rem;">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <button type="submit" class="navbar-logout" aria-label="Выйти из аккаунта">
+          <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
         </button>
-        <form action="/logout" method="POST" style="display:inline;margin-left:0.5rem;">
-          <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-          <button type="submit" class="navbar-logout" aria-label="Выйти из аккаунта">
-            <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
-          </button>
-        </form>
+      </form>
       {% else %}
-        <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
-          <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-          <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-        </button>
-        <a href="/login" class="nav-link">Войти</a>
-        <a href="/register" class="nav-link nav-link--primary">Регистрация</a>
+      <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+        <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+        <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+      </button>
+      <a href="/login" class="nav-link">Войти</a>
+      <a href="/register" class="nav-link nav-link--primary">Регистрация</a>
       {% endif %}
     </div>
-
   </div><!-- /.navbar-inner -->
 
   <!-- ===== МОБИЛЬНОЕ МЕНЮ ===== -->
-  <!-- ВСЕГДА рендерится. По умолчанию СКРЫТО через CSS (display: none).
+  <!-- По умолчанию СКРЫТО через CSS (display: none).
        Показывается через добавление класса .is-open (управляется Alpine). -->
   <div class="navbar-mobile-menu"
        id="mobile-menu"
        :class="{ 'is-open': mobileMenuOpen }"
        @click.outside="mobileMenuOpen = false">
-
     {% if request.state.user %}
-      <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" @click="mobileMenuOpen = false">
-        <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
-      </a>
-      <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-        <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
-      </a>
-      <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-        <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
-      </a>
-      <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" @click="mobileMenuOpen = false">
-        <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
-      </a>
-      {% if request.state.user.is_admin %}
-        <a href="/admin/prompts" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-          <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
-        </a>
-        <a href="/admin/stats" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-          <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
-        </a>
-      {% endif %}
-      <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
-        <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-        <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-        Сменить тему
-      </button>
-      <form action="/logout" method="POST" style="margin-top:0.5rem;">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-        <button type="submit" class="navbar-logout" style="width:100%;" aria-label="Выйти">
-          <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
-        </button>
-      </form>
-    {% else %}
-      <a href="/login" class="nav-link" @click="mobileMenuOpen = false">Войти</a>
-      <a href="/register" class="nav-link nav-link--primary" @click="mobileMenuOpen = false">Регистрация</a>
-      <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
-        <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-        <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-        Сменить тему
-      </button>
+    <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" @click="mobileMenuOpen = false">
+      <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
+    </a>
+    <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+      <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+    </a>
+    <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+      <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
+    </a>
+    <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" @click="mobileMenuOpen = false">
+      <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
+    </a>
+    {% if request.state.user.is_admin %}
+    <a href="/admin/prompts" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+      <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
+    </a>
+    <a href="/admin/stats" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+      <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
+    </a>
     {% endif %}
-
+    <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
+      <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+      <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+      Сменить тему
+    </button>
+    <form action="/logout" method="POST" style="margin-top:0.5rem;">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+      <button type="submit" class="navbar-logout" style="width:100%;" aria-label="Выйти">
+        <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
+      </button>
+    </form>
+    {% else %}
+    <a href="/login" class="nav-link" @click="mobileMenuOpen = false">Войти</a>
+    <a href="/register" class="nav-link nav-link--primary" @click="mobileMenuOpen = false">Регистрация</a>
+    <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
+      <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+      <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+      Сменить тему
+    </button>
+    {% endif %}
   </div><!-- /.navbar-mobile-menu -->
-
 </nav>
 
 <script>
@@ -10116,6 +10111,7 @@ function toggleTheme() {
   localStorage.setItem('theme', next);
   updateThemeIcons(next);
 }
+
 function updateThemeIcons(theme) {
   document.querySelectorAll('.theme-icon-sun').forEach(function(el) {
     el.style.display = theme === 'dark' ? 'block' : 'none';
@@ -10124,6 +10120,7 @@ function updateThemeIcons(theme) {
     el.style.display = theme === 'dark' ? 'none' : 'block';
   });
 }
+
 document.addEventListener('DOMContentLoaded', function() {
   updateThemeIcons(document.documentElement.getAttribute('data-theme'));
 });

@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Настройка профиля — 101slovo{% endblock %}
+
 {% block content %}
 {% set selected_level = form.get('level', user.level) if form else user.level %}
 {% set selected_dictionary = form.get('dictionary_code', user.dictionary_code) if form else user.dictionary_code %}
-{% set selected_timezone = form.get('timezone', user.timezone) if form else user.timezone %}
 {% set words_value = form.get('words_per_lesson', user.words_per_lesson or 5) if form else (user.words_per_lesson or 5) %}
 {% set limit_value = form.get('daily_lesson_limit', user.daily_lesson_limit or 1) if form else (user.daily_lesson_limit or 1) %}
+
 {% set words_min = settings.WORDS_PER_LESSON_MIN if settings else 1 %}
 {% set words_max = settings.WORDS_PER_LESSON_MAX if settings else 10 %}
 {% set limit_max = settings.DAILY_LESSON_LIMIT_MAX if settings else 5 %}
@@ -75,24 +76,11 @@
             </div>
         </div>
 
-        <!-- 3. Часовой пояс -->
-        <div class="card mb-3" style="padding: 1.5rem;">
-            <label for="timezone" style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
-                <i data-lucide="globe" style="width: 20px; height: 20px; color: var(--brand-accent);"></i>
-                <strong>3. Часовой пояс</strong>
-            </label>
-            <select id="timezone" name="timezone" required>
-                {% for tz in timezones %}
-                <option value="{{ tz }}" {% if selected_timezone == tz %}selected{% endif %}>{{ tz }}</option>
-                {% endfor %}
-            </select>
-        </div>
-
-        <!-- 4. Слов в уроке -->
+        <!-- 3. Слов в уроке -->
         <div class="card mb-3" style="padding: 1.5rem;" x-data="{ val: {{ words_value }} }">
             <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
                 <i data-lucide="type" style="width: 20px; height: 20px; color: #10b981;"></i>
-                <strong>4. Слов в одном уроке:</strong>
+                <strong>3. Слов в одном уроке:</strong>
                 <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.25rem; margin-left: 0.25rem;"></span>
             </label>
             <input type="range" name="words_per_lesson"
@@ -106,11 +94,11 @@
             </div>
         </div>
 
-        <!-- 5. Уроков в день -->
+        <!-- 4. Уроков в день -->
         <div class="card mb-4" style="padding: 1.5rem;" x-data="{ val: {{ limit_value }} }">
             <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
                 <i data-lucide="calendar" style="width: 20px; height: 20px; color: #f59e0b;"></i>
-                <strong>5. Уроков в день:</strong>
+                <strong>4. Уроков в день:</strong>
                 <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.25rem; margin-left: 0.25rem;"></span>
             </label>
             <input type="range" name="daily_lesson_limit"
@@ -118,6 +106,7 @@
                    value="{{ limit_value }}" required
                    @input="val = $event.target.value"
                    style="width: 100%;">
+
             <!-- ✅ ФИКС: Подсказка о том, что настройка применяется только с Premium -->
             <div style="display: flex; align-items: flex-start; gap: 0.5rem; margin-top: 0.75rem; padding: 0.625rem 0.875rem; background: rgba(59, 130, 246, 0.06); border: 1px solid rgba(59, 130, 246, 0.15); border-radius: var(--radius-md); font-size: 0.8125rem; color: var(--text-secondary);">
                 <i data-lucide="info" style="width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; color: #3b82f6;"></i>

@@ -7,13 +7,11 @@ from app.deps import require_auth, require_csrf
 from app.services.onboarding import complete_onboarding
 from app.core.templates import templates
 from app.models.user import User
-from app.utils.timezones import get_available_timezones, is_valid_timezone
 from app.config import settings
 
 router = APIRouter(tags=["onboarding"])
 
 LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
-
 DICT_LABELS = {
     "general": "Общий",
     "it": "IT",
@@ -38,18 +36,15 @@ def render_onboarding(
     form: dict | None = None,
 ):
     form = form or {}
-    selected_timezone = form.get("timezone") or user.timezone or "UTC"
     return templates.TemplateResponse(
         "onboarding.html",
         {
             "request": request,
-            "timezones": get_available_timezones(selected_timezone),
             "levels": LEVELS,
             "dictionaries": get_dictionaries(),
             "user": user,
             "error": error,
             "form": form,
-            # ✅ ФИКС: передаём settings для подсказки о лимите
             "settings": settings,
         },
     )
@@ -62,6 +57,7 @@ async def onboarding_page(
 ):
     if user.is_onboarded:
         return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
     return render_onboarding(request, user)
 
 
@@ -73,7 +69,6 @@ async def onboarding_complete(
     request: Request,
     level: str = Form(...),
     dictionary_code: str = Form(...),
-    timezone: str = Form(...),
     words_per_lesson: int = Form(...),
     daily_lesson_limit: int = Form(...),
     user: User = Depends(require_auth),
@@ -85,7 +80,6 @@ async def onboarding_complete(
     form = {
         "level": level,
         "dictionary_code": dictionary_code,
-        "timezone": timezone,
         "words_per_lesson": words_per_lesson,
         "daily_lesson_limit": daily_lesson_limit,
     }
@@ -103,14 +97,6 @@ async def onboarding_complete(
             request,
             user,
             error="Некорректный словарь.",
-            form=form,
-        )
-
-    if not is_valid_timezone(timezone):
-        return render_onboarding(
-            request,
-            user,
-            error="Некорректный часовой пояс. Выберите другой из списка.",
             form=form,
         )
 
@@ -147,7 +133,6 @@ async def onboarding_complete(
             user=user,
             level=level,
             dictionary_code=dictionary_code,
-            tz=timezone,
             words_per_lesson=words_per_lesson,
             daily_lesson_limit=daily_lesson_limit,
         )
