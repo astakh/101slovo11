@@ -1,23 +1,22 @@
 <nav class="navbar" x-data="{ mobileMenuOpen: false }" aria-label="Основная навигация">
   <div class="navbar-inner">
-
     <a href="/" class="navbar-brand" aria-label="101slovo — на главную">
       <i data-lucide="book-open" style="width: 20px; height: 20px;" aria-hidden="true"></i>
       101slovo
     </a>
 
-    <!-- Бургер — для ВСЕХ пользователей, виден только на мобильных -->
+    <!-- Бургер — ВСЕГДА рендерится, виден только на мобильных через CSS -->
     <button class="navbar-burger"
             type="button"
             @click="mobileMenuOpen = !mobileMenuOpen"
             :aria-expanded="mobileMenuOpen.toString()"
             aria-controls="mobile-menu"
-            aria-label="Меню навигации">
+            aria-label="Открыть меню навигации">
       <i data-lucide="menu" x-show="!mobileMenuOpen" style="width: 22px; height: 22px;" aria-hidden="true"></i>
       <i data-lucide="x" x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
     </button>
 
-    <!-- ===== ДЕСКТОПНОЕ МЕНЮ ===== -->
+    <!-- ===== ДЕСКТОПНОЕ МЕНЮ (скрыто на мобильных через CSS) ===== -->
     <div class="navbar-menu--desktop">
       {% if request.state.user %}
         <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
@@ -63,7 +62,8 @@
   </div><!-- /.navbar-inner -->
 
   <!-- ===== МОБИЛЬНОЕ МЕНЮ ===== -->
-  <!-- Видимость управляется через класс .is-open (Alpine :class) -->
+  <!-- ВСЕГДА рендерится. По умолчанию СКРЫТО через CSS (display: none).
+       Показывается через добавление класса .is-open (управляется Alpine). -->
   <div class="navbar-mobile-menu"
        id="mobile-menu"
        :class="{ 'is-open': mobileMenuOpen }"

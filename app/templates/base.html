@@ -1,59 +1,58 @@
-<!-- app/templates/base.html -->
 <!DOCTYPE html>
 <html lang="ru" data-theme="light" class="notranslate" translate="no">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#6366f1">
-<meta name="google" content="notranslate">
-<title>{% block title %}101slovo{% endblock %}</title>
-<script>
-(function() {
-const theme = localStorage.getItem('theme') || 'light';
-document.documentElement.setAttribute('data-theme', theme);
-})();
-</script>
-<link rel="preload" href="/static/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/static/fonts/inter-500.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/static/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/static/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/static/fonts/inter-800.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/static/css/custom.css">
-<script src="/static/vendor/htmx.min.js"></script>
-<script defer src="/static/vendor/alpine.min.js"></script>
-<script defer src="/static/vendor/lucide.min.js"></script>
-<script defer src="/static/js/app.js"></script>
-<link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
-<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-<link rel="shortcut icon" href="/favicon.ico" />
-<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-<link rel="manifest" href="/static/favicon/site.webmanifest" />
-{% block head %}{% endblock %}
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="google" content="notranslate">
+  <title>{% block title %}101slovo{% endblock %}</title>
+  <script>
+    (function() {
+      const theme = localStorage.getItem('theme') || 'light';
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
+  <link rel="preload" href="/static/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-500.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-800.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/css/custom.css">
+  <script src="/static/vendor/htmx.min.js"></script>
+  <script defer src="/static/vendor/alpine.min.js"></script>
+  <script defer src="/static/vendor/lucide.min.js"></script>
+  <script defer src="/static/js/app.js"></script>
+  <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
+  <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
+  <link rel="manifest" href="/static/favicon/site.webmanifest" />
+  {% block head %}{% endblock %}
 </head>
 <body>
-<a href="#main-content" class="visually-hidden" style="position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden;">
-Перейти к основному содержимому
-</a>
-{% include "partials/nav.html" %}
-{% include "partials/flash.html" %}
-<main class="container fade-in-up" id="main-content" style="padding-top: 2rem; padding-bottom: 4rem;" aria-label="Основное содержимое страницы">
-{% block content %}{% endblock %}
-</main>
-<footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;" aria-label="Информация о сайте">
-<p style="margin-bottom: 0.75rem;">© 2026 101slovo • Изучай английский в контексте</p>
-<nav aria-label="Юридические документы">
-<p style="display: flex; justify-content: center; gap: 1.5rem; flex-wrap: wrap; font-size: 0.8125rem;">
-<a href="/legal/offer" style="color: var(--text-muted); text-decoration: none;">Оферта</a>
-<a href="/legal/privacy" style="color: var(--text-muted); text-decoration: none;">Конфиденциальность</a>
-<a href="/legal/terms" style="color: var(--text-muted); text-decoration: none;">Условия использования</a>
-<a href="/legal/consent" style="color: var(--text-muted); text-decoration: none;">Согласие на обработку ПД</a>
-</p>
-</nav>
-</footer>
-<script>
-document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
-document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
-</script>
-{% block scripts %}{% endblock %}
+  <a href="#main-content" class="visually-hidden" style="position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden;">
+    Перейти к основному содержимому
+  </a>
+  {% include "partials/nav.html" %}
+  {% include "partials/flash.html" %}
+  <main class="container fade-in-up" id="main-content" style="padding-top: 2rem; padding-bottom: 4rem;" aria-label="Основное содержимое страницы">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;" aria-label="Информация о сайте">
+    <p style="margin-bottom: 0.75rem;">© 2026 101slovo • Изучай английский в контексте</p>
+    <nav aria-label="Юридические документы">
+      <p style="display: flex; justify-content: center; gap: 1.5rem; flex-wrap: wrap; font-size: 0.8125rem;">
+        <a href="/legal/offer" style="color: var(--text-muted); text-decoration: none;">Оферта</a>
+        <a href="/legal/privacy" style="color: var(--text-muted); text-decoration: none;">Конфиденциальность</a>
+        <a href="/legal/terms" style="color: var(--text-muted); text-decoration: none;">Условия использования</a>
+        <a href="/legal/consent" style="color: var(--text-muted); text-decoration: none;">Согласие на обработку ПД</a>
+      </p>
+    </nav>
+  </footer>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
+    document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
+  </script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>
