@@ -1,6 +1,7 @@
 """Роуты для юридических страниц."""
 from fastapi import APIRouter, Request
 from app.core.templates import templates
+from app.config import settings
 
 router = APIRouter(prefix="/legal", tags=["legal"])
 
@@ -10,7 +11,10 @@ async def legal_offer(request: Request):
     """Публичная оферта на подписку."""
     return templates.TemplateResponse(
         "legal/offer.html",
-        {"request": request},
+        {
+            "request": request,
+            "referral_bonus_days": settings.REFERRAL_BONUS_DAYS,
+        },
     )
 
 

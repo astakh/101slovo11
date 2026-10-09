@@ -104,7 +104,10 @@ async def activate_subscription(
     if existing:
         # Продлеваем: добавляем дни к текущему expires_at
         existing.expires_at = existing.expires_at + timedelta(days=total_days)
-        existing.plan = plan  # Обновляем план (если переключился)
+        # Обновляем план только если это НЕ реферальный бонус
+        # (чтобы не перезаписать "monthly" на "referral_bonus")
+        if source != "referral":
+            existing.plan = plan
         if payment_id:
             existing.payment_id = payment_id
 
@@ -114,6 +117,7 @@ async def activate_subscription(
             payload={
                 "subscription_id": existing.id,
                 "plan": plan,
+                "source": source,
                 "added_days": total_days,
                 "new_expires_at": existing.expires_at.isoformat(),
             },
@@ -123,7 +127,8 @@ async def activate_subscription(
 
         logger.info(
             f"[SUBSCRIPTION] Extended for user_id={user_id}, "
-            f"plan={plan}, +{total_days} days, expires={existing.expires_at}"
+            f"plan={plan}, source={source}, +{total_days} days, "
+            f"expires={existing.expires_at}"
         )
         return existing
 

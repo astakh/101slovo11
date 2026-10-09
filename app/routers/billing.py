@@ -73,6 +73,7 @@ async def billing_page(
             "user": user,
             "subscription": sub_status,
             "referral": referral_stats,
+            "referral_bonus_days": settings.REFERRAL_BONUS_DAYS,
         },
     )
 
@@ -203,7 +204,7 @@ async def billing_success(
     """
     Страница успеха после оплаты (return_url от ЮKassa).
     Проверяет статус платежа и активирует подписку если нужно.
-    
+
     ВАЖНО: Бонус рефереру начисляется ТОЛЬКО через webhook,
     чтобы избежать двойного начисления.
     """
@@ -306,7 +307,7 @@ async def billing_webhook(
     - payment.canceled — платёж отменён
 
     Защита: проверка IP-адреса отправителя.
-    
+
     ВАЖНО: Бонус рефереру начисляется ТОЛЬКО здесь,
     чтобы избежать двойного начисления.
     """
@@ -366,7 +367,7 @@ async def billing_webhook(
                 payment_id=payment.id,
             )
 
-            # ✅ Начисляем бонус рефереру ТОЛЬКО здесь
+            # ✅ Начисляем бонус рефереру И реферированному ТОЛЬКО здесь
             await reward_referrer_on_purchase(db, payment.user_id)
 
             logger.info(

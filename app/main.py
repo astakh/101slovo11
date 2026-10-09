@@ -11,6 +11,7 @@ from app.middleware import AppMiddleware
 from app.core.templates import templates
 from app.db import AsyncSessionLocal
 from app.services.background_tasks import run_periodic_tasks
+from app.config import settings as app_settings
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,13 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def root(request: Request):
     if request.state.user:
         return Response(status_code=303, headers={"Location": "/dashboard"})
-    return templates.TemplateResponse("landing.html", {"request": request})
+    return templates.TemplateResponse(
+        "landing.html",
+        {
+            "request": request,
+            "referral_bonus_days": app_settings.REFERRAL_BONUS_DAYS,
+        },
+    )
 
 
 @app.get("/health")

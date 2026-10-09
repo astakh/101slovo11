@@ -54,7 +54,7 @@
             </span>
         </div>
         <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
-            У вас бесплатный план: 1 урок в день, {{ paywall.free_lessons_total if paywall else 5 }} уроков всего.
+            У вас бесплатный план: 1 урок в день, 5 уроков всего.
         </p>
         <a href="/billing/plans" role="button" style="background: var(--gradient-primary);">
             <i data-lucide="crown" style="width: 16px; height: 16px;"></i>
@@ -70,7 +70,9 @@
             Пригласи друга — получи месяц бесплатно
         </h3>
         <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
-            Поделись промокодом с другом. Когда он купит подписку, ты получишь <strong>+30 дней Premium</strong>.
+            Поделись промокодом с другом. Когда он купит подписку, ты получишь
+            <strong>+{{ referral_bonus_days }} дней Premium</strong>.
+            Твой друг тоже получит <strong>+{{ referral_bonus_days }} дней</strong> к своей подписке.
         </p>
 
         <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap;">

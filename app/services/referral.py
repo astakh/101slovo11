@@ -136,7 +136,7 @@ async def apply_referral_code(
         f"[REFERRAL] Code '{code}' applied: "
         f"user_id={user.id} referred by user_id={promo.owner_user_id}"
     )
-    return True, "Промокод применён! Ваш друг получит бонус после вашей подписки."
+    return True, "Промокод применён! Вы и ваш друг получите бонус после вашей подписки."
 
 
 async def reward_referrer_on_purchase(
@@ -144,8 +144,12 @@ async def reward_referrer_on_purchase(
     buyer_user_id: int,
 ) -> int | None:
     """
-    Начисляет бонус рефереру после покупки подписки.
+    Начисляет бонус рефереру И реферированному после покупки подписки.
     Вызывается после успешной оплаты.
+
+    Оба получают +REFERRAL_BONUS_DAYS дней:
+    - Реферер: за привлечение платящего пользователя.
+    - Реферированный: за регистрацию по промокоду (бонус к первой покупке).
 
     Возвращает:
         user_id реферера или None если реферала нет.
@@ -161,12 +165,22 @@ async def reward_referrer_on_purchase(
     if not referral:
         return None
 
-    # Начисляем бонус рефереру
     bonus_days = settings.REFERRAL_BONUS_DAYS
 
+    # 1. Начисляем бонус РЕФЕРЕРУ (пригласившему)
     await activate_subscription(
         db,
         user_id=referral.referrer_user_id,
+        plan="referral_bonus",
+        source="referral",
+        extra_days=bonus_days,
+    )
+
+    # 2. Начисляем бонус РЕФЕРИРОВАННОМУ (покупателю)
+    #    Бонус добавляется к только что купленной подписке
+    await activate_subscription(
+        db,
+        user_id=buyer_user_id,
         plan="referral_bonus",
         source="referral",
         extra_days=bonus_days,
@@ -176,6 +190,7 @@ async def reward_referrer_on_purchase(
     referral.status = "rewarded"
     referral.rewarded_at = datetime.now(timezone.utc)
 
+    # Событие для реферера
     event = Event(
         user_id=referral.referrer_user_id,
         type="referral_reward_granted",
@@ -186,9 +201,10 @@ async def reward_referrer_on_purchase(
     )
     db.add(event)
 
+    # Событие для реферированного
     event2 = Event(
         user_id=buyer_user_id,
-        type="referral_reward_given",
+        type="referral_bonus_received",
         payload={
             "referrer_user_id": referral.referrer_user_id,
             "bonus_days": bonus_days,
@@ -198,8 +214,8 @@ async def reward_referrer_on_purchase(
     await db.flush()
 
     logger.info(
-        f"[REFERRAL] Reward granted: user_id={referral.referrer_user_id} "
-        f"gets +{bonus_days} days for referring user_id={buyer_user_id}"
+        f"[REFERRAL] Rewards granted: referrer user_id={referral.referrer_user_id} "
+        f"and referred user_id={buyer_user_id} each get +{bonus_days} days"
     )
     return referral.referrer_user_id
 
