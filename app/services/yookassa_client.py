@@ -23,6 +23,7 @@ YOOKASSA_WEBHOOK_IPS = [
 
 class YooKassaError(Exception):
     """Ошибка при работе с ЮKassa API."""
+
     def __init__(self, message: str, http_status: int | None = None):
         super().__init__(message)
         self.http_status = http_status
@@ -31,13 +32,15 @@ class YooKassaError(Exception):
 async def create_payment(
     payment: Payment,
     return_url: str,
+    user_email: str,
 ) -> dict:
     """
-    Создаёт платёж в ЮKassa.
+    Создаёт платёж в ЮKassa с фискальным чеком (54-ФЗ).
 
     Args:
         payment: объект Payment из БД (с amount_kop, plan, description)
         return_url: URL для редиректа после оплаты (например, /billing/success)
+        user_email: email пользователя (для отправки фискального чека)
 
     Returns:
         dict с confirmation_url для редиректа пользователя
@@ -53,6 +56,36 @@ async def create_payment(
     # Сумма в рублях (ЮKassa принимает строку с 2 знаками после запятой)
     amount_value = f"{payment.amount_kop / 100:.2f}"
 
+    # === Фискальный чек (54-ФЗ) ===
+    # vat_code:
+    #   1 — НДС не облагается (ИП на УСН) ← ваш случай
+    #   2 — НДС 0%
+    #   3 — НДС 10%
+    #   4 — НДС 20%
+    #   5 — НДС 10/110
+    #   6 — НДС 20/120
+    # Если вы на ОСНО — поменяйте на нужное значение.
+    vat_code = 1
+
+    receipt = {
+        "customer": {
+            "email": user_email,
+        },
+        "items": [
+            {
+                "description": payment.description or f"Подписка: {payment.plan}",
+                "quantity": "1.00",
+                "amount": {
+                    "value": amount_value,
+                    "currency": "RUB",
+                },
+                "vat_code": vat_code,
+                "payment_mode": "full_payment",      # полная оплата
+                "payment_subject": "service",        # услуга
+            }
+        ],
+    }
+
     payload = {
         "amount": {
             "value": amount_value,
@@ -64,6 +97,7 @@ async def create_payment(
             "return_url": return_url,
         },
         "description": payment.description or f"Подписка: {payment.plan}",
+        "receipt": receipt,
         "metadata": {
             "payment_id": payment.id,
             "user_id": payment.user_id,
@@ -73,7 +107,6 @@ async def create_payment(
 
     # Idempotence key для идемпотентности
     idempotence_key = str(uuid.uuid4())
-
     headers = {
         "Idempotence-Key": idempotence_key,
         "Content-Type": "application/json",
@@ -82,7 +115,7 @@ async def create_payment(
 
     logger.info(
         f"[YOOKASSA] Creating payment | user_id={payment.user_id} | "
-        f"amount={amount_value} RUB | plan={payment.plan}"
+        f"amount={amount_value} RUB | plan={payment.plan} | email={user_email}"
     )
 
     try:
@@ -116,7 +149,6 @@ async def create_payment(
     # Извлекаем confirmation_url
     confirmation = data.get("confirmation", {})
     confirmation_url = confirmation.get("confirmation_url")
-
     if not confirmation_url:
         logger.error(f"[YOOKASSA] No confirmation_url in response: {data}")
         raise YooKassaError("ЮKassa не вернула confirmation_url")
@@ -138,7 +170,6 @@ async def create_payment(
 async def get_payment_info(yookassa_payment_id: str) -> dict:
     """
     Получает информацию о платеже из ЮKassa.
-
     Используется для проверки статуса после редиректа.
     """
     if not settings.YOOKASSA_SHOP_ID or not settings.YOOKASSA_SECRET_KEY:

@@ -2994,13 +2994,11 @@ from app.deps import require_auth, require_csrf
 from app.services.onboarding import complete_onboarding
 from app.core.templates import templates
 from app.models.user import User
-from app.utils.timezones import get_available_timezones, is_valid_timezone
 from app.config import settings
 
 router = APIRouter(tags=["onboarding"])
 
 LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
-
 DICT_LABELS = {
     "general": "Общий",
     "it": "IT",
@@ -3025,18 +3023,15 @@ def render_onboarding(
     form: dict | None = None,
 ):
     form = form or {}
-    selected_timezone = form.get("timezone") or user.timezone or "UTC"
     return templates.TemplateResponse(
         "onboarding.html",
         {
             "request": request,
-            "timezones": get_available_timezones(selected_timezone),
             "levels": LEVELS,
             "dictionaries": get_dictionaries(),
             "user": user,
             "error": error,
             "form": form,
-            # ✅ ФИКС: передаём settings для подсказки о лимите
             "settings": settings,
         },
     )
@@ -3049,6 +3044,7 @@ async def onboarding_page(
 ):
     if user.is_onboarded:
         return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
     return render_onboarding(request, user)
 
 
@@ -3060,7 +3056,6 @@ async def onboarding_complete(
     request: Request,
     level: str = Form(...),
     dictionary_code: str = Form(...),
-    timezone: str = Form(...),
     words_per_lesson: int = Form(...),
     daily_lesson_limit: int = Form(...),
     user: User = Depends(require_auth),
@@ -3072,7 +3067,6 @@ async def onboarding_complete(
     form = {
         "level": level,
         "dictionary_code": dictionary_code,
-        "timezone": timezone,
         "words_per_lesson": words_per_lesson,
         "daily_lesson_limit": daily_lesson_limit,
     }
@@ -3090,14 +3084,6 @@ async def onboarding_complete(
             request,
             user,
             error="Некорректный словарь.",
-            form=form,
-        )
-
-    if not is_valid_timezone(timezone):
-        return render_onboarding(
-            request,
-            user,
-            error="Некорректный часовой пояс. Выберите другой из списка.",
             form=form,
         )
 
@@ -3134,7 +3120,6 @@ async def onboarding_complete(
             user=user,
             level=level,
             dictionary_code=dictionary_code,
-            tz=timezone,
             words_per_lesson=words_per_lesson,
             daily_lesson_limit=daily_lesson_limit,
         )
@@ -3206,19 +3191,18 @@ async def dashboard_page(
 from fastapi import APIRouter, Request, Depends, Form, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.services.settings import update_user_settings
 from app.core.templates import templates
 from app.models.user import User
-from app.utils.timezones import get_available_timezones, is_valid_timezone
 from app.config import settings
 from app.utils.flash import add_flash
 
 router = APIRouter(tags=["settings"])
 
 LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
-
 DICT_LABELS = {
     "general": "Общий",
     "it": "IT",
@@ -3243,12 +3227,10 @@ def render_settings(
     form: dict | None = None,
 ):
     form = form or {}
-    selected_timezone = form.get("timezone") or user.timezone or "UTC"
     return templates.TemplateResponse(
         "settings.html",
         {
             "request": request,
-            "timezones": get_available_timezones(selected_timezone),
             "levels": LEVELS,
             "dictionaries": get_dictionaries(),
             "user": user,
@@ -3267,6 +3249,7 @@ async def settings_page(
     """Страница настроек."""
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
     return render_settings(request, user)
 
 
@@ -3275,7 +3258,6 @@ async def settings_post(
     request: Request,
     level: str = Form(...),
     dictionary_code: str = Form(...),
-    timezone: str = Form(...),
     words_per_lesson: int = Form(...),
     daily_lesson_limit: int = Form(...),
     user: User = Depends(require_auth),
@@ -3284,15 +3266,14 @@ async def settings_post(
     """Обновление настроек."""
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
-    
+
     form = {
         "level": level,
         "dictionary_code": dictionary_code,
-        "timezone": timezone,
         "words_per_lesson": words_per_lesson,
         "daily_lesson_limit": daily_lesson_limit,
     }
-    
+
     # Валидация уровня
     if level not in LEVELS:
         return render_settings(
@@ -3301,7 +3282,7 @@ async def settings_post(
             error="Некорректный уровень английского языка.",
             form=form,
         )
-    
+
     # Валидация словаря
     if dictionary_code not in settings.AVAILABLE_DICTIONARIES:
         return render_settings(
@@ -3310,16 +3291,7 @@ async def settings_post(
             error="Некорректный словарь.",
             form=form,
         )
-    
-    # Валидация таймзоны
-    if not is_valid_timezone(timezone):
-        return render_settings(
-            request,
-            user,
-            error="Некорректный часовой пояс. Выберите другой из списка.",
-            form=form,
-        )
-    
+
     # Валидация слов в уроке
     if not (
         settings.WORDS_PER_LESSON_MIN
@@ -3336,7 +3308,7 @@ async def settings_post(
             ),
             form=form,
         )
-    
+
     # Валидация лимита уроков
     if not (1 <= daily_lesson_limit <= settings.DAILY_LESSON_LIMIT_MAX):
         return render_settings(
@@ -3348,7 +3320,7 @@ async def settings_post(
             ),
             form=form,
         )
-    
+
     # Обновление настроек
     try:
         await update_user_settings(
@@ -3356,7 +3328,6 @@ async def settings_post(
             user=user,
             level=level,
             dictionary_code=dictionary_code,
-            tz=timezone,
             words_per_lesson=words_per_lesson,
             daily_lesson_limit=daily_lesson_limit,
         )
@@ -3367,7 +3338,7 @@ async def settings_post(
             error=str(e),
             form=form,
         )
-    
+
     response = RedirectResponse(url="/settings", status_code=status.HTTP_303_SEE_OTHER)
     add_flash(response, "success", "Настройки успешно сохранены!")
     return response
@@ -3558,10 +3529,10 @@ class LoginForm(BaseModel):
 ### app/schemas/onboarding.py ########################################################################
 from pydantic import BaseModel, Field
 
+
 class OnboardingForm(BaseModel):
     level: str = Field(..., pattern="^(A1|A2|B1|B2|C1|C2)$")
     dictionary_code: str
-    timezone: str
     words_per_lesson: int = Field(..., ge=1, le=10)
     daily_lesson_limit: int = Field(..., ge=1, le=5)
 ### end of app/schemas/onboarding.py ########################################################################
@@ -3569,12 +3540,12 @@ class OnboardingForm(BaseModel):
 ### app/schemas/settings.py ########################################################################
 from pydantic import BaseModel, Field
 
+
 class SettingsForm(BaseModel):
     level: str = Field(..., pattern="^(A1|A2|B1|B2|C1|C2)$")
     dictionary_code: str
     words_per_lesson: int = Field(..., ge=1, le=10)
     daily_lesson_limit: int = Field(..., ge=1, le=5)
-    timezone: str
 ### end of app/schemas/settings.py ########################################################################
 
 ### app/security.py ########################################################################
@@ -5104,39 +5075,39 @@ async def get_lesson_summary(
 ### app/services/onboarding.py ########################################################################
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from datetime import datetime, timezone
 
 from app.models.user import User
 from app.models.event import Event
 
+APP_TIMEZONE = "Europe/Moscow"
+
+
 async def complete_onboarding(
-    db: AsyncSession, 
-    user: User, 
-    level: str, 
-    dictionary_code: str, 
-    tz: str, 
-    words_per_lesson: int, 
+    db: AsyncSession,
+    user: User,
+    level: str,
+    dictionary_code: str,
+    words_per_lesson: int,
     daily_lesson_limit: int
 ) -> None:
     # Перезагружаем пользователя в текущей сессии
     stmt = select(User).where(User.id == user.id)
     result = await db.execute(stmt)
     db_user = result.scalar_one()
-    
+
     if db_user.is_onboarded:
         raise ValueError("Онбординг уже пройден")
-        
+
     db_user.level = level
     db_user.dictionary_code = dictionary_code
-    db_user.timezone = tz
-    db_user.timezone_changed_at = datetime.now(timezone.utc)
+    db_user.timezone = APP_TIMEZONE
     db_user.words_per_lesson = words_per_lesson
     db_user.daily_lesson_limit = daily_lesson_limit
     db_user.is_onboarded = True
-    
+
     event = Event(user_id=db_user.id, type="onboarding_completed")
     db.add(event)
-    
+
     await db.commit()
     await db.refresh(db_user)
 ### end of app/services/onboarding.py ########################################################################
@@ -5503,13 +5474,11 @@ async def get_referral_stats(db: AsyncSession, user_id: int) -> dict:
 
 ### app/services/settings.py ########################################################################
 """Сервис для обновления настроек пользователя."""
-from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
 from app.models.user import User
 from app.models.event import Event
-
-TIMEZONE_CHANGE_INTERVAL_DAYS = 7
 
 
 async def update_user_settings(
@@ -5517,47 +5486,28 @@ async def update_user_settings(
     user: User,
     level: str,
     dictionary_code: str,
-    tz: str,
     words_per_lesson: int,
     daily_lesson_limit: int,
 ) -> None:
     """
     Обновляет настройки пользователя.
-    
-    Raises:
-        ValueError: если нарушен лимит смены таймзоны (7 дней).
+    Часовой пояс больше не изменяется (всегда Europe/Moscow).
     """
     # Перезагружаем пользователя в текущей сессии
     stmt = select(User).where(User.id == user.id)
     result = await db.execute(stmt)
     db_user = result.scalar_one()
-    
-    # Проверка лимита смены таймзоны
-    if db_user.timezone != tz and db_user.timezone_changed_at:
-        days_since_change = (
-            datetime.now(timezone.utc) - db_user.timezone_changed_at
-        ).days
-        if days_since_change < TIMEZONE_CHANGE_INTERVAL_DAYS:
-            remaining = TIMEZONE_CHANGE_INTERVAL_DAYS - days_since_change
-            raise ValueError(
-                f"Часовой пояс можно менять не чаще раза в 7 дней. "
-                f"Осталось {remaining} дн."
-            )
-    
-    # Обновляем поля
-    if db_user.timezone != tz:
-        db_user.timezone = tz
-        db_user.timezone_changed_at = datetime.now(timezone.utc)
-    
+
+    # Обновляем поля (кроме timezone — он фиксированный)
     db_user.level = level
     db_user.dictionary_code = dictionary_code
     db_user.words_per_lesson = words_per_lesson
     db_user.daily_lesson_limit = daily_lesson_limit
-    
+
     # Событие
     event = Event(user_id=db_user.id, type="settings_updated")
     db.add(event)
-    
+
     await db.commit()
     await db.refresh(db_user)
 ### end of app/services/settings.py ########################################################################
@@ -7932,59 +7882,70 @@ async function copyToClipboard(text) {
 <!DOCTYPE html>
 <html lang="ru" data-theme="light" class="notranslate" translate="no">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#6366f1">
-  <meta name="google" content="notranslate">
-  <title>{% block title %}101slovo{% endblock %}</title>
-  <script>
-    (function() {
-      const theme = localStorage.getItem('theme') || 'light';
-      document.documentElement.setAttribute('data-theme', theme);
-    })();
-  </script>
-  <link rel="preload" href="/static/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/static/fonts/inter-500.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/static/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/static/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/static/fonts/inter-800.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/static/css/custom.css">
-  <script src="/static/vendor/htmx.min.js"></script>
-  <script defer src="/static/vendor/alpine.min.js"></script>
-  <script defer src="/static/vendor/lucide.min.js"></script>
-  <script defer src="/static/js/app.js"></script>
-  <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
-  <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
-  <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
-  <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
-  <link rel="manifest" href="/static/favicon/site.webmanifest" />
-  {% block head %}{% endblock %}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="google" content="notranslate">
+    <title>{% block title %}101slovo{% endblock %}</title>
+
+    <script>
+        (function() {
+            const theme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
+
+    <link rel="preload" href="/static/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-500.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-800.woff2" as="font" type="font/woff2" crossorigin>
+
+    <link rel="stylesheet" href="/static/css/custom.css">
+
+    <script src="/static/vendor/htmx.min.js"></script>
+    <script defer src="/static/js/app.js"></script>
+    <script defer src="/static/vendor/alpine.min.js"></script>
+    <script defer src="/static/vendor/lucide.min.js"></script>
+
+    <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
+    <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
+    <link rel="manifest" href="/static/favicon/site.webmanifest" />
+
+    {% block head %}{% endblock %}
 </head>
 <body>
-  <a href="#main-content" class="visually-hidden" style="position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden;">
-    Перейти к основному содержимому
-  </a>
-  {% include "partials/nav.html" %}
-  {% include "partials/flash.html" %}
-  <main class="container fade-in-up" id="main-content" style="padding-top: 2rem; padding-bottom: 4rem;" aria-label="Основное содержимое страницы">
-    {% block content %}{% endblock %}
-  </main>
-  <footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;" aria-label="Информация о сайте">
-    <p style="margin-bottom: 0.75rem;">© 2026 101slovo • Изучай английский в контексте</p>
-    <nav aria-label="Юридические документы">
-      <p style="display: flex; justify-content: center; gap: 1.5rem; flex-wrap: wrap; font-size: 0.8125rem;">
-        <a href="/legal/offer" style="color: var(--text-muted); text-decoration: none;">Оферта</a>
-        <a href="/legal/privacy" style="color: var(--text-muted); text-decoration: none;">Конфиденциальность</a>
-        <a href="/legal/terms" style="color: var(--text-muted); text-decoration: none;">Условия использования</a>
-        <a href="/legal/consent" style="color: var(--text-muted); text-decoration: none;">Согласие на обработку ПД</a>
-      </p>
-    </nav>
-  </footer>
-  <script>
-    document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
-    document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
-  </script>
-  {% block scripts %}{% endblock %}
+    <a href="#main-content" class="visually-hidden" style="position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden;">
+        Перейти к основному содержимому
+    </a>
+
+    {% include "partials/nav.html" %}
+    {% include "partials/flash.html" %}
+
+    <main class="container fade-in-up" id="main-content" style="padding-top: 2rem; padding-bottom: 4rem;" aria-label="Основное содержимое страницы">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;" aria-label="Информация о сайте">
+        <p style="margin-bottom: 0.75rem;">© 2026 101slovo • Изучай английский в контексте</p>
+        <nav aria-label="Юридические документы">
+            <p style="display: flex; justify-content: center; gap: 1.5rem; flex-wrap: wrap; font-size: 0.8125rem;">
+                <a href="/legal/offer" style="color: var(--text-muted); text-decoration: none;">Оферта</a>
+                <a href="/legal/privacy" style="color: var(--text-muted); text-decoration: none;">Конфиденциальность</a>
+                <a href="/legal/terms" style="color: var(--text-muted); text-decoration: none;">Условия использования</a>
+                <a href="/legal/consent" style="color: var(--text-muted); text-decoration: none;">Согласие на обработку ПД</a>
+            </p>
+        </nav>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
+        document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
+    </script>
+
+    {% block scripts %}{% endblock %}
 </body>
 </html>
 ### end of app/templates/base.html ########################################################################
@@ -9801,12 +9762,13 @@ aria-label="Пропустить слово {{ sw.lemma }}">
 ### app/templates/onboarding.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Настройка профиля — 101slovo{% endblock %}
+
 {% block content %}
 {% set selected_level = form.get('level', user.level) if form else user.level %}
 {% set selected_dictionary = form.get('dictionary_code', user.dictionary_code) if form else user.dictionary_code %}
-{% set selected_timezone = form.get('timezone', user.timezone) if form else user.timezone %}
 {% set words_value = form.get('words_per_lesson', user.words_per_lesson or 5) if form else (user.words_per_lesson or 5) %}
 {% set limit_value = form.get('daily_lesson_limit', user.daily_lesson_limit or 1) if form else (user.daily_lesson_limit or 1) %}
+
 {% set words_min = settings.WORDS_PER_LESSON_MIN if settings else 1 %}
 {% set words_max = settings.WORDS_PER_LESSON_MAX if settings else 10 %}
 {% set limit_max = settings.DAILY_LESSON_LIMIT_MAX if settings else 5 %}
@@ -9876,24 +9838,11 @@ aria-label="Пропустить слово {{ sw.lemma }}">
             </div>
         </div>
 
-        <!-- 3. Часовой пояс -->
-        <div class="card mb-3" style="padding: 1.5rem;">
-            <label for="timezone" style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
-                <i data-lucide="globe" style="width: 20px; height: 20px; color: var(--brand-accent);"></i>
-                <strong>3. Часовой пояс</strong>
-            </label>
-            <select id="timezone" name="timezone" required>
-                {% for tz in timezones %}
-                <option value="{{ tz }}" {% if selected_timezone == tz %}selected{% endif %}>{{ tz }}</option>
-                {% endfor %}
-            </select>
-        </div>
-
-        <!-- 4. Слов в уроке -->
+        <!-- 3. Слов в уроке -->
         <div class="card mb-3" style="padding: 1.5rem;" x-data="{ val: {{ words_value }} }">
             <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
                 <i data-lucide="type" style="width: 20px; height: 20px; color: #10b981;"></i>
-                <strong>4. Слов в одном уроке:</strong>
+                <strong>3. Слов в одном уроке:</strong>
                 <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.25rem; margin-left: 0.25rem;"></span>
             </label>
             <input type="range" name="words_per_lesson"
@@ -9907,11 +9856,11 @@ aria-label="Пропустить слово {{ sw.lemma }}">
             </div>
         </div>
 
-        <!-- 5. Уроков в день -->
+        <!-- 4. Уроков в день -->
         <div class="card mb-4" style="padding: 1.5rem;" x-data="{ val: {{ limit_value }} }">
             <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
                 <i data-lucide="calendar" style="width: 20px; height: 20px; color: #f59e0b;"></i>
-                <strong>5. Уроков в день:</strong>
+                <strong>4. Уроков в день:</strong>
                 <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.25rem; margin-left: 0.25rem;"></span>
             </label>
             <input type="range" name="daily_lesson_limit"
@@ -9919,6 +9868,7 @@ aria-label="Пропустить слово {{ sw.lemma }}">
                    value="{{ limit_value }}" required
                    @input="val = $event.target.value"
                    style="width: 100%;">
+
             <!-- ✅ ФИКС: Подсказка о том, что настройка применяется только с Premium -->
             <div style="display: flex; align-items: flex-start; gap: 0.5rem; margin-top: 0.75rem; padding: 0.625rem 0.875rem; background: rgba(59, 130, 246, 0.06); border: 1px solid rgba(59, 130, 246, 0.15); border-radius: var(--radius-md); font-size: 0.8125rem; color: var(--text-secondary);">
                 <i data-lucide="info" style="width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; color: #3b82f6;"></i>
@@ -10189,12 +10139,13 @@ document.addEventListener('DOMContentLoaded', function() {
 ### app/templates/settings.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Настройки — 101slovo{% endblock %}
+
 {% block content %}
 {% set selected_level = form.get('level', user.level) if form else user.level %}
 {% set selected_dictionary = form.get('dictionary_code', user.dictionary_code) if form else user.dictionary_code %}
-{% set selected_timezone = form.get('timezone', user.timezone) if form else user.timezone %}
 {% set words_value = form.get('words_per_lesson', user.words_per_lesson or 5) if form else (user.words_per_lesson or 5) %}
 {% set limit_value = form.get('daily_lesson_limit', user.daily_lesson_limit or 1) if form else (user.daily_lesson_limit or 1) %}
+
 {% set words_min = settings.WORDS_PER_LESSON_MIN if settings else 1 %}
 {% set words_max = settings.WORDS_PER_LESSON_MAX if settings else 10 %}
 {% set limit_max = settings.DAILY_LESSON_LIMIT_MAX if settings else 5 %}
@@ -10264,33 +10215,11 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         </div>
 
-        <!-- 3. Часовой пояс -->
-        <div class="card mb-3" style="padding: 1.5rem;">
-            <label for="timezone" style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
-                <i data-lucide="globe" style="width: 20px; height: 20px; color: var(--brand-accent);"></i>
-                <strong>3. Часовой пояс</strong>
-            </label>
-            <select id="timezone" name="timezone" required>
-                {% for tz in timezones %}
-                <option value="{{ tz }}" {% if selected_timezone == tz %}selected{% endif %}>{{ tz }}</option>
-                {% endfor %}
-            </select>
-            {% if user.timezone_changed_at %}
-            <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; padding: 0.625rem 0.875rem; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.2); border-radius: var(--radius-md); font-size: 0.8125rem; color: #92400e;">
-                <i data-lucide="info" style="width: 14px; height: 14px; flex-shrink: 0;"></i>
-                <span>
-                    Последняя смена: <strong>{{ user.timezone_changed_at.strftime('%d.%m.%Y') }}</strong>.
-                    Часовой пояс можно менять не чаще раза в 7 дней.
-                </span>
-            </div>
-            {% endif %}
-        </div>
-
-        <!-- 4. Слов в уроке -->
+        <!-- 3. Слов в уроке -->
         <div class="card mb-3" style="padding: 1.5rem;" x-data="{ val: {{ words_value }} }">
             <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
                 <i data-lucide="type" style="width: 20px; height: 20px; color: #10b981;"></i>
-                <strong>4. Слов в одном уроке:</strong>
+                <strong>3. Слов в одном уроке:</strong>
                 <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.25rem; margin-left: 0.25rem;"></span>
             </label>
             <input type="range" name="words_per_lesson"
@@ -10304,11 +10233,11 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         </div>
 
-        <!-- 5. Уроков в день -->
+        <!-- 4. Уроков в день -->
         <div class="card mb-4" style="padding: 1.5rem;" x-data="{ val: {{ limit_value }} }">
             <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; margin-bottom: 1rem; color: var(--text-primary);">
                 <i data-lucide="calendar" style="width: 20px; height: 20px; color: #f59e0b;"></i>
-                <strong>5. Уроков в день:</strong>
+                <strong>4. Уроков в день:</strong>
                 <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.25rem; margin-left: 0.25rem;"></span>
             </label>
             <input type="range" name="daily_lesson_limit"
@@ -10316,6 +10245,7 @@ document.addEventListener('DOMContentLoaded', function() {
                    value="{{ limit_value }}" required
                    @input="val = $event.target.value"
                    style="width: 100%;">
+
             <!-- ✅ ФИКС: Подсказка о том, что настройка применяется только с Premium -->
             <div style="display: flex; align-items: flex-start; gap: 0.5rem; margin-top: 0.75rem; padding: 0.625rem 0.875rem; background: rgba(59, 130, 246, 0.06); border: 1px solid rgba(59, 130, 246, 0.15); border-radius: var(--radius-md); font-size: 0.8125rem; color: var(--text-secondary);">
                 <i data-lucide="info" style="width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; color: #3b82f6;"></i>
@@ -10844,25 +10774,27 @@ def cluster_words(
 
 ### app/utils/datetime_utils.py ########################################################################
 from datetime import datetime, date, time, timezone, timedelta
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from zoneinfo import ZoneInfo
 
-def get_user_tz(timezone_str: str | None) -> ZoneInfo:
-    if not timezone_str:
-        return ZoneInfo("UTC")
-    try:
-        return ZoneInfo(timezone_str)
-    except ZoneInfoNotFoundError:
-        return ZoneInfo("UTC")
+# Фиксированный часовой пояс приложения
+APP_TIMEZONE = ZoneInfo("Europe/Moscow")
 
-def get_user_today(timezone_str: str | None) -> date:
-    tz = get_user_tz(timezone_str)
-    return datetime.now(tz).date()
 
-def get_resets_at(timezone_str: str | None) -> datetime:
-    tz = get_user_tz(timezone_str)
-    now = datetime.now(tz)
+def get_user_tz(timezone_str: str | None = None) -> ZoneInfo:
+    """Возвращает часовой пояс приложения (всегда Europe/Moscow)."""
+    return APP_TIMEZONE
+
+
+def get_user_today(timezone_str: str | None = None) -> date:
+    """Возвращает текущую дату по московскому времени."""
+    return datetime.now(APP_TIMEZONE).date()
+
+
+def get_resets_at(timezone_str: str | None = None) -> datetime:
+    """Возвращает время сброса дневного лимита (00:00 по Москве, в UTC)."""
+    now = datetime.now(APP_TIMEZONE)
     tomorrow = now.date() + timedelta(days=1)
-    reset_time = datetime.combine(tomorrow, time(0, 0, 0), tzinfo=tz)
+    reset_time = datetime.combine(tomorrow, time(0, 0, 0), tzinfo=APP_TIMEZONE)
     return reset_time.astimezone(timezone.utc)
 ### end of app/utils/datetime_utils.py ########################################################################
 
@@ -11240,130 +11172,6 @@ def validate_user_fragment(user_input: str, fragment: str) -> bool:
     normalized_fragment = normalize_for_comparison(fragment)
     return normalized_fragment in normalized_input
 ### end of app/utils/text_validation.py ########################################################################
-
-### app/utils/timezones.py ########################################################################
-from zoneinfo import available_timezones, ZoneInfo
-
-
-FALLBACK_TIMEZONES = [
-    "UTC",
-    "Africa/Cairo",
-    "Africa/Johannesburg",
-    "Africa/Lagos",
-    "Africa/Nairobi",
-    "America/Anchorage",
-    "America/Argentina/Buenos_Aires",
-    "America/Bogota",
-    "America/Chicago",
-    "America/Denver",
-    "America/Los_Angeles",
-    "America/Mexico_City",
-    "America/New_York",
-    "America/Phoenix",
-    "America/Sao_Paulo",
-    "America/Toronto",
-    "America/Vancouver",
-    "Asia/Almaty",
-    "Asia/Baghdad",
-    "Asia/Baku",
-    "Asia/Bangkok",
-    "Asia/Colombo",
-    "Asia/Dhaka",
-    "Asia/Dubai",
-    "Asia/Hong_Kong",
-    "Asia/Irkutsk",
-    "Asia/Jakarta",
-    "Asia/Jerusalem",
-    "Asia/Kabul",
-    "Asia/Karachi",
-    "Asia/Kolkata",
-    "Asia/Kuala_Lumpur",
-    "Asia/Novosibirsk",
-    "Asia/Riyadh",
-    "Asia/Seoul",
-    "Asia/Shanghai",
-    "Asia/Singapore",
-    "Asia/Tashkent",
-    "Asia/Tbilisi",
-    "Asia/Tehran",
-    "Asia/Tokyo",
-    "Asia/Vladivostok",
-    "Asia/Yekaterinburg",
-    "Asia/Yerevan",
-    "Atlantic/Reykjavik",
-    "Australia/Adelaide",
-    "Australia/Brisbane",
-    "Australia/Melbourne",
-    "Australia/Perth",
-    "Australia/Sydney",
-    "Europe/Amsterdam",
-    "Europe/Athens",
-    "Europe/Belgrade",
-    "Europe/Berlin",
-    "Europe/Brussels",
-    "Europe/Bucharest",
-    "Europe/Budapest",
-    "Europe/Dublin",
-    "Europe/Helsinki",
-    "Europe/Istanbul",
-    "Europe/Kaliningrad",
-    "Europe/Kiev",
-    "Europe/Lisbon",
-    "Europe/London",
-    "Europe/Madrid",
-    "Europe/Minsk",
-    "Europe/Moscow",
-    "Europe/Paris",
-    "Europe/Prague",
-    "Europe/Rome",
-    "Europe/Samara",
-    "Europe/Sofia",
-    "Europe/Stockholm",
-    "Europe/Vienna",
-    "Europe/Vilnius",
-    "Europe/Warsaw",
-    "Europe/Zurich",
-    "Pacific/Auckland",
-    "Pacific/Honolulu",
-]
-
-
-def get_available_timezones(extra: str | None = None) -> list[str]:
-    """
-    Возвращает список доступных часовых поясов.
-
-    Если системная база таймзон пуста, используем запасной список.
-    Это типично для систем без установленного tzdata.
-    """
-    try:
-        zones = set(available_timezones())
-    except Exception:
-        zones = set()
-
-    if not zones:
-        zones = set(FALLBACK_TIMEZONES)
-
-    zones.add("UTC")
-
-    if extra:
-        zones.add(extra)
-
-    return sorted(zones)
-
-
-def is_valid_timezone(name: str | None) -> bool:
-    """
-    Проверяет, что строка является валидным IANA-часовым поясом.
-    """
-    if not name:
-        return False
-
-    try:
-        ZoneInfo(name)
-        return True
-    except Exception:
-        return False
-### end of app/utils/timezones.py ########################################################################
 
 ### docs/DEPLOY.md ########################################################################
 # Сводка по деплою проекта 101slovo

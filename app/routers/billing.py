@@ -1,10 +1,12 @@
 """Роуты биллинга и управления подпиской."""
 import logging
 from datetime import datetime, timezone
+
 from fastapi import APIRouter, Request, Depends, Form, HTTPException, status
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.core.templates import templates
@@ -167,7 +169,8 @@ async def subscribe_post(
         base_url = str(request.base_url).rstrip("/")
         return_url = f"{base_url}/billing/success?payment_id={payment.id}"
 
-        result = await create_payment(payment, return_url)
+        # ✅ Передаём email пользователя для фискального чека (54-ФЗ)
+        result = await create_payment(payment, return_url, user_email=user.email)
 
         # Сохраняем yookassa_payment_id
         payment.yookassa_payment_id = result["yookassa_payment_id"]
@@ -240,7 +243,6 @@ async def billing_success(
                 payment.status = "succeeded"
                 paid_at_raw = info.get("captured_at") or info.get("created_at")
                 payment.paid_at = _parse_yookassa_datetime(paid_at_raw)
-
                 await activate_subscription(
                     db,
                     user_id=user.id,
@@ -255,9 +257,11 @@ async def billing_success(
                     f"payment_id={payment.id} | user_id={user.id} | "
                     f"referral bonus will be granted by webhook"
                 )
+
             elif yookassa_status == "canceled":
                 payment.status = "failed"
                 logger.info(f"[BILLING] Payment canceled | payment_id={payment.id}")
+
             # pending — ждём webhook
 
         except YooKassaError as e:
@@ -295,7 +299,6 @@ async def cancel_post(
 # ============================================================
 # WEBHOOK от ЮKassa
 # ============================================================
-
 @router.post("/webhook")
 async def billing_webhook(
     request: Request,
@@ -303,7 +306,6 @@ async def billing_webhook(
 ):
     """
     Webhook-эндпоинт для уведомлений от ЮKassa.
-
     Обрабатывает события:
     - payment.succeeded — платёж успешен
     - payment.canceled — платёж отменён
@@ -338,7 +340,6 @@ async def billing_webhook(
     event = body.get("event", "")
     obj = body.get("object", {})
     yookassa_payment_id = obj.get("id", "")
-
     logger.info(f"[WEBHOOK] Received event: {event} | yookassa_id={yookassa_payment_id}")
 
     # 3. Находим платёж в БД
@@ -363,7 +364,6 @@ async def billing_webhook(
             payment.status = "succeeded"
             paid_at_raw = obj.get("captured_at") or obj.get("created_at")
             payment.paid_at = _parse_yookassa_datetime(paid_at_raw)
-
             await activate_subscription(
                 db,
                 user_id=payment.user_id,
@@ -371,23 +371,22 @@ async def billing_webhook(
                 source="payment",
                 payment_id=payment.id,
             )
-
             logger.info(
                 f"[WEBHOOK] Payment succeeded | payment_id={payment.id} | "
                 f"user_id={payment.user_id} | plan={payment.plan}"
             )
 
-            event_record = Event(
-                user_id=payment.user_id,
-                type="payment_succeeded",
-                payload={
-                    "payment_id": payment.id,
-                    "yookassa_payment_id": yookassa_payment_id,
-                    "plan": payment.plan,
-                    "amount_kop": payment.amount_kop,
-                },
-            )
-            db.add(event_record)
+        event_record = Event(
+            user_id=payment.user_id,
+            type="payment_succeeded",
+            payload={
+                "payment_id": payment.id,
+                "yookassa_payment_id": yookassa_payment_id,
+                "plan": payment.plan,
+                "amount_kop": payment.amount_kop,
+            },
+        )
+        db.add(event_record)
 
         # ✅ Начисление бонуса — ВНЕ блока проверки статуса платежа.
         # Это решает проблему, когда /billing/success уже пометил
@@ -399,22 +398,21 @@ async def billing_webhook(
     elif event == "payment.canceled":
         if payment.status not in ("succeeded", "failed"):
             payment.status = "failed"
-
             logger.info(
                 f"[WEBHOOK] Payment canceled | payment_id={payment.id} | "
                 f"user_id={payment.user_id}"
             )
 
-            event_record = Event(
-                user_id=payment.user_id,
-                type="payment_canceled",
-                payload={
-                    "payment_id": payment.id,
-                    "yookassa_payment_id": yookassa_payment_id,
-                    "reason": obj.get("cancellation_details", {}).get("reason", "unknown"),
-                },
-            )
-            db.add(event_record)
+        event_record = Event(
+            user_id=payment.user_id,
+            type="payment_canceled",
+            payload={
+                "payment_id": payment.id,
+                "yookassa_payment_id": yookassa_payment_id,
+                "reason": obj.get("cancellation_details", {}).get("reason", "unknown"),
+            },
+        )
+        db.add(event_record)
 
     else:
         logger.info(f"[WEBHOOK] Unhandled event: {event}")
