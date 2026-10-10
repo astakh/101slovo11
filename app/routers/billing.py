@@ -110,6 +110,11 @@ async def plans_page(
             "six_month_full": six_month_full,
             "six_month_saving": six_month_saving,
             "discount_percent": settings.SUBSCRIPTION_6M_DISCOUNT_PERCENT,
+            # ✅ Лимиты из конфига (вместо хардкода)
+            "free_daily_limit": settings.FREE_LESSON_PER_DAY_LIMIT,
+            "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
+            "daily_lesson_limit_max": settings.DAILY_LESSON_LIMIT_MAX,
+            "words_per_lesson_max": settings.WORDS_PER_LESSON_MAX,
         },
     )
 

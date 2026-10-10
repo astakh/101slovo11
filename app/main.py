@@ -2,10 +2,12 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
 from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal
 from app.middleware import AppMiddleware
 from app.core.templates import templates
@@ -17,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 BG_TASK_INTERVAL = 3600
 
+
 async def _background_scheduler():
     """Фоновый планировщик периодических задач."""
     while True:
@@ -27,6 +30,7 @@ async def _background_scheduler():
                 await db.commit()
         except Exception as e:
             logger.error(f"[BG SCHEDULER] Error: {e}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -40,7 +44,9 @@ async def lifespan(app: FastAPI):
         pass
     logger.info("[LIFESPAN] Background scheduler stopped")
 
+
 app = FastAPI(title="101slovo", lifespan=lifespan)
+
 
 @app.middleware("http")
 async def bot_protection_middleware(request: Request, call_next):
@@ -61,6 +67,7 @@ async def bot_protection_middleware(request: Request, call_next):
         )
     return await call_next(request)
 
+
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.add_middleware(AppMiddleware)
 
@@ -75,6 +82,7 @@ app.include_router(admin.router)
 app.include_router(billing.router)
 app.include_router(legal.router)
 
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if request.headers.get("HX-Request") and exc.headers and "HX-Redirect" in exc.headers:
@@ -86,6 +94,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if exc.status_code == 503:
         return templates.TemplateResponse("errors/503.html", {"request": request}, status_code=503)
     return templates.TemplateResponse("errors/500.html", {"request": request}, status_code=500)
+
 
 @app.get("/")
 async def root(request: Request):
@@ -114,8 +123,12 @@ async def root(request: Request):
             # Freemium лимиты
             "free_lessons_total": app_settings.FREE_LESSONS_TOTAL_LIMIT,
             "free_daily_limit": app_settings.FREE_LESSON_PER_DAY_LIMIT,
+            # ✅ Лимиты Premium из конфига (вместо хардкода)
+            "daily_lesson_limit_max": app_settings.DAILY_LESSON_LIMIT_MAX,
+            "words_per_lesson_max": app_settings.WORDS_PER_LESSON_MAX,
         },
     )
+
 
 @app.get("/health")
 async def health():

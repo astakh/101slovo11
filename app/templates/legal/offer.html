@@ -2,7 +2,6 @@
 {% block title %}Публичная оферта — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-
     <div style="margin-bottom: 2rem;">
         <h1 style="background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
             Публичная оферта на подписку
@@ -13,7 +12,6 @@
     </div>
 
     <div class="card" style="padding: 2rem; line-height: 1.8;">
-
         <h3>1. Общие положения</h3>
         <p>
             1.1. Настоящий документ является официальным предложением (публичной офертой)
@@ -40,7 +38,7 @@
         <ul>
             <li><strong>Сервис</strong> — веб-приложение «101slovo» для изучения английских слов методом интервального повторения с использованием генеративного искусственного интеллекта.</li>
             <li><strong>Подписка</strong> — платный период доступа к расширенным функциям Сервиса.</li>
-            <li><strong>Freemium</strong> — бесплатный ограниченный доступ к Сервису (5 уроков всего, 1 урок в день).</li>
+            <li><strong>Freemium</strong> — бесплатный ограниченный доступ к Сервису ({{ free_lessons_total }} уроков всего, {{ free_daily_limit }} урок в день).</li>
             <li><strong>Premium</strong> — платный доступ без ограничений по общему количеству уроков.</li>
             <li><strong>ЮKassa (НКО «ЮМани» ООО)</strong> — платёжная система, через которую осуществляется приём платежей.</li>
             <li><strong>Реферальная программа</strong> — программа, по которой Пользователи получают бонусные дни подписки за привлечение новых платящих пользователей.</li>
@@ -58,7 +56,7 @@
             3.3. В рамках подписки Пользователю предоставляются:
         </p>
         <ul>
-            <li>Неограниченное количество уроков (до 5 уроков в день);</li>
+            <li>Неограниченное количество уроков (до {{ daily_lesson_limit_max }} уроков в день);</li>
             <li>Генерация предложений с использованием ИИ (GigaChat);</li>
             <li>Оценка переводов с использованием ИИ;</li>
             <li>Алгоритм интервального повторения (SRS);</li>
@@ -167,7 +165,7 @@
         </p>
         <p>
             8.3. Для запроса возврата необходимо направить письмо на
-            <a href="mailto:support@101slovo.ru">support@101slovo.ru</a>
+            <a href="mailto:astavimana@yandex.ru">astavimana@yandex.ru</a>
             с указанием email аккаунта и причины возврата.
         </p>
         <p>
@@ -253,10 +251,9 @@
             <p style="margin: 0.25rem 0;">ИНН: 501723142274</p>
             <p style="margin: 0.25rem 0;">ОГРНИП: 325508100740497</p>
             <p style="margin: 0.25rem 0;">Адрес: МО, г. Раменское, тер. СНТ Старниково, д.48</p>
-            <p style="margin: 0.25rem 0;">Email: <a href="mailto:support@101slovo.ru">support@101slovo.ru</a></p>
+            <p style="margin: 0.25rem 0;">Email: <a href="mailto:astavimana@yandex.ru">astavimana@yandex.ru</a></p>
             <p style="margin: 0.25rem 0;">Телефон: +7 (925) 010-58-94</p>
         </div>
-
     </div>
 </div>
 {% endblock %}

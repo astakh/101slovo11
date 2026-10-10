@@ -1208,10 +1208,12 @@ class EnrichWordResponse(BaseModel):
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
 from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal
 from app.middleware import AppMiddleware
 from app.core.templates import templates
@@ -1223,6 +1225,7 @@ logger = logging.getLogger(__name__)
 
 BG_TASK_INTERVAL = 3600
 
+
 async def _background_scheduler():
     """Фоновый планировщик периодических задач."""
     while True:
@@ -1233,6 +1236,7 @@ async def _background_scheduler():
                 await db.commit()
         except Exception as e:
             logger.error(f"[BG SCHEDULER] Error: {e}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1246,7 +1250,9 @@ async def lifespan(app: FastAPI):
         pass
     logger.info("[LIFESPAN] Background scheduler stopped")
 
+
 app = FastAPI(title="101slovo", lifespan=lifespan)
+
 
 @app.middleware("http")
 async def bot_protection_middleware(request: Request, call_next):
@@ -1267,6 +1273,7 @@ async def bot_protection_middleware(request: Request, call_next):
         )
     return await call_next(request)
 
+
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.add_middleware(AppMiddleware)
 
@@ -1281,6 +1288,7 @@ app.include_router(admin.router)
 app.include_router(billing.router)
 app.include_router(legal.router)
 
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if request.headers.get("HX-Request") and exc.headers and "HX-Redirect" in exc.headers:
@@ -1292,6 +1300,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if exc.status_code == 503:
         return templates.TemplateResponse("errors/503.html", {"request": request}, status_code=503)
     return templates.TemplateResponse("errors/500.html", {"request": request}, status_code=500)
+
 
 @app.get("/")
 async def root(request: Request):
@@ -1320,8 +1329,12 @@ async def root(request: Request):
             # Freemium лимиты
             "free_lessons_total": app_settings.FREE_LESSONS_TOTAL_LIMIT,
             "free_daily_limit": app_settings.FREE_LESSON_PER_DAY_LIMIT,
+            # ✅ Лимиты Premium из конфига (вместо хардкода)
+            "daily_lesson_limit_max": app_settings.DAILY_LESSON_LIMIT_MAX,
+            "words_per_lesson_max": app_settings.WORDS_PER_LESSON_MAX,
         },
     )
+
 
 @app.get("/health")
 async def health():
@@ -2017,10 +2030,12 @@ async def logout_post(request: Request, db: AsyncSession = Depends(get_db)):
 """Роуты биллинга и управления подпиской."""
 import logging
 from datetime import datetime, timezone
+
 from fastapi import APIRouter, Request, Depends, Form, HTTPException, status
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.core.templates import templates
@@ -2124,6 +2139,11 @@ async def plans_page(
             "six_month_full": six_month_full,
             "six_month_saving": six_month_saving,
             "discount_percent": settings.SUBSCRIPTION_6M_DISCOUNT_PERCENT,
+            # ✅ Лимиты из конфига (вместо хардкода)
+            "free_daily_limit": settings.FREE_LESSON_PER_DAY_LIMIT,
+            "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
+            "daily_lesson_limit_max": settings.DAILY_LESSON_LIMIT_MAX,
+            "words_per_lesson_max": settings.WORDS_PER_LESSON_MAX,
         },
     )
 
@@ -2183,7 +2203,8 @@ async def subscribe_post(
         base_url = str(request.base_url).rstrip("/")
         return_url = f"{base_url}/billing/success?payment_id={payment.id}"
 
-        result = await create_payment(payment, return_url)
+        # ✅ Передаём email пользователя для фискального чека (54-ФЗ)
+        result = await create_payment(payment, return_url, user_email=user.email)
 
         # Сохраняем yookassa_payment_id
         payment.yookassa_payment_id = result["yookassa_payment_id"]
@@ -2256,7 +2277,6 @@ async def billing_success(
                 payment.status = "succeeded"
                 paid_at_raw = info.get("captured_at") or info.get("created_at")
                 payment.paid_at = _parse_yookassa_datetime(paid_at_raw)
-
                 await activate_subscription(
                     db,
                     user_id=user.id,
@@ -2271,9 +2291,11 @@ async def billing_success(
                     f"payment_id={payment.id} | user_id={user.id} | "
                     f"referral bonus will be granted by webhook"
                 )
+
             elif yookassa_status == "canceled":
                 payment.status = "failed"
                 logger.info(f"[BILLING] Payment canceled | payment_id={payment.id}")
+
             # pending — ждём webhook
 
         except YooKassaError as e:
@@ -2311,7 +2333,6 @@ async def cancel_post(
 # ============================================================
 # WEBHOOK от ЮKassa
 # ============================================================
-
 @router.post("/webhook")
 async def billing_webhook(
     request: Request,
@@ -2319,7 +2340,6 @@ async def billing_webhook(
 ):
     """
     Webhook-эндпоинт для уведомлений от ЮKassa.
-
     Обрабатывает события:
     - payment.succeeded — платёж успешен
     - payment.canceled — платёж отменён
@@ -2354,7 +2374,6 @@ async def billing_webhook(
     event = body.get("event", "")
     obj = body.get("object", {})
     yookassa_payment_id = obj.get("id", "")
-
     logger.info(f"[WEBHOOK] Received event: {event} | yookassa_id={yookassa_payment_id}")
 
     # 3. Находим платёж в БД
@@ -2379,7 +2398,6 @@ async def billing_webhook(
             payment.status = "succeeded"
             paid_at_raw = obj.get("captured_at") or obj.get("created_at")
             payment.paid_at = _parse_yookassa_datetime(paid_at_raw)
-
             await activate_subscription(
                 db,
                 user_id=payment.user_id,
@@ -2387,23 +2405,22 @@ async def billing_webhook(
                 source="payment",
                 payment_id=payment.id,
             )
-
             logger.info(
                 f"[WEBHOOK] Payment succeeded | payment_id={payment.id} | "
                 f"user_id={payment.user_id} | plan={payment.plan}"
             )
 
-            event_record = Event(
-                user_id=payment.user_id,
-                type="payment_succeeded",
-                payload={
-                    "payment_id": payment.id,
-                    "yookassa_payment_id": yookassa_payment_id,
-                    "plan": payment.plan,
-                    "amount_kop": payment.amount_kop,
-                },
-            )
-            db.add(event_record)
+        event_record = Event(
+            user_id=payment.user_id,
+            type="payment_succeeded",
+            payload={
+                "payment_id": payment.id,
+                "yookassa_payment_id": yookassa_payment_id,
+                "plan": payment.plan,
+                "amount_kop": payment.amount_kop,
+            },
+        )
+        db.add(event_record)
 
         # ✅ Начисление бонуса — ВНЕ блока проверки статуса платежа.
         # Это решает проблему, когда /billing/success уже пометил
@@ -2415,22 +2432,21 @@ async def billing_webhook(
     elif event == "payment.canceled":
         if payment.status not in ("succeeded", "failed"):
             payment.status = "failed"
-
             logger.info(
                 f"[WEBHOOK] Payment canceled | payment_id={payment.id} | "
                 f"user_id={payment.user_id}"
             )
 
-            event_record = Event(
-                user_id=payment.user_id,
-                type="payment_canceled",
-                payload={
-                    "payment_id": payment.id,
-                    "yookassa_payment_id": yookassa_payment_id,
-                    "reason": obj.get("cancellation_details", {}).get("reason", "unknown"),
-                },
-            )
-            db.add(event_record)
+        event_record = Event(
+            user_id=payment.user_id,
+            type="payment_canceled",
+            payload={
+                "payment_id": payment.id,
+                "yookassa_payment_id": yookassa_payment_id,
+                "reason": obj.get("cancellation_details", {}).get("reason", "unknown"),
+            },
+        )
+        db.add(event_record)
 
     else:
         logger.info(f"[WEBHOOK] Unhandled event: {event}")
@@ -2442,6 +2458,7 @@ async def billing_webhook(
 ### app/routers/legal.py ########################################################################
 """Роуты для юридических страниц."""
 from fastapi import APIRouter, Request
+
 from app.core.templates import templates
 from app.config import settings
 
@@ -2456,6 +2473,11 @@ async def legal_offer(request: Request):
         {
             "request": request,
             "referral_bonus_days": settings.REFERRAL_BONUS_DAYS,
+            # ✅ Лимиты из конфига (вместо хардкода)
+            "free_daily_limit": settings.FREE_LESSON_PER_DAY_LIMIT,
+            "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
+            "daily_lesson_limit_max": settings.DAILY_LESSON_LIMIT_MAX,
+            "words_per_lesson_max": settings.WORDS_PER_LESSON_MAX,
         },
     )
 
@@ -6279,6 +6301,7 @@ YOOKASSA_WEBHOOK_IPS = [
 
 class YooKassaError(Exception):
     """Ошибка при работе с ЮKassa API."""
+
     def __init__(self, message: str, http_status: int | None = None):
         super().__init__(message)
         self.http_status = http_status
@@ -6287,13 +6310,15 @@ class YooKassaError(Exception):
 async def create_payment(
     payment: Payment,
     return_url: str,
+    user_email: str,
 ) -> dict:
     """
-    Создаёт платёж в ЮKassa.
+    Создаёт платёж в ЮKassa с фискальным чеком (54-ФЗ).
 
     Args:
         payment: объект Payment из БД (с amount_kop, plan, description)
         return_url: URL для редиректа после оплаты (например, /billing/success)
+        user_email: email пользователя (для отправки фискального чека)
 
     Returns:
         dict с confirmation_url для редиректа пользователя
@@ -6309,6 +6334,36 @@ async def create_payment(
     # Сумма в рублях (ЮKassa принимает строку с 2 знаками после запятой)
     amount_value = f"{payment.amount_kop / 100:.2f}"
 
+    # === Фискальный чек (54-ФЗ) ===
+    # vat_code:
+    #   1 — НДС не облагается (ИП на УСН) ← ваш случай
+    #   2 — НДС 0%
+    #   3 — НДС 10%
+    #   4 — НДС 20%
+    #   5 — НДС 10/110
+    #   6 — НДС 20/120
+    # Если вы на ОСНО — поменяйте на нужное значение.
+    vat_code = 1
+
+    receipt = {
+        "customer": {
+            "email": user_email,
+        },
+        "items": [
+            {
+                "description": payment.description or f"Подписка: {payment.plan}",
+                "quantity": "1.00",
+                "amount": {
+                    "value": amount_value,
+                    "currency": "RUB",
+                },
+                "vat_code": vat_code,
+                "payment_mode": "full_payment",      # полная оплата
+                "payment_subject": "service",        # услуга
+            }
+        ],
+    }
+
     payload = {
         "amount": {
             "value": amount_value,
@@ -6320,6 +6375,7 @@ async def create_payment(
             "return_url": return_url,
         },
         "description": payment.description or f"Подписка: {payment.plan}",
+        "receipt": receipt,
         "metadata": {
             "payment_id": payment.id,
             "user_id": payment.user_id,
@@ -6329,7 +6385,6 @@ async def create_payment(
 
     # Idempotence key для идемпотентности
     idempotence_key = str(uuid.uuid4())
-
     headers = {
         "Idempotence-Key": idempotence_key,
         "Content-Type": "application/json",
@@ -6338,7 +6393,7 @@ async def create_payment(
 
     logger.info(
         f"[YOOKASSA] Creating payment | user_id={payment.user_id} | "
-        f"amount={amount_value} RUB | plan={payment.plan}"
+        f"amount={amount_value} RUB | plan={payment.plan} | email={user_email}"
     )
 
     try:
@@ -6372,7 +6427,6 @@ async def create_payment(
     # Извлекаем confirmation_url
     confirmation = data.get("confirmation", {})
     confirmation_url = confirmation.get("confirmation_url")
-
     if not confirmation_url:
         logger.error(f"[YOOKASSA] No confirmation_url in response: {data}")
         raise YooKassaError("ЮKassa не вернула confirmation_url")
@@ -6394,7 +6448,6 @@ async def create_payment(
 async def get_payment_info(yookassa_payment_id: str) -> dict:
     """
     Получает информацию о платеже из ЮKassa.
-
     Используется для проверки статуса после редиректа.
     """
     if not settings.YOOKASSA_SHOP_ID or not settings.YOOKASSA_SECRET_KEY:
@@ -6451,7 +6504,6 @@ def is_webhook_ip_allowed(ip: str) -> bool:
 /* ============================================
    Локальные шрифты (Inter woff2)
    ============================================ */
-
 @font-face {
   font-family: 'Inter';
   font-style: normal;
@@ -6460,7 +6512,6 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   src: url('/static/fonts/inter-400.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
-
 @font-face {
   font-family: 'Inter';
   font-style: normal;
@@ -6469,7 +6520,6 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   src: url('/static/fonts/inter-500.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
-
 @font-face {
   font-family: 'Inter';
   font-style: normal;
@@ -6478,7 +6528,6 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   src: url('/static/fonts/inter-600.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
-
 @font-face {
   font-family: 'Inter';
   font-style: normal;
@@ -6487,7 +6536,6 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   src: url('/static/fonts/inter-700.woff2') format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
-
 @font-face {
   font-family: 'Inter';
   font-style: normal;
@@ -6498,9 +6546,8 @@ def is_webhook_ip_allowed(ip: str) -> bool:
 }
 
 /* ============================================
-   101slovo — Modern UI Design System
+   101slovo — Modern UI Design System (COMPACT)
    ============================================ */
-
 :root {
   /* Brand */
   --brand-primary: #6366f1;
@@ -6528,7 +6575,6 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   --text-secondary: #475569;
   --text-muted: #64748b;
   --text-inverse: #ffffff;
-
   --text-success: #065f46;
   --text-success-strong: #059669;
   --text-error: #991b1b;
@@ -6576,7 +6622,6 @@ def is_webhook_ip_allowed(ip: str) -> bool:
 /* ============================================
    Тёмная тема
    ============================================ */
-
 [data-theme="dark"] {
   --surface-0: #0f172a;
   --surface-50: #1e293b;
@@ -6615,7 +6660,8 @@ body {
   font-feature-settings: 'cv11', 'ss01';
   color: var(--text-primary);
   background: var(--surface-50);
-  line-height: 1.6;
+  font-size: 0.9375rem;   /* 15px (было 16) */
+  line-height: 1.5;       /* было 1.6 */
   letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
 }
@@ -6626,10 +6672,10 @@ h1, h2, h3, h4, h5, h6 {
   line-height: 1.2;
 }
 
-h1 { font-size: 2.5rem; }
-h2 { font-size: 2rem; }
-h3 { font-size: 1.5rem; }
-h4 { font-size: 1.25rem; }
+h1 { font-size: 2rem; }       /* было 2.5rem */
+h2 { font-size: 1.5rem; }     /* было 2rem */
+h3 { font-size: 1.25rem; }    /* было 1.5rem */
+h4 { font-size: 1.0625rem; }  /* было 1.25rem */
 
 /* === A11Y: визуально скрытый, но доступный скринридеру === */
 .visually-hidden {
@@ -6645,7 +6691,6 @@ h4 { font-size: 1.25rem; }
 }
 
 /* === NAVBAR === */
-
 .navbar {
   position: sticky;
   top: 0;
@@ -6654,26 +6699,23 @@ h4 { font-size: 1.25rem; }
   backdrop-filter: saturate(180%) blur(12px);
   -webkit-backdrop-filter: saturate(180%) blur(12px);
   border-bottom: 1px solid var(--border-light);
-  padding: 0.875rem 0;
+  padding: 0.5rem 0;   /* было 0.875rem */
 }
-
 [data-theme="dark"] .navbar {
   background: rgba(15, 23, 42, 0.8);
 }
-
 .navbar-inner {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 1.5rem;
+  padding: 0 1rem;      /* было 0 1.5rem */
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 2rem;
+  gap: 1rem;            /* было 2rem */
 }
-
 .navbar-brand {
   font-weight: 800;
-  font-size: 1.25rem;
+  font-size: 1.125rem;  /* было 1.25rem */
   background: var(--gradient-primary);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -6684,21 +6726,17 @@ h4 { font-size: 1.25rem; }
   align-items: center;
   gap: 0.375rem;
 }
-
-/* Десктопное меню */
 .navbar-menu--desktop {
   display: flex;
   align-items: center;
   gap: 0.25rem;
 }
-
-/* Кнопка бургера (скрыта на десктопе) */
 .navbar-burger {
   display: none;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   padding: 0;
   border: none;
   background: transparent;
@@ -6708,17 +6746,10 @@ h4 { font-size: 1.25rem; }
   transition: all var(--transition-fast);
   box-shadow: none;
 }
-
 .navbar-burger:hover {
   background: rgba(99, 102, 241, 0.08);
   color: var(--brand-primary);
 }
-
-/* ============================================
-   ✅ ФИКС 1: Мобильное меню СКРЫТО по умолчанию.
-   Было: display: flex → меню рендерилось всегда,
-   создавая визуальный дубль навбара.
-   ============================================ */
 .navbar-mobile-menu {
   display: none;
   position: absolute;
@@ -6728,66 +6759,55 @@ h4 { font-size: 1.25rem; }
   background: var(--surface-0);
   border-bottom: 1px solid var(--border-light);
   box-shadow: var(--shadow-lg);
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 0.75rem;   /* было 0.75rem 1rem */
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.125rem;
   z-index: 99;
 }
-
-/* ✅ ФИКС 2: Показываем меню при добавлении класса .is-open
-   (Alpine.js добавляет его при клике на бургер) */
 .navbar-mobile-menu.is-open {
   display: flex;
 }
-
 [data-theme="dark"] .navbar-mobile-menu {
   background: var(--surface-0);
   border-bottom-color: var(--border-light);
 }
-
 .navbar-mobile-menu .nav-link {
   width: 100%;
   justify-content: flex-start;
-  padding: 0.75rem 1rem;
-  font-size: 1rem;
+  padding: 0.625rem 1rem;   /* было 0.75rem 1rem */
+  font-size: 0.9375rem;      /* было 1rem */
 }
-
 .navbar-mobile-menu .navbar-logout {
   width: 100%;
   margin-top: 0.5rem;
-  padding: 0.75rem 1rem;
+  padding: 0.625rem 1rem;
   text-align: center;
 }
-
 .nav-link {
-  padding: 0.5rem 0.875rem;
+  padding: 0.375rem 0.75rem;   /* было 0.5rem 0.875rem */
   color: var(--text-secondary);
   text-decoration: none;
   font-weight: 500;
-  font-size: 0.925rem;
+  font-size: 0.875rem;          /* было 0.925rem */
   border-radius: var(--radius-md);
   transition: all var(--transition-fast);
   display: inline-flex;
   align-items: center;
   gap: 0.375rem;
 }
-
 .nav-link:hover {
   color: var(--brand-primary);
   background: rgba(99, 102, 241, 0.08);
 }
-
 .nav-link.active {
   color: var(--brand-primary);
   background: rgba(99, 102, 241, 0.1);
 }
-
 .nav-link--admin { color: var(--brand-secondary); }
 .nav-link--admin:hover { background: rgba(236, 72, 153, 0.08); }
-
 .navbar-logout {
   padding: 0.375rem 0.75rem;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   background: transparent;
   color: var(--text-muted);
   border: 1px solid var(--border-light);
@@ -6797,7 +6817,6 @@ h4 { font-size: 1.25rem; }
   font-family: inherit;
   font-weight: 500;
 }
-
 .navbar-logout:hover {
   color: var(--text-error-strong);
   border-color: #fca5a5;
@@ -6805,15 +6824,14 @@ h4 { font-size: 1.25rem; }
 }
 
 /* === BUTTONS === */
-
 button, .button, [role="button"], input[type="submit"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.625rem 1.25rem;
+  padding: 0.5rem 1.125rem;   /* было 0.625rem 1.25rem */
   font-weight: 600;
-  font-size: 0.925rem;
+  font-size: 0.875rem;        /* было 0.925rem */
   border-radius: var(--radius-md);
   border: none;
   cursor: pointer;
@@ -6822,7 +6840,6 @@ button, .button, [role="button"], input[type="submit"] {
   white-space: nowrap;
   font-family: inherit;
 }
-
 button:not(.secondary):not(.outline):not(.navbar-burger),
 .button:not(.secondary):not(.outline),
 [role="button"]:not(.secondary):not(.outline),
@@ -6831,7 +6848,6 @@ input[type="submit"] {
   color: var(--text-inverse);
   box-shadow: var(--shadow-sm), 0 1px 2px rgba(99, 102, 241, 0.2);
 }
-
 button:not(.secondary):not(.outline):not(.navbar-burger):hover,
 .button:not(.secondary):not(.outline):hover,
 [role="button"]:not(.secondary):not(.outline):hover,
@@ -6840,73 +6856,61 @@ input[type="submit"]:hover {
   box-shadow: var(--shadow-md), 0 4px 12px rgba(99, 102, 241, 0.25);
   transform: translateY(-1px);
 }
-
 button:active, .button:active, [role="button"]:active { transform: translateY(0); }
-
 .secondary, [role="button"].secondary {
   background: var(--surface-100);
   color: var(--text-secondary);
   border: 1px solid var(--border-light);
 }
-
 .secondary:hover, [role="button"].secondary:hover {
   background: var(--surface-200);
   color: var(--text-primary);
 }
-
 .btn-lg, [role="button"][style*="font-size: 1.2rem"],
 [role="button"][style*="padding: 1rem 2rem"] {
-  padding: 1rem 2rem;
-  font-size: 1.1rem;
+  padding: 0.75rem 1.5rem;   /* было 1rem 2rem */
+  font-size: 1rem;           /* было 1.1rem */
   border-radius: var(--radius-lg);
 }
 
 /* === FORMS === */
-
 input[type="text"], input[type="email"], input[type="password"],
 input[type="number"], input[type="search"], textarea, select {
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 0.75rem;    /* было 0.75rem 1rem */
   border: 1.5px solid var(--border-light);
   border-radius: var(--radius-md);
   background: var(--surface-0);
   color: var(--text-primary);
-  font-size: 0.95rem;
+  font-size: 0.9375rem;       /* было 0.95rem */
   font-family: inherit;
   transition: all var(--transition-fast);
   width: 100%;
   box-sizing: border-box;
 }
-
 input:focus, textarea:focus, select:focus {
   outline: none;
   border-color: var(--brand-primary);
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
 }
-
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
-
-textarea { resize: vertical; min-height: 100px; line-height: 1.6; }
-
+textarea { resize: vertical; min-height: 90px; line-height: 1.5; }
 label {
   display: block;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.375rem;    /* было 0.5rem */
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;       /* было 0.875rem */
   color: var(--text-secondary);
 }
-
 fieldset {
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
-  padding: 1.25rem;
-  margin-bottom: 1.25rem;
+  padding: 1rem;              /* было 1.25rem */
+  margin-bottom: 1rem;        /* было 1.25rem */
   background: var(--surface-50);
 }
-
-legend { font-weight: 600; padding: 0 0.5rem; font-size: 0.95rem; }
+legend { font-weight: 600; padding: 0 0.5rem; font-size: 0.9rem; }
 
 /* === RANGE INPUT (кроссбраузерно) === */
-
 input[type="range"] {
   height: 6px;
   background: var(--surface-200);
@@ -6917,37 +6921,28 @@ input[type="range"] {
   -webkit-appearance: none;
   -moz-appearance: none;
 }
-
 input[type="range"]::-webkit-slider-thumb {
   appearance: none;
   -webkit-appearance: none;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   background: var(--brand-primary);
   border-radius: 50%;
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(99, 102, 241, 0.4);
   transition: all var(--transition-fast);
 }
-
-input[type="range"]::-webkit-slider-thumb:hover {
-  transform: scale(1.15);
-}
-
+input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 input[type="range"]::-moz-range-thumb {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   background: var(--brand-primary);
   border-radius: 50%;
   border: none;
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(99, 102, 241, 0.4);
 }
-
-input[type="range"]::-moz-range-thumb:hover {
-  transform: scale(1.15);
-}
-
+input[type="range"]::-moz-range-thumb:hover { transform: scale(1.15); }
 input[type="range"]::-moz-range-track {
   height: 6px;
   background: var(--surface-200);
@@ -6956,19 +6951,17 @@ input[type="range"]::-moz-range-track {
 }
 
 /* === BADGES === */
-
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.25rem 0.625rem;
+  padding: 0.2rem 0.5rem;     /* было 0.25rem 0.625rem */
   border-radius: var(--radius-full);
-  font-size: 0.75rem;
+  font-size: 0.6875rem;       /* было 0.75rem */
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
-
 .badge-active { background: rgba(99, 102, 241, 0.12); color: var(--text-brand); }
 .badge-mastered { background: var(--bg-success); color: var(--text-success-strong); }
 .badge-ignored { background: var(--bg-error); color: var(--text-error-strong); }
@@ -6976,27 +6969,24 @@ input[type="range"]::-moz-range-track {
 .badge-review { background: rgba(6, 182, 212, 0.12); color: var(--text-accent); }
 
 /* === FLASH === */
-
 .flash-success, .flash-error, .flash-info, .flash-warning {
-  padding: 1rem 1.25rem;
-  border-radius: var(--radius-lg);
-  margin-bottom: 1.25rem;
+  padding: 0.75rem 1rem;      /* было 1rem 1.25rem */
+  border-radius: var(--radius-md);
+  margin-bottom: 0.875rem;    /* было 1.25rem */
   font-weight: 500;
-  font-size: 0.925rem;
+  font-size: 0.875rem;        /* было 0.925rem */
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.625rem;
   border: 1px solid transparent;
   animation: slideInDown 0.3s ease-out;
 }
-
 .flash-success { background: var(--bg-success); border-color: var(--bg-success-border); color: var(--text-success); }
 .flash-error { background: var(--bg-error); border-color: var(--bg-error-border); color: var(--text-error); }
 .flash-info { background: var(--bg-info); border-color: var(--bg-info-border); color: var(--text-info); }
 .flash-warning { background: var(--bg-warning); border-color: var(--bg-warning-border); color: var(--text-warning); }
 
 /* === TABLES === */
-
 table {
   width: 100%;
   border-collapse: separate;
@@ -7007,48 +6997,41 @@ table {
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border-light);
 }
-
 thead { background: var(--surface-50); }
-
 th {
-  padding: 0.875rem 1rem;
+  padding: 0.625rem 0.75rem;   /* было 0.875rem 1rem */
   text-align: left;
   font-weight: 600;
-  font-size: 0.8125rem;
+  font-size: 0.75rem;          /* было 0.8125rem */
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border-light);
 }
-
 td {
-  padding: 1rem;
+  padding: 0.625rem 0.75rem;   /* было 1rem */
   border-bottom: 1px solid var(--border-light);
-  font-size: 0.925rem;
+  font-size: 0.875rem;         /* было 0.925rem */
 }
-
 tbody tr { transition: background var(--transition-fast); }
 tbody tr:hover { background: var(--surface-50); }
 tbody tr:last-child td { border-bottom: none; }
-
 .table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
 
 /* === STAT CARDS === */
-
 .stat-card {
   position: relative;
   overflow: hidden;
-  padding: 1.5rem;
+  padding: 1.25rem;            /* было 1.5rem */
   background: var(--surface-0);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   transition: all var(--transition-base);
 }
-
 .stat-card::before {
   content: '';
   position: absolute;
@@ -7058,129 +7041,131 @@ tbody tr:last-child td { border-bottom: none; }
   opacity: 0;
   transition: opacity var(--transition-base);
 }
-
 .stat-card:hover {
-  transform: translateY(-4px);
+  transform: translateY(-3px);
   box-shadow: var(--shadow-lg);
 }
-
 .stat-card:hover::before { opacity: 1; }
-
 .stat-card__icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px; height: 48px;
+  width: 40px; height: 40px;   /* было 48px */
   border-radius: var(--radius-md);
   background: rgba(99, 102, 241, 0.1);
   color: var(--brand-primary);
-  margin-bottom: 1rem;
-  font-size: 1.5rem;
+  margin-bottom: 0.75rem;      /* было 1rem */
+  font-size: 1.25rem;          /* было 1.5rem */
 }
-
 .stat-card__icon--fire { background: var(--bg-warning); color: var(--text-warning-strong); }
 .stat-card__icon--book { background: var(--bg-success); color: var(--text-success-strong); }
 .stat-card__icon--calendar { background: var(--bg-info); color: var(--text-info-strong); }
-
 .stat-card__value {
-  font-size: 2.5rem;
+  font-size: 2rem;             /* было 2.5rem */
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1;
   margin-bottom: 0.25rem;
 }
-
 .stat-card__label {
-  font-size: 0.875rem;
+  font-size: 0.75rem;          /* было 0.875rem */
   color: var(--text-muted);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-
 .stat-card__sublabel {
-  font-size: 0.8125rem;
+  font-size: 0.75rem;          /* было 0.8125rem */
   color: var(--text-muted);
   margin-top: 0.25rem;
 }
+.stat-card__body { min-width: 0; }
+
+/* Горизонтальные компактные стат-карты (мобильные) */
+@media (max-width: 768px) {
+  .stat-card--compact {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.625rem 0.875rem;
+  }
+  .stat-card--compact .stat-card__icon {
+    width: 36px; height: 36px;
+    font-size: 1.125rem;
+    margin-bottom: 0;
+    flex-shrink: 0;
+  }
+  .stat-card--compact .stat-card__value { font-size: 1.375rem; margin-bottom: 0; }
+  .stat-card--compact .stat-card__label { font-size: 0.6875rem; }
+  .stat-card--compact .stat-card__sublabel { font-size: 0.6875rem; margin-top: 0; }
+}
 
 /* === CARD === */
-
 .card {
   background: var(--surface-0);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
-  padding: 1.5rem;
+  padding: 1.25rem;            /* было 1.5rem */
   box-shadow: var(--shadow-sm);
 }
 
 /* === EXERCISE === */
-
 .exercise-card {
   background: var(--surface-0);
   border: 1px solid var(--border-light);
-  border-radius: var(--radius-xl);
-  padding: 2rem;
+  border-radius: var(--radius-lg);   /* было xl */
+  padding: 1.5rem;                   /* было 2rem */
   box-shadow: var(--shadow-md);
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;               /* было 1.5rem */
 }
-
 .exercise-sentence {
-  font-size: 1.5rem;
+  font-size: 1.25rem;            /* было 1.5rem */
   font-weight: 600;
   line-height: 1.4;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;        /* было 1rem */
   letter-spacing: -0.01em;
 }
-
 .exercise-words {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 1.5rem;
+  gap: 0.375rem;                 /* было 0.5rem */
+  margin-bottom: 1rem;           /* было 1.5rem */
 }
-
 .exercise-result-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1rem;
+  gap: 0.75rem;                  /* было 1rem */
 }
 
 /* === SUGGESTION === */
-
 .suggestion-card {
-  padding: 1rem 1.25rem;
+  padding: 0.75rem 1rem;         /* было 1rem 1.25rem */
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.5rem;         /* было 0.75rem */
   background: var(--surface-50);
   transition: all var(--transition-fast);
 }
-
 .suggestion-card:hover {
   border-color: var(--brand-primary-light);
   background: var(--surface-0);
   box-shadow: var(--shadow-sm);
 }
-
 .suggestion-card--added {
   background: var(--bg-success);
   border-color: var(--bg-success-border);
 }
-
 .suggestion-card--ignored {
   background: rgba(148, 163, 184, 0.05);
   border-color: rgba(148, 163, 184, 0.2);
   opacity: 0.7;
 }
-
 .text-success { color: var(--text-success-strong); }
 .text-error { color: var(--text-error-strong); }
 .text-warning { color: var(--text-warning-strong); }
 .text-info { color: var(--text-info-strong); }
 
 /* === SPINNER === */
-
 .htmx-indicator {
   display: none;
   align-items: center;
@@ -7189,11 +7174,9 @@ tbody tr:last-child td { border-bottom: none; }
   font-size: 0.875rem;
   font-style: normal;
 }
-
 .htmx-request .htmx-indicator, .htmx-indicator.htmx-request {
   display: inline-flex;
 }
-
 .spinner {
   display: inline-block;
   width: 16px; height: 16px;
@@ -7202,22 +7185,19 @@ tbody tr:last-child td { border-bottom: none; }
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
-
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* === PAGINATION === */
-
 .pagination {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 0.5rem;
-  margin-top: 2rem;
+  gap: 0.375rem;                 /* было 0.5rem */
+  margin-top: 1.5rem;            /* было 2rem */
   flex-wrap: wrap;
 }
-
 .pagination a {
-  min-width: 36px; height: 36px;
+  min-width: 34px; height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7229,7 +7209,6 @@ tbody tr:last-child td { border-bottom: none; }
   font-weight: 500;
   transition: all var(--transition-fast);
 }
-
 .pagination a:hover {
   background: var(--brand-primary);
   color: var(--text-inverse);
@@ -7237,72 +7216,63 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === WORD ITEM (vocabulary) === */
-
 .word-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem 1.25rem;
+  padding: 0.75rem 1rem;         /* было 1rem 1.25rem */
   background: var(--surface-0);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.375rem;       /* было 0.5rem */
   transition: all var(--transition-fast);
   text-decoration: none;
   color: inherit;
 }
-
 .word-item:hover {
   border-color: var(--brand-primary-light);
   box-shadow: var(--shadow-sm);
   transform: translateX(4px);
 }
-
 .word-item__main {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.75rem;                  /* было 1rem */
   flex: 1;
   min-width: 0;
 }
-
 .word-item__lemma {
   font-weight: 700;
-  font-size: 1.0625rem;
+  font-size: 0.9375rem;          /* было 1.0625rem */
 }
-
 .word-item__pos {
-  font-size: 0.8125rem;
+  font-size: 0.75rem;            /* было 0.8125rem */
   color: var(--text-muted);
   padding: 0.125rem 0.5rem;
   background: var(--surface-100);
   border-radius: var(--radius-sm);
 }
-
 .word-item__translation {
   color: var(--text-secondary);
-  font-size: 0.925rem;
+  font-size: 0.875rem;           /* было 0.925rem */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .word-item__meta {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;                   /* было 0.75rem */
   flex-shrink: 0;
 }
-
 .word-item__due {
-  font-size: 0.8125rem;
+  font-size: 0.75rem;            /* было 0.8125rem */
   color: var(--text-muted);
-  padding: 0.25rem 0.625rem;
+  padding: 0.2rem 0.5rem;
   background: var(--surface-100);
   border-radius: var(--radius-full);
   white-space: nowrap;
 }
-
 .vocab-filters {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -7311,51 +7281,44 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === CTA SECTION === */
-
 .cta-section {
   text-align: center;
-  padding: 3rem 2rem;
+  padding: 2rem 1.5rem;          /* было 3rem 2rem */
   background: var(--gradient-primary);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-lg);
   color: var(--text-inverse);
-  margin: 2rem 0;
+  margin: 1.5rem 0;              /* было 2rem 0 */
   box-shadow: var(--shadow-lg), 0 8px 32px rgba(99, 102, 241, 0.25);
 }
-
-.cta-section h3 { color: var(--text-inverse); font-size: 1.75rem; margin-bottom: 0.5rem; }
-.cta-section p { opacity: 0.9; margin-bottom: 1.5rem; }
-
+.cta-section h3 { color: var(--text-inverse); font-size: 1.375rem; margin-bottom: 0.375rem; } /* было 1.75rem */
+.cta-section p { opacity: 0.9; margin-bottom: 1rem; font-size: 0.9375rem; }
 .cta-section .button, .cta-section [role="button"] {
   background: var(--surface-0);
   color: var(--brand-primary);
   border: none;
-  padding: 1rem 2.5rem;
-  font-size: 1.1rem;
+  padding: 0.75rem 1.75rem;      /* было 1rem 2.5rem */
+  font-size: 1rem;               /* было 1.1rem */
   font-weight: 700;
   box-shadow: var(--shadow-lg);
 }
-
 .cta-section .button:hover, .cta-section [role="button"]:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-xl);
 }
 
 /* === HERO === */
-
 .hero {
-  padding: 2rem 0;
-  margin-bottom: 2rem;
+  padding: 1rem 0;               /* было 2rem 0 */
+  margin-bottom: 1.25rem;        /* было 2rem */
 }
-
 .hero__greeting {
-  font-size: 1.125rem;
+  font-size: 1rem;               /* было 1.125rem */
   color: var(--text-muted);
   font-weight: 500;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.125rem;
 }
-
 .hero__title {
-  font-size: 2.5rem;
+  font-size: 2rem;               /* было 2.5rem */
   font-weight: 800;
   letter-spacing: -0.03em;
   margin: 0;
@@ -7366,7 +7329,6 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === UTILS === */
-
 .container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
 .container--narrow { max-width: 720px; }
 .container--medium { max-width: 960px; }
@@ -7383,7 +7345,6 @@ tbody tr:last-child td { border-bottom: none; }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
 
 /* === Skeleton Loading === */
-
 .skeleton {
   background: linear-gradient(
     90deg,
@@ -7395,44 +7356,20 @@ tbody tr:last-child td { border-bottom: none; }
   animation: skeleton-shimmer 1.5s infinite;
   border-radius: var(--radius-md);
 }
-
 @keyframes skeleton-shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
-
-.skeleton-text {
-  height: 1rem;
-  margin-bottom: 0.5rem;
-  width: 100%;
-}
-
+.skeleton-text { height: 1rem; margin-bottom: 0.5rem; width: 100%; }
 .skeleton-text.short { width: 60%; }
 .skeleton-text.title { height: 1.5rem; width: 40%; margin-bottom: 1rem; }
-.skeleton-card {
-  height: 120px;
-  width: 100%;
-}
-
-.htmx-skeleton-wrapper.htmx-request .skeleton-target {
-  opacity: 0.5;
-  pointer-events: none;
-}
-
-.htmx-skeleton-wrapper.htmx-request .skeleton-loader {
-  display: block !important;
-}
-
-.skeleton-loader {
-  display: none;
-}
+.skeleton-card { height: 120px; width: 100%; }
+.htmx-skeleton-wrapper.htmx-request .skeleton-target { opacity: 0.5; pointer-events: none; }
+.htmx-skeleton-wrapper.htmx-request .skeleton-loader { display: block !important; }
+.skeleton-loader { display: none; }
 
 /* === ADD WORD MODAL === */
-
-[x-cloak] {
-  display: none !important;
-}
-
+[x-cloak] { display: none !important; }
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -7442,42 +7379,38 @@ tbody tr:last-child td { border-bottom: none; }
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding: 10vh 1rem 2rem 1rem;
+  padding: 8vh 1rem 1.5rem 1rem;
 }
-
 .modal-panel {
   width: 100%;
   max-width: 600px;
-  max-height: 80vh;
+  max-height: 82vh;
   overflow-y: auto;
   background: var(--surface-0);
-  border-radius: var(--radius-xl);
-  padding: 2rem;
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;               /* было 2rem */
   box-shadow: var(--shadow-xl);
   animation: fadeInUp 0.25s ease-out;
 }
-
 .word-option-card {
   display: flex;
   align-items: flex-start;
-  gap: 1rem;
-  padding: 1rem 1.25rem;
+  gap: 0.875rem;                 /* было 1rem */
+  padding: 0.75rem 1rem;         /* было 1rem 1.25rem */
   background: var(--surface-50);
   border: 1.5px solid var(--border-light);
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--transition-fast);
 }
-
 .word-option-card:hover {
   border-color: var(--brand-primary-light);
   background: var(--surface-0);
   box-shadow: var(--shadow-sm);
 }
-
 .word-option-card input[type="checkbox"] {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   margin-top: 2px;
   accent-color: var(--brand-primary);
   cursor: pointer;
@@ -7485,33 +7418,26 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* === ANIMATIONS === */
-
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes slideInDown {
   from { opacity: 0; transform: translateY(-10px); }
   to { opacity: 1; transform: translateY(0); }
 }
-
 .fade-in { animation: fadeIn 0.4s ease-out; }
 .fade-in-up { animation: fadeInUp 0.5s ease-out; }
 
 ::selection { background: rgba(99, 102, 241, 0.2); }
-
 :focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
 
 /* === SCROLLBAR === */
-
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--surface-100); }
 ::-webkit-scrollbar-thumb { background: var(--surface-300); border-radius: var(--radius-full); }
 ::-webkit-scrollbar-thumb:hover { background: var(--surface-200); }
-
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--surface-300) var(--surface-100);
@@ -7520,7 +7446,6 @@ tbody tr:last-child td { border-bottom: none; }
 /* ============================================
    BREAKPOINTS
    ============================================ */
-
 @media (min-width: 1280px) {
   .container { max-width: 1200px; }
 }
@@ -7528,17 +7453,23 @@ tbody tr:last-child td { border-bottom: none; }
 @media (max-width: 1024px) {
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
-  h1 { font-size: 2.25rem; }
-  .hero__title { font-size: 2.25rem; }
+  h1 { font-size: 1.875rem; }
+  .hero__title { font-size: 1.875rem; }
 }
 
 @media (max-width: 768px) {
+  body { font-size: 0.875rem; }   /* 14px на мобильных */
   .grid-3, .grid-4 { grid-template-columns: 1fr; }
-  h1 { font-size: 2rem; }
-  h2 { font-size: 1.5rem; }
-  h3 { font-size: 1.25rem; }
-  .stat-card__value { font-size: 2rem; }
-  .hero__title { font-size: 2rem; }
+  /* Компактные сетки не сворачиваются в 1 колонку */
+  .grid-3--stats, .grid-3--compact { grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+  .grid-4 { grid-template-columns: repeat(2, 1fr); gap: 0.625rem; } /* итоги урока 2×2 */
+
+  h1 { font-size: 1.5rem; }
+  h2 { font-size: 1.25rem; }
+  h3 { font-size: 1.125rem; }
+  h4 { font-size: 1rem; }
+  .stat-card__value { font-size: 1.625rem; }
+  .hero__title { font-size: 1.625rem; }
 
   .navbar-menu--desktop { display: none; }
   .navbar-burger { display: flex; }
@@ -7547,36 +7478,49 @@ tbody tr:last-child td { border-bottom: none; }
   .exercise-result-grid { grid-template-columns: 1fr; }
   .vocab-filters { grid-template-columns: 1fr; }
   .vocab-filters select { min-width: unset; }
-  .exercise-card { padding: 1.5rem; }
-  .exercise-sentence { font-size: 1.25rem; }
-  .cta-section { padding: 2.5rem 1.5rem; }
-  .cta-section h3 { font-size: 1.5rem; }
+
+  .container { padding: 0 0.875rem; }
+  .grid { gap: 0.75rem; }
+  .card { padding: 1rem; }
+  .exercise-card { padding: 1rem; }
+  .stat-card { padding: 0.875rem 1rem; }
+  .cta-section { padding: 1.5rem 1rem; }
+  .cta-section h3 { font-size: 1.25rem; }
+  fieldset { padding: 1rem; margin-bottom: 1rem; }
+  .exercise-sentence { font-size: 1.125rem; }
+
   .modal-overlay { padding: 5vh 0.75rem 1.5rem 0.75rem; }
-  .modal-panel { padding: 1.5rem; }
+  .modal-panel { padding: 1.25rem; }
+
   .word-item { flex-wrap: wrap; gap: 0.5rem; }
   .word-item__meta { width: 100%; justify-content: flex-start; }
-  .summary-streak-flex { gap: 1.5rem !important; }
+  .summary-streak-flex { gap: 1.25rem !important; }
 }
 
 @media (max-width: 480px) {
-  .container { padding: 0 1rem; }
-  .card { padding: 1.25rem; }
-  .exercise-card { padding: 1.25rem; }
-  .stat-card { padding: 1rem; }
-  .cta-section { padding: 2rem 1rem; }
+  .container { padding: 0 0.75rem; }
+  .card { padding: 0.875rem; }
+  .exercise-card { padding: 0.875rem; }
+  .stat-card { padding: 0.75rem; }
+  .cta-section { padding: 1.25rem 0.875rem; }
   .modal-overlay { padding: 3vh 0.5rem 1rem 0.5rem; }
-  .modal-panel { padding: 1.25rem; }
-  h1 { font-size: 1.75rem; }
-  h2 { font-size: 1.375rem; }
-  .hero__title { font-size: 1.75rem; }
-  .stat-card__value { font-size: 1.75rem; }
-  .exercise-sentence { font-size: 1.125rem; }
+  .modal-panel { padding: 1rem; }
+
+  h1 { font-size: 1.375rem; }
+  h2 { font-size: 1.1875rem; }
+  .hero__title { font-size: 1.5rem; }
+  .stat-card__value { font-size: 1.5rem; }
+  .exercise-sentence { font-size: 1.0625rem; }
+
   .flash-success, .flash-error, .flash-info, .flash-warning {
-    padding: 0.875rem 1rem;
-    font-size: 0.875rem;
+    padding: 0.625rem 0.875rem;
+    font-size: 0.8125rem;
   }
   .pagination { gap: 0.25rem; }
   .pagination a { min-width: 32px; height: 32px; font-size: 0.875rem; }
+
+  /* На очень узких экранах уровни/словари — 3 колонки, но плотнее */
+  .grid-3--compact { gap: 0.375rem; }
 }
 ### end of app/static/css/custom.css ########################################################################
 
@@ -7793,37 +7737,37 @@ async function copyToClipboard(text) {
 {% extends "base.html" %}
 {% block title %}Вход — 101slovo{% endblock %}
 {% block content %}
-<div class="container--narrow" style="margin: 4rem auto;">
-    <div class="card" style="max-width: 440px; margin: 0 auto; padding: 2.5rem;">
-        <div class="text-center mb-4">
-            <div style="font-size: 3rem; margin-bottom: 0.5rem;">👋</div>
-            <h2 style="margin: 0;">С возвращением!</h2>
-            <p style="color: var(--text-muted); margin-top: 0.5rem;">Войдите, чтобы продолжить обучение</p>
-        </div>
-        
-        {% if error %}
-            <div class="flash-error">
-                <i data-lucide="alert-circle" style="width: 18px; height: 18px;"></i>
-                {{ error }}
-            </div>
-        {% endif %}
-        
-        <form method="POST" action="/login">
-            <div style="margin-bottom: 1rem;">
-                <label for="email">Email</label>
-                <input type="email" id="email" name="email" value="{{ email|default('') }}" required placeholder="you@example.com">
-            </div>
-            <div style="margin-bottom: 1.5rem;">
-                <label for="password">Пароль</label>
-                <input type="password" id="password" name="password" required placeholder="••••••••">
-            </div>
-            <button type="submit" style="width: 100%; padding: 0.875rem;">Войти</button>
-        </form>
-        
-        <p class="text-center mt-4" style="color: var(--text-muted); font-size: 0.925rem;">
-            Нет аккаунта? <a href="/register" style="font-weight: 600;">Зарегистрироваться</a>
-        </p>
+<div class="container--narrow" style="margin: 1.5rem auto;">
+  <div class="card" style="max-width: 440px; margin: 0 auto; padding: 1.5rem;">
+    <div class="text-center mb-3">
+      <div style="font-size: 2.25rem; margin-bottom: 0.375rem;">👋</div>
+      <h2 style="margin: 0;">С возвращением!</h2>
+      <p style="color: var(--text-muted); margin-top: 0.375rem;">Войдите, чтобы продолжить обучение</p>
     </div>
+
+    {% if error %}
+    <div class="flash-error">
+      <i data-lucide="alert-circle" style="width: 16px; height: 16px;"></i>
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <form method="POST" action="/login">
+      <div style="margin-bottom: 0.875rem;">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" value="{{ email|default('') }}" required placeholder="you@example.com">
+      </div>
+      <div style="margin-bottom: 1.25rem;">
+        <label for="password">Пароль</label>
+        <input type="password" id="password" name="password" required placeholder="••••••••">
+      </div>
+      <button type="submit" style="width: 100%; padding: 0.75rem;">Войти</button>
+    </form>
+
+    <p class="text-center mt-3" style="color: var(--text-muted); font-size: 0.875rem;">
+      Нет аккаунта? <a href="/register" style="font-weight: 600;">Зарегистрироваться</a>
+    </p>
+  </div>
 </div>
 {% endblock %}
 ### end of app/templates/auth/login.html ########################################################################
@@ -7832,48 +7776,47 @@ async function copyToClipboard(text) {
 {% extends "base.html" %}
 {% block title %}Регистрация — 101slovo{% endblock %}
 {% block content %}
-<div class="container--narrow" style="margin: 4rem auto;">
-    <div class="card" style="max-width: 440px; margin: 0 auto; padding: 2.5rem;">
-
-        <div class="text-center mb-4">
-            <div style="font-size: 3rem; margin-bottom: 0.5rem;">🚀</div>
-            <h2 style="margin: 0;">Создать аккаунт</h2>
-            <p style="color: var(--text-muted); margin-top: 0.5rem;">Начните учить английский уже сегодня</p>
-        </div>
-
-        {% if error %}
-        <div class="flash-error">
-            <i data-lucide="alert-circle" style="width: 18px; height: 18px;"></i>
-            {{ error }}
-        </div>
-        {% endif %}
-
-        <form method="POST" action="/register">
-            <div style="margin-bottom: 1rem;">
-                <label for="email">Email</label>
-                <input type="email" id="email" name="email" value="{{ email|default('') }}" required placeholder="you@example.com">
-            </div>
-            <div style="margin-bottom: 1rem;">
-                <label for="password">Пароль (мин. 8 символов)</label>
-                <input type="password" id="password" name="password" minlength="8" maxlength="72" required placeholder="••••••••">
-            </div>
-            <div style="margin-bottom: 1rem;">
-                <label for="password_confirm">Повторите пароль</label>
-                <input type="password" id="password_confirm" name="password_confirm" minlength="8" maxlength="72" required placeholder="••••••••">
-            </div>
-            <div style="margin-bottom: 1.5rem;">
-                <label for="promo_code">Промокод (необязательно)</label>
-                <input type="text" id="promo_code" name="promo_code" value="{{ ref_code|default('') }}"
-                       placeholder="Если вас пригласил друг" maxlength="6"
-                       style="text-transform: uppercase;">
-            </div>
-            <button type="submit" style="width: 100%; padding: 0.875rem;">Создать аккаунт</button>
-        </form>
-
-        <p class="text-center mt-4" style="color: var(--text-muted); font-size: 0.925rem;">
-            Уже есть аккаунт? <a href="/login" style="font-weight: 600;">Войти</a>
-        </p>
+<div class="container--narrow" style="margin: 1.5rem auto;">
+  <div class="card" style="max-width: 440px; margin: 0 auto; padding: 1.5rem;">
+    <div class="text-center mb-3">
+      <div style="font-size: 2.25rem; margin-bottom: 0.375rem;">🚀</div>
+      <h2 style="margin: 0;">Создать аккаунт</h2>
+      <p style="color: var(--text-muted); margin-top: 0.375rem;">Начните учить английский уже сегодня</p>
     </div>
+
+    {% if error %}
+    <div class="flash-error">
+      <i data-lucide="alert-circle" style="width: 16px; height: 16px;"></i>
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <form method="POST" action="/register">
+      <div style="margin-bottom: 0.875rem;">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" value="{{ email|default('') }}" required placeholder="you@example.com">
+      </div>
+      <div style="margin-bottom: 0.875rem;">
+        <label for="password">Пароль (мин. 8 символов)</label>
+        <input type="password" id="password" name="password" minlength="8" maxlength="72" required placeholder="••••••••">
+      </div>
+      <div style="margin-bottom: 0.875rem;">
+        <label for="password_confirm">Повторите пароль</label>
+        <input type="password" id="password_confirm" name="password_confirm" minlength="8" maxlength="72" required placeholder="••••••••">
+      </div>
+      <div style="margin-bottom: 1.25rem;">
+        <label for="promo_code">Промокод (необязательно)</label>
+        <input type="text" id="promo_code" name="promo_code" value="{{ ref_code|default('') }}"
+               placeholder="Если вас пригласил друг" maxlength="6"
+               style="text-transform: uppercase;">
+      </div>
+      <button type="submit" style="width: 100%; padding: 0.75rem;">Создать аккаунт</button>
+    </form>
+
+    <p class="text-center mt-3" style="color: var(--text-muted); font-size: 0.875rem;">
+      Уже есть аккаунт? <a href="/login" style="font-weight: 600;">Войти</a>
+    </p>
+  </div>
 </div>
 {% endblock %}
 ### end of app/templates/auth/register.html ########################################################################
@@ -7882,70 +7825,63 @@ async function copyToClipboard(text) {
 <!DOCTYPE html>
 <html lang="ru" data-theme="light" class="notranslate" translate="no">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#6366f1">
-    <meta name="google" content="notranslate">
-    <title>{% block title %}101slovo{% endblock %}</title>
-
-    <script>
-        (function() {
-            const theme = localStorage.getItem('theme') || 'light';
-            document.documentElement.setAttribute('data-theme', theme);
-        })();
-    </script>
-
-    <link rel="preload" href="/static/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/static/fonts/inter-500.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/static/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/static/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="/static/fonts/inter-800.woff2" as="font" type="font/woff2" crossorigin>
-
-    <link rel="stylesheet" href="/static/css/custom.css">
-
-    <script src="/static/vendor/htmx.min.js"></script>
-    <script defer src="/static/js/app.js"></script>
-    <script defer src="/static/vendor/alpine.min.js"></script>
-    <script defer src="/static/vendor/lucide.min.js"></script>
-
-    <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
-    <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
-    <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
-    <link rel="manifest" href="/static/favicon/site.webmanifest" />
-
-    {% block head %}{% endblock %}
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="google" content="notranslate">
+  <title>{% block title %}101slovo{% endblock %}</title>
+  <script>
+    (function() {
+      const theme = localStorage.getItem('theme') || 'light';
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
+  <link rel="preload" href="/static/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-500.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/inter-800.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/static/css/custom.css">
+  <script src="/static/vendor/htmx.min.js"></script>
+  <script defer src="/static/js/app.js"></script>
+  <script defer src="/static/vendor/alpine.min.js"></script>
+  <script defer src="/static/vendor/lucide.min.js"></script>
+  <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
+  <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
+  <link rel="manifest" href="/static/favicon/site.webmanifest" />
+  {% block head %}{% endblock %}
 </head>
 <body>
-    <a href="#main-content" class="visually-hidden" style="position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden;">
-        Перейти к основному содержимому
-    </a>
+  <a href="#main-content" class="visually-hidden" style="position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden;">
+    Перейти к основному содержимому
+  </a>
 
-    {% include "partials/nav.html" %}
-    {% include "partials/flash.html" %}
+  {% include "partials/nav.html" %}
+  {% include "partials/flash.html" %}
 
-    <main class="container fade-in-up" id="main-content" style="padding-top: 2rem; padding-bottom: 4rem;" aria-label="Основное содержимое страницы">
-        {% block content %}{% endblock %}
-    </main>
+  <main class="container fade-in-up" id="main-content" style="padding-top: 1rem; padding-bottom: 2rem;" aria-label="Основное содержимое страницы">
+    {% block content %}{% endblock %}
+  </main>
 
-    <footer class="container text-center" style="padding: 2rem 0; color: var(--text-muted); font-size: 0.875rem; border-top: 1px solid var(--border-light); margin-top: auto;" aria-label="Информация о сайте">
-        <p style="margin-bottom: 0.75rem;">© 2026 101slovo • Изучай английский в контексте</p>
-        <nav aria-label="Юридические документы">
-            <p style="display: flex; justify-content: center; gap: 1.5rem; flex-wrap: wrap; font-size: 0.8125rem;">
-                <a href="/legal/offer" style="color: var(--text-muted); text-decoration: none;">Оферта</a>
-                <a href="/legal/privacy" style="color: var(--text-muted); text-decoration: none;">Конфиденциальность</a>
-                <a href="/legal/terms" style="color: var(--text-muted); text-decoration: none;">Условия использования</a>
-                <a href="/legal/consent" style="color: var(--text-muted); text-decoration: none;">Согласие на обработку ПД</a>
-            </p>
-        </nav>
-    </footer>
+  <footer class="container text-center" style="padding: 1.25rem 0; color: var(--text-muted); font-size: 0.8125rem; border-top: 1px solid var(--border-light); margin-top: auto;" aria-label="Информация о сайте">
+    <p style="margin-bottom: 0.5rem;">© 2026 101slovo • Изучай английский в контексте</p>
+    <nav aria-label="Юридические документы">
+      <p style="display: flex; justify-content: center; gap: 1.25rem; flex-wrap: wrap; font-size: 0.75rem;">
+        <a href="/legal/offer" style="color: var(--text-muted); text-decoration: none;">Оферта</a>
+        <a href="/legal/privacy" style="color: var(--text-muted); text-decoration: none;">Конфиденциальность</a>
+        <a href="/legal/terms" style="color: var(--text-muted); text-decoration: none;">Условия использования</a>
+        <a href="/legal/consent" style="color: var(--text-muted); text-decoration: none;">Согласие на обработку ПД</a>
+      </p>
+    </nav>
+  </footer>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
-        document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
-    </script>
-
-    {% block scripts %}{% endblock %}
+  <script>
+    document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
+    document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
+  </script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>
 ### end of app/templates/base.html ########################################################################
@@ -8083,115 +8019,119 @@ async function handleCopyPromo(button, code) {
 {% block title %}Тарифы — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-<div class="text-center mb-4">
-<div style="font-size: 3rem; margin-bottom: 0.5rem;">👑</div>
-<h1 style="margin: 0; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-Premium подписка
-</h1>
-<p style="color: var(--text-muted); margin-top: 0.5rem; font-size: 1.0625rem;">
-Безлимитные уроки без ограничений
-</p>
-</div>
-{% if subscription.is_premium %}
-<div class="flash-info mb-4">
-<i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
-У вас уже активна подписка <strong>{{ subscription.plan }}</strong>
-до {{ subscription.expires_at.strftime('%d.%m.%Y') }}.
-При покупке нового тарифа оставшиеся дни будут добавлены.
-</div>
-{% endif %}
-<div class="grid grid-3" style="align-items: stretch;">
-<!-- Free -->
-<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--border-light);">
-<h3 style="margin-top: 0;">Free</h3>
-<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">0 ₽</div>
-<ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
-<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-1 урок в день
-</li>
-<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-5 уроков всего
-</li>
-<li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-До 10 слов в уроке
-</li>
-</ul>
-<button disabled class="secondary" style="width: 100%;">Текущий план</button>
-</div>
-<!-- Monthly -->
-<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
-<div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
-<h3 style="margin-top: 0;">Месячная</h3>
-<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">
-{{ "%.0f" | format(monthly_price) }} ₽
-<span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span>
-</div>
-<ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
-<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-До 5 уроков в день
-</li>
-<li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-До 10 слов в уроке
-</li>
-</ul>
-<form method="POST" action="/billing/subscribe">
-<input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-<input type="hidden" name="plan" value="monthly">
-<label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer; line-height: 1.5;">
-<input type="checkbox" required style="width: auto; margin-top: 2px; flex-shrink: 0;">
-<span>
-Согласен с <a href="/legal/offer" target="_blank">публичной офертой</a>,
-<a href="/legal/privacy" target="_blank">политикой конфиденциальности</a>
-и даю согласие на
-<a href="/legal/consent" target="_blank">обработку персональных данных</a>
-и автоматическое списание средств
-</span>
-</label>
-<button type="submit" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</button>
-</form>
-</div>
-<!-- 6 Months -->
-<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981; position: relative;">
-<div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">
-−{{ discount_percent }}%
-</div>
-<h3 style="margin-top: 0;">6 месяцев</h3>
-<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">
-{{ "%.0f" | format(six_month_price) }} ₽
-</div>
-<div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 0.5rem;">
-{{ "%.0f" | format(six_month_per_month) }} ₽/мес ·
-<s>{{ "%.0f" | format(six_month_full) }} ₽</s> ·
-экономия {{ "%.0f" | format(six_month_saving) }} ₽
-</div>
-<ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
-<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-До 5 уроков в день
-</li>
-<li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-До 10 слов в уроке
-</li>
-</ul>
-<form method="POST" action="/billing/subscribe">
-<input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-<input type="hidden" name="plan" value="six_months">
-<label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer;">
-<input type="checkbox" required style="width: auto;">
-Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
-</label>
-<button type="submit" style="width: 100%; background: #10b981;">
-Подключить за {{ "%.0f" | format(six_month_price) }} ₽
-</button>
-</form>
-</div>
-</div>
+    <div class="text-center mb-4">
+        <div style="font-size: 3rem; margin-bottom: 0.5rem;">👑</div>
+        <h1 style="margin: 0; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+            Premium подписка
+        </h1>
+        <p style="color: var(--text-muted); margin-top: 0.5rem; font-size: 1.0625rem;">
+            Безлимитные уроки без ограничений
+        </p>
+    </div>
+
+    {% if subscription.is_premium %}
+    <div class="flash-info mb-4">
+        <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
+        У вас уже активна подписка <strong>{{ subscription.plan }}</strong>
+        до {{ subscription.expires_at.strftime('%d.%m.%Y') }}.
+        При покупке нового тарифа оставшиеся дни будут добавлены.
+    </div>
+    {% endif %}
+
+    <div class="grid grid-3" style="align-items: stretch;">
+        <!-- Free -->
+        <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--border-light);">
+            <h3 style="margin-top: 0;">Free</h3>
+            <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">0 ₽</div>
+            <ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    {{ free_daily_limit }} урок{% if free_daily_limit != 1 %}а{% endif %} в день
+                </li>
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    {{ free_lessons_total }} уроков всего
+                </li>
+                <li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    До {{ words_per_lesson_max }} слов в уроке
+                </li>
+            </ul>
+            <button disabled class="secondary" style="width: 100%;">Текущий план</button>
+        </div>
+
+        <!-- Monthly -->
+        <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
+            <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
+            <h3 style="margin-top: 0;">Месячная</h3>
+            <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">
+                {{ "%.0f" | format(monthly_price) }} ₽
+                <span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span>
+            </div>
+            <ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    До {{ daily_lesson_limit_max }} уроков в день
+                </li>
+                <li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    До {{ words_per_lesson_max }} слов в уроке
+                </li>
+            </ul>
+            <form method="POST" action="/billing/subscribe">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <input type="hidden" name="plan" value="monthly">
+                <label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer; line-height: 1.5;">
+                    <input type="checkbox" required style="width: auto; margin-top: 2px; flex-shrink: 0;">
+                    <span>
+                        Согласен с <a href="/legal/offer" target="_blank">публичной офертой</a>,
+                        <a href="/legal/privacy" target="_blank">политикой конфиденциальности</a>
+                        и даю согласие на
+                        <a href="/legal/consent" target="_blank">обработку персональных данных</a>
+                        и автоматическое списание средств
+                    </span>
+                </label>
+                <button type="submit" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</button>
+            </form>
+        </div>
+
+        <!-- 6 Months -->
+        <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981; position: relative;">
+            <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">
+                −{{ discount_percent }}%
+            </div>
+            <h3 style="margin-top: 0;">6 месяцев</h3>
+            <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">
+                {{ "%.0f" | format(six_month_price) }} ₽
+            </div>
+            <div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+                {{ "%.0f" | format(six_month_per_month) }} ₽/мес ·
+                <s>{{ "%.0f" | format(six_month_full) }} ₽</s> ·
+                экономия {{ "%.0f" | format(six_month_saving) }} ₽
+            </div>
+            <ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
+                <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    До {{ daily_lesson_limit_max }} уроков в день
+                </li>
+                <li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
+                    До {{ words_per_lesson_max }} слов в уроке
+                </li>
+            </ul>
+            <form method="POST" action="/billing/subscribe">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <input type="hidden" name="plan" value="six_months">
+                <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer;">
+                    <input type="checkbox" required style="width: auto;">
+                    Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
+                </label>
+                <button type="submit" style="width: 100%; background: #10b981;">
+                    Подключить за {{ "%.0f" | format(six_month_price) }} ₽
+                </button>
+            </form>
+        </div>
+    </div>
 </div>
 {% endblock %}
 ### end of app/templates/billing/plans.html ########################################################################
@@ -8199,111 +8139,117 @@ Premium подписка
 ### app/templates/dashboard.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Дашборд — 101slovo{% endblock %}
-
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
 
-    <!-- Hero -->
-    <div class="hero">
-        <p class="hero__greeting">Привет! 👋</p>
-        <h1 class="hero__title">Готов к уроку?</h1>
-    </div>
+  <!-- Hero -->
+  <div class="hero">
+    <p class="hero__greeting">Привет! 👋</p>
+    <h1 class="hero__title">Готов к уроку?</h1>
+  </div>
 
-    <!-- Subscription banner -->
-    {% if subscription.is_premium %}
-    <div class="flash-info mb-4" style="border-color: var(--bg-info-border); background: var(--bg-info);" role="status">
-        <i data-lucide="crown" style="width: 18px; height: 18px; color: var(--brand-primary);" aria-hidden="true"></i>
-        <span>
-            <strong>Premium</strong> активна до {{ subscription.expires_at.strftime('%d.%m.%Y') }}
-            ({{ subscription.days_left }} дн.)
-        </span>
-        <a href="/billing" style="margin-left: auto; font-weight: 600; font-size: 0.875rem;">Управление →</a>
+  <!-- Subscription banner -->
+  {% if subscription.is_premium %}
+    <div class="flash-info mb-3" style="border-color: var(--bg-info-border); background: var(--bg-info);" role="status">
+      <i data-lucide="crown" style="width: 16px; height: 16px; color: var(--brand-primary);" aria-hidden="true"></i>
+      <span>
+        <strong>Premium</strong> активна до {{ subscription.expires_at.strftime('%d.%m.%Y') }}
+        ({{ subscription.days_left }} дн.)
+      </span>
+      <a href="/billing" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Управление →</a>
     </div>
-    {% elif paywall.paywall_triggered %}
-    <div class="flash-warning mb-4" role="alert">
-        <i data-lucide="alert-triangle" style="width: 18px; height: 18px;" aria-hidden="true"></i>
-        <span>Бесплатные уроки исчерпаны.</span>
-        <a href="/billing/plans" style="margin-left: auto; font-weight: 600; font-size: 0.875rem;">Подключить Premium →</a>
+  {% elif paywall.paywall_triggered %}
+    <div class="flash-warning mb-3" role="alert">
+      <i data-lucide="alert-triangle" style="width: 16px; height: 16px;" aria-hidden="true"></i>
+      <span>Бесплатные уроки исчерпаны.</span>
+      <a href="/billing/plans" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Подключить Premium →</a>
     </div>
-    {% elif paywall.free_lessons_remaining is not none %}
-    <div class="flash-info mb-4" style="background: var(--bg-info);" role="status">
-        <i data-lucide="info" style="width: 18px; height: 18px;" aria-hidden="true"></i>
-        <span>Осталось бесплатных уроков: <strong>{{ paywall.free_lessons_remaining }}</strong> из {{ paywall.free_lessons_total }}</span>
+  {% elif paywall.free_lessons_remaining is not none %}
+    <div class="flash-info mb-3" style="background: var(--bg-info);" role="status">
+      <i data-lucide="info" style="width: 16px; height: 16px;" aria-hidden="true"></i>
+      <span>Осталось бесплатных уроков: <strong>{{ paywall.free_lessons_remaining }}</strong> из {{ paywall.free_lessons_total }}</span>
     </div>
-    {% endif %}
+  {% endif %}
 
-    <!-- Stats Grid -->
-    <div class="grid grid-3 mb-4">
-        <div class="stat-card">
-            <div class="stat-card__icon stat-card__icon--fire" aria-hidden="true">🔥</div>
-            <div class="stat-card__value">{{ streak.current }}</div>
-            <div class="stat-card__label">Дней подряд</div>
-            <div class="stat-card__sublabel">Рекорд: {{ streak.longest }} дн.</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-card__icon stat-card__icon--book" aria-hidden="true">📚</div>
-            <div class="stat-card__value">{{ word_summary.active }}</div>
-            <div class="stat-card__label">Активных слов</div>
-            <div class="stat-card__sublabel">
-                Изучено: {{ word_summary.mastered }} • Игнор: {{ word_summary.ignored }}
-            </div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-card__icon stat-card__icon--calendar" aria-hidden="true">📅</div>
-            <div class="stat-card__value">{{ lessons_today }}/{{ paywall.effective_daily_limit }}</div>
-            <div class="stat-card__label">Уроков сегодня</div>
-            <div class="stat-card__sublabel">
-                {% if lessons_today >= paywall.effective_daily_limit %}
-                    Лимит достигнут ✓
-                {% else %}
-                    Осталось: {{ paywall.effective_daily_limit - lessons_today }}
-                {% endif %}
-            </div>
-        </div>
+  <!-- Stats Grid (компактный, не сворачивается в 1 колонку) -->
+  <div class="grid grid-3 grid-3--stats mb-3">
+    <div class="stat-card stat-card--compact">
+      <div class="stat-card__icon stat-card__icon--fire" aria-hidden="true">🔥</div>
+      <div class="stat-card__body">
+        <div class="stat-card__value">{{ streak.current }}</div>
+        <div class="stat-card__label">Дней подряд</div>
+        <div class="stat-card__sublabel">Рекорд: {{ streak.longest }} дн.</div>
+      </div>
     </div>
+    <div class="stat-card stat-card--compact">
+      <div class="stat-card__icon stat-card__icon--book" aria-hidden="true">📚</div>
+      <div class="stat-card__body">
+        <div class="stat-card__value">{{ word_summary.active }}</div>
+        <div class="stat-card__label">Активных слов</div>
+        <div class="stat-card__sublabel">
+          Изучено: {{ word_summary.mastered }} • Игнор: {{ word_summary.ignored }}
+        </div>
+      </div>
+    </div>
+    <div class="stat-card stat-card--compact">
+      <div class="stat-card__icon stat-card__icon--calendar" aria-hidden="true">📅</div>
+      <div class="stat-card__body">
+        <div class="stat-card__value">{{ lessons_today }}/{{ paywall.effective_daily_limit }}</div>
+        <div class="stat-card__label">Уроков сегодня</div>
+        <div class="stat-card__sublabel">
+          {% if lessons_today >= paywall.effective_daily_limit %}
+            Лимит достигнут ✓
+          {% else %}
+            Осталось: {{ paywall.effective_daily_limit - lessons_today }}
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
 
-    <!-- CTA Section -->
-    {% if paywall.paywall_triggered %}
-        {% include "partials/paywall.html" %}
-    {% elif cta == 'resume' %}
+  <!-- CTA Section -->
+  {% if paywall.paywall_triggered %}
+    {% include "partials/paywall.html" %}
+  {% elif cta == 'resume' %}
     <div class="cta-section" style="background: var(--gradient-warning);">
-        <h3>⏳ У вас есть незавершённый урок!</h3>
-        <p>Продолжайте с того места, где остановились</p>
-        <a href="/lesson/{{ cta_lesson_id }}" role="button">
-            Продолжить урок →
-        </a>
+      <h3>⏳ У вас есть незавершённый урок!</h3>
+      <p>Продолжайте с того места, где остановились</p>
+      <a href="/lesson/{{ cta_lesson_id }}" role="button">
+        Продолжить урок →
+      </a>
     </div>
-    {% elif cta == 'limit_reached' %}
+  {% elif cta == 'limit_reached' %}
     <div class="cta-section" style="background: var(--gradient-success);">
-        <h3>🎉 Отличная работа!</h3>
-        <p>Лимит уроков на сегодня исчерпан. Отдохните — завтра новые вызовы!</p>
-        <a href="/vocabulary" role="button">Повторить слова</a>
+      <h3>🎉 Отличная работа!</h3>
+      <p>Лимит уроков на сегодня исчерпан. Отдохните — завтра новые вызовы!</p>
+      <a href="/vocabulary" role="button">Повторить слова</a>
     </div>
-    {% else %}
+  {% else %}
     <div class="cta-section">
-        <h3>🚀 Начнём новый урок?</h3>
-        <p>Подберём слова специально для вашего уровня</p>
-        <a href="/lesson/preview" role="button">
-            Подготовиться к уроку
-        </a>
+      <h3>🚀 Начнём новый урок?</h3>
+      <p>Подберём слова специально для вашего уровня</p>
+      <a href="/lesson/preview" role="button">
+        Подготовиться к уроку
+      </a>
     </div>
-    {% endif %}
+  {% endif %}
 
-    {% if in_progress_lesson %}
-    <div class="card mt-4" style="background: var(--surface-0);">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div>
-                <h4 style="margin: 0 0 0.25rem 0;">📝 Незавершённый урок #{{ in_progress_lesson.lesson_number }}</h4>
-                <p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">
-                    Начат {{ in_progress_lesson.started_at.strftime('%d.%m.%Y в %H:%M') }}
-                </p>
-            </div>
-            <a href="/lesson/{{ in_progress_lesson.id }}" role="button" class="secondary">
-                Продолжить
-            </a>
-        </div>
+  {% if in_progress_lesson %}
+  <div class="card mt-3" style="background: var(--surface-0);">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h4 style="margin: 0 0 0.25rem 0;">📝 Незавершённый урок #{{ in_progress_lesson.lesson_number }}</h4>
+        <p style="margin: 0; color: var(--text-muted); font-size: 0.8125rem;">
+          Начат {{ in_progress_lesson.started_at.strftime('%d.%m.%Y в %H:%M') }}
+        </p>
+      </div>
+      <a href="/lesson/{{ in_progress_lesson.id }}" role="button" class="secondary">
+        Продолжить
+      </a>
     </div>
-    {% endif %}
+  </div>
+  {% endif %}
+
 </div>
 {% endblock %}
 ### end of app/templates/dashboard.html ########################################################################
@@ -8365,135 +8311,141 @@ Premium подписка
 {% block title %}101slovo — Учи английский в контексте{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto; text-align: center; padding-top: 2rem;">
-<!-- Hero -->
-<div style="padding: 4rem 1rem;">
-<span class="badge badge-active" style="font-size: 0.875rem; padding: 0.5rem 1rem; margin-bottom: 1.5rem;">
-🚀 Powered by GigaChat AI
-</span>
-<h1 style="font-size: 3.5rem; line-height: 1.1; margin-bottom: 1.5rem; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-Забудь зубрёжку.<br>Учи слова в контексте.
-</h1>
-<p style="font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 2.5rem auto; line-height: 1.6;">
-101slovo генерирует персонализированные предложения с помощью ИИ и использует интервальное повторение (SRS), чтобы слова запоминались навсегда.
-</p>
-<div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-<a href="/register" role="button" class="btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
-Начать бесплатно
-</a>
-<a href="/login" role="button" class="secondary btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
-У меня есть аккаунт
-</a>
-</div>
-</div>
-<!-- Features -->
-<div class="grid grid-3" style="margin-top: 4rem; text-align: left;">
-<div class="card">
-<div class="stat-card__icon" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">
-<i data-lucide="brain" style="width: 24px; height: 24px;"></i>
-</div>
-<h3>Интервальное повторение</h3>
-<p style="color: var(--text-secondary);">Научно доказанный алгоритм SRS покажет слово именно тогда, когда ты почти его забыл.</p>
-</div>
-<div class="card">
-<div class="stat-card__icon" style="background: rgba(236, 72, 153, 0.1); color: var(--brand-secondary);">
-<i data-lucide="sparkles" style="width: 24px; height: 24px;"></i>
-</div>
-<h3>Контекст от ИИ</h3>
-<p style="color: var(--text-secondary);">GigaChat создаёт уникальные, естественные предложения специально для твоего уровня (A1–C2).</p>
-</div>
-<div class="card">
-<div class="stat-card__icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
-<i data-lucide="target" style="width: 24px; height: 24px;"></i>
-</div>
-<h3>Тематические словари</h3>
-<p style="color: var(--text-secondary);">Выбирай общий, IT или travel словарь. Учи только то, что реально нужно тебе.</p>
-</div>
-</div>
-<!-- Pricing -->
-<div style="margin-top: 5rem;">
-<h2 style="margin-bottom: 0.5rem;">Тарифы</h2>
-<p style="color: var(--text-muted); margin-bottom: 2rem;">
-Начни бесплатно — {{ free_lessons_total }} уроков без оплаты
-</p>
-<div class="grid grid-3" style="text-align: left; align-items: stretch;">
-<!-- Free -->
-<div class="card" style="display: flex; flex-direction: column; padding: 2rem;">
-<h3 style="margin-top: 0;">Free</h3>
-<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">0 ₽</div>
-<ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
-<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">
-✅ {{ free_daily_limit }} урок в день
-</li>
-<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">
-✅ {{ free_lessons_total }} уроков всего
-</li>
-<li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
-</ul>
-<a href="/register" role="button" class="secondary" style="margin-top: 1.5rem; width: 100%; text-align: center;">Начать бесплатно</a>
-</div>
-<!-- Monthly -->
-<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
-<div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
-<h3 style="margin-top: 0;">Месячная</h3>
-<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">
-{{ "%.0f" | format(monthly_price) }} ₽<span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span>
-</div>
-<ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
-<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До 5 уроков в день</li>
-<li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
-</ul>
-<a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center;">
-Подключить за {{ "%.0f" | format(monthly_price) }} ₽
-</a>
-</div>
-<!-- 6 Months -->
-<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981;">
-<div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">−{{ discount_percent }}%</div>
-<h3 style="margin-top: 0;">6 месяцев</h3>
-<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">
-{{ "{:,.0f}".format(six_month_price) | replace(",", " ") }} ₽
-</div>
-<div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1rem;">
-{{ "%.0f" | format(six_month_per_month) }} ₽/мес · экономия {{ "%.0f" | format(six_month_saving) }} ₽
-</div>
-<ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
-<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До 5 уроков в день</li>
-<li style="padding: 0.5rem 0;">✅ До 10 слов в уроке</li>
-</ul>
-<a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center; background: #10b981;">
-Подключить за {{ "{:,.0f}".format(six_month_price) | replace(",", " ") }} ₽
-</a>
-</div>
-</div>
-</div>
-<!-- Referral -->
-<div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium); text-align: center; padding: 2.5rem;">
-<div style="font-size: 2.5rem; margin-bottom: 0.75rem;">🎁</div>
-<h3 style="margin-bottom: 0.5rem;">Пригласи друга — получи бонус</h3>
-<p style="color: var(--text-secondary); max-width: 500px; margin: 0 auto;">
-Поделись своим промокодом. Когда друг купит подписку, ты получишь
-+{{ referral_bonus_days }} дней Premium. Твой друг тоже получит
-+{{ referral_bonus_days }} дней к своей подписке.
-Без ограничений по количеству друзей.
-</p>
-</div>
-<!-- Social Proof / Stats -->
-<div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium);">
-<div class="grid grid-3" style="text-align: center;">
-<div>
-<div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-primary);">6</div>
-<div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Стадий SRS</div>
-</div>
-<div>
-<div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-secondary);">15с</div>
-<div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Среднее время оценки</div>
-</div>
-<div>
-<div style="font-size: 2.5rem; font-weight: 800; color: #10b981;">100%</div>
-<div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Серверный рендеринг</div>
-</div>
-</div>
-</div>
+    <!-- Hero -->
+    <div style="padding: 4rem 1rem;">
+        <span class="badge badge-active" style="font-size: 0.875rem; padding: 0.5rem 1rem; margin-bottom: 1.5rem;">
+            🚀 Powered by GigaChat AI
+        </span>
+        <h1 style="font-size: 3.5rem; line-height: 1.1; margin-bottom: 1.5rem; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+            Забудь зубрёжку.<br>Учи слова в контексте.
+        </h1>
+        <p style="font-size: 1.25rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 2.5rem auto; line-height: 1.6;">
+            101slovo генерирует персонализированные предложения с помощью ИИ и использует интервальное повторение (SRS), чтобы слова запоминались навсегда.
+        </p>
+        <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+            <a href="/register" role="button" class="btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
+                Начать бесплатно
+            </a>
+            <a href="/login" role="button" class="secondary btn-lg" style="padding: 1rem 2.5rem; font-size: 1.125rem;">
+                У меня есть аккаунт
+            </a>
+        </div>
+    </div>
+
+    <!-- Features -->
+    <div class="grid grid-3" style="margin-top: 4rem; text-align: left;">
+        <div class="card">
+            <div class="stat-card__icon" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">
+                <i data-lucide="brain" style="width: 24px; height: 24px;"></i>
+            </div>
+            <h3>Интервальное повторение</h3>
+            <p style="color: var(--text-secondary);">Научно доказанный алгоритм SRS покажет слово именно тогда, когда ты почти его забыл.</p>
+        </div>
+        <div class="card">
+            <div class="stat-card__icon" style="background: rgba(236, 72, 153, 0.1); color: var(--brand-secondary);">
+                <i data-lucide="sparkles" style="width: 24px; height: 24px;"></i>
+            </div>
+            <h3>Контекст от ИИ</h3>
+            <p style="color: var(--text-secondary);">GigaChat создаёт уникальные, естественные предложения специально для твоего уровня (A1–C2).</p>
+        </div>
+        <div class="card">
+            <div class="stat-card__icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
+                <i data-lucide="target" style="width: 24px; height: 24px;"></i>
+            </div>
+            <h3>Тематические словари</h3>
+            <p style="color: var(--text-secondary);">Выбирай общий, IT или travel словарь. Учи только то, что реально нужно тебе.</p>
+        </div>
+    </div>
+
+    <!-- Pricing -->
+    <div style="margin-top: 5rem;">
+        <h2 style="margin-bottom: 0.5rem;">Тарифы</h2>
+        <p style="color: var(--text-muted); margin-bottom: 2rem;">
+            Начни бесплатно — {{ free_lessons_total }} уроков без оплаты
+        </p>
+        <div class="grid grid-3" style="text-align: left; align-items: stretch;">
+            <!-- Free -->
+            <div class="card" style="display: flex; flex-direction: column; padding: 2rem;">
+                <h3 style="margin-top: 0;">Free</h3>
+                <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">0 ₽</div>
+                <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
+                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">
+                        ✅ {{ free_daily_limit }} урок{% if free_daily_limit != 1 %}а{% endif %} в день
+                    </li>
+                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">
+                        ✅ {{ free_lessons_total }} уроков всего
+                    </li>
+                    <li style="padding: 0.5rem 0;">✅ До {{ words_per_lesson_max }} слов в уроке</li>
+                </ul>
+                <a href="/register" role="button" class="secondary" style="margin-top: 1.5rem; width: 100%; text-align: center;">Начать бесплатно</a>
+            </div>
+
+            <!-- Monthly -->
+            <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
+                <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
+                <h3 style="margin-top: 0;">Месячная</h3>
+                <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 1rem;">
+                    {{ "%.0f" | format(monthly_price) }} ₽<span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span>
+                </div>
+                <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
+                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До {{ daily_lesson_limit_max }} уроков в день</li>
+                    <li style="padding: 0.5rem 0;">✅ До {{ words_per_lesson_max }} слов в уроке</li>
+                </ul>
+                <a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center;">
+                    Подключить за {{ "%.0f" | format(monthly_price) }} ₽
+                </a>
+            </div>
+
+            <!-- 6 Months -->
+            <div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981;">
+                <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">−{{ discount_percent }}%</div>
+                <h3 style="margin-top: 0;">6 месяцев</h3>
+                <div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">
+                    {{ "{:,.0f}".format(six_month_price) | replace(",", " ") }} ₽
+                </div>
+                <div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 1rem;">
+                    {{ "%.0f" | format(six_month_per_month) }} ₽/мес · экономия {{ "%.0f" | format(six_month_saving) }} ₽
+                </div>
+                <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
+                    <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light);">✅ До {{ daily_lesson_limit_max }} уроков в день</li>
+                    <li style="padding: 0.5rem 0;">✅ До {{ words_per_lesson_max }} слов в уроке</li>
+                </ul>
+                <a href="/register" role="button" style="margin-top: 1.5rem; width: 100%; text-align: center; background: #10b981;">
+                    Подключить за {{ "{:,.0f}".format(six_month_price) | replace(",", " ") }} ₽
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Referral -->
+    <div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium); text-align: center; padding: 2.5rem;">
+        <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">🎁</div>
+        <h3 style="margin-bottom: 0.5rem;">Пригласи друга — получи бонус</h3>
+        <p style="color: var(--text-secondary); max-width: 500px; margin: 0 auto;">
+            Поделись своим промокодом. Когда друг купит подписку, ты получишь
+            +{{ referral_bonus_days }} дней Premium. Твой друг тоже получит
+            +{{ referral_bonus_days }} дней к своей подписке.
+            Без ограничений по количеству друзей.
+        </p>
+    </div>
+
+    <!-- Social Proof / Stats -->
+    <div class="card" style="margin-top: 4rem; background: var(--surface-50); border: 1px dashed var(--border-medium);">
+        <div class="grid grid-3" style="text-align: center;">
+            <div>
+                <div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-primary);">6</div>
+                <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Стадий SRS</div>
+            </div>
+            <div>
+                <div style="font-size: 2.5rem; font-weight: 800; color: var(--brand-secondary);">15с</div>
+                <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Среднее время оценки</div>
+            </div>
+            <div>
+                <div style="font-size: 2.5rem; font-weight: 800; color: #10b981;">100%</div>
+                <div style="color: var(--text-muted); font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Серверный рендеринг</div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 ### end of app/templates/landing.html ########################################################################
@@ -8616,7 +8568,6 @@ Premium подписка
 {% block title %}Публичная оферта — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-
     <div style="margin-bottom: 2rem;">
         <h1 style="background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
             Публичная оферта на подписку
@@ -8627,7 +8578,6 @@ Premium подписка
     </div>
 
     <div class="card" style="padding: 2rem; line-height: 1.8;">
-
         <h3>1. Общие положения</h3>
         <p>
             1.1. Настоящий документ является официальным предложением (публичной офертой)
@@ -8654,7 +8604,7 @@ Premium подписка
         <ul>
             <li><strong>Сервис</strong> — веб-приложение «101slovo» для изучения английских слов методом интервального повторения с использованием генеративного искусственного интеллекта.</li>
             <li><strong>Подписка</strong> — платный период доступа к расширенным функциям Сервиса.</li>
-            <li><strong>Freemium</strong> — бесплатный ограниченный доступ к Сервису (5 уроков всего, 1 урок в день).</li>
+            <li><strong>Freemium</strong> — бесплатный ограниченный доступ к Сервису ({{ free_lessons_total }} уроков всего, {{ free_daily_limit }} урок в день).</li>
             <li><strong>Premium</strong> — платный доступ без ограничений по общему количеству уроков.</li>
             <li><strong>ЮKassa (НКО «ЮМани» ООО)</strong> — платёжная система, через которую осуществляется приём платежей.</li>
             <li><strong>Реферальная программа</strong> — программа, по которой Пользователи получают бонусные дни подписки за привлечение новых платящих пользователей.</li>
@@ -8672,7 +8622,7 @@ Premium подписка
             3.3. В рамках подписки Пользователю предоставляются:
         </p>
         <ul>
-            <li>Неограниченное количество уроков (до 5 уроков в день);</li>
+            <li>Неограниченное количество уроков (до {{ daily_lesson_limit_max }} уроков в день);</li>
             <li>Генерация предложений с использованием ИИ (GigaChat);</li>
             <li>Оценка переводов с использованием ИИ;</li>
             <li>Алгоритм интервального повторения (SRS);</li>
@@ -8781,7 +8731,7 @@ Premium подписка
         </p>
         <p>
             8.3. Для запроса возврата необходимо направить письмо на
-            <a href="mailto:support@101slovo.ru">support@101slovo.ru</a>
+            <a href="mailto:astavimana@yandex.ru">astavimana@yandex.ru</a>
             с указанием email аккаунта и причины возврата.
         </p>
         <p>
@@ -8867,10 +8817,9 @@ Premium подписка
             <p style="margin: 0.25rem 0;">ИНН: 501723142274</p>
             <p style="margin: 0.25rem 0;">ОГРНИП: 325508100740497</p>
             <p style="margin: 0.25rem 0;">Адрес: МО, г. Раменское, тер. СНТ Старниково, д.48</p>
-            <p style="margin: 0.25rem 0;">Email: <a href="mailto:support@101slovo.ru">support@101slovo.ru</a></p>
+            <p style="margin: 0.25rem 0;">Email: <a href="mailto:astavimana@yandex.ru">astavimana@yandex.ru</a></p>
             <p style="margin: 0.25rem 0;">Телефон: +7 (925) 010-58-94</p>
         </div>
-
     </div>
 </div>
 {% endblock %}
@@ -9525,175 +9474,175 @@ aria-label="Пропустить слово {{ sw.lemma }}">
 ### app/templates/lesson/preview.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Подготовка к уроку — 101slovo{% endblock %}
-
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
 
-    <!-- Заголовок страницы -->
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2.5rem; flex-wrap: wrap; gap: 1rem;">
-        <div>
-            <h1 style="margin: 0; display: flex; align-items: center; gap: 0.75rem;">
-                <i data-lucide="sparkles" style="width: 32px; height: 32px; color: var(--brand-primary);"></i>
-                <span style="background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-                    Подготовка к уроку
-                </span>
-            </h1>
-            <p style="color: var(--text-muted); margin: 0.5rem 0 0 0; font-size: 1.0625rem;">
-                Мы подобрали слова специально для вашего уровня
-            </p>
-        </div>
-        <a href="/dashboard" class="secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.625rem 1rem;">
-            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
-            Отмена
+  <!-- Заголовок страницы -->
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+    <div>
+      <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+        <i data-lucide="sparkles" style="width: 24px; height: 24px; color: var(--brand-primary);"></i>
+        <span style="background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+          Подготовка к уроку
+        </span>
+      </h1>
+      <p style="color: var(--text-muted); margin: 0.375rem 0 0 0; font-size: 0.9375rem;">
+        Мы подобрали слова специально для вашего уровня
+      </p>
+    </div>
+    <a href="/dashboard" class="secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.875rem;">
+      <i data-lucide="x" style="width: 14px; height: 14px;"></i>
+      Отмена
+    </a>
+  </div>
+
+  {% if error %}
+  <div class="flash-error" style="margin-bottom: 1rem;">
+    <i data-lucide="alert-circle" style="width: 16px; height: 16px; flex-shrink: 0;"></i>
+    <span>{{ error }}</span>
+  </div>
+  {% endif %}
+
+  {% if limit_reached and paywall_reason == 'free_limit_reached' %}
+    <!-- Полный пейволл: бесплатные уроки исчерпаны -->
+    {% include "partials/paywall.html" %}
+
+  {% elif limit_reached and paywall_reason == 'daily_limit' %}
+    <!-- Дневной лимит исчерпан -->
+    <div class="card text-center" style="padding: 2rem 1.5rem; border-color: rgba(16, 185, 129, 0.3);">
+      <div style="font-size: 2.25rem; margin-bottom: 0.75rem;">🎉</div>
+      <h3 style="margin-bottom: 0.375rem;">Лимит на сегодня исчерпан!</h3>
+      <p style="color: var(--text-muted); margin-bottom: 0.875rem;">
+        Вы прошли {{ lessons_today }} из {{ daily_lesson_limit }} уроков. Отдохните, мозг тоже нуждается в перезагрузке.
+      </p>
+      {% if not is_premium %}
+      <div style="padding: 1rem 1.25rem; background: rgba(99, 102, 241, 0.05); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: var(--radius-md); margin-bottom: 1.25rem; text-align: left; max-width: 480px; margin-left: auto; margin-right: auto;">
+        <p style="margin: 0 0 0.375rem 0; color: var(--text-secondary); font-size: 0.875rem; display: flex; align-items: flex-start; gap: 0.5rem;">
+          <span style="flex-shrink: 0;">💡</span>
+          <span>На <strong>бесплатном тарифе</strong> доступен <strong>1 урок в день</strong> и 5 уроков всего.</span>
+        </p>
+        <p style="margin: 0; color: var(--text-secondary); font-size: 0.875rem; display: flex; align-items: flex-start; gap: 0.5rem;">
+          <span style="flex-shrink: 0;">👑</span>
+          <span>С <strong>Premium</strong> — до <strong>5 уроков в день</strong> и без ограничений по общему числу.</span>
+        </p>
+      </div>
+      <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+        <a href="/billing/plans" role="button" style="background: var(--gradient-primary); display: inline-flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="crown" style="width: 14px; height: 14px;"></i>
+          Подключить Premium
         </a>
+        <a href="/dashboard" role="button" class="secondary">На дашборд</a>
+      </div>
+      {% else %}
+      <a href="/dashboard" role="button">На дашборд</a>
+      {% endif %}
     </div>
 
-    {% if error %}
-    <div class="flash-error" style="margin-bottom: 1.5rem;">
-        <i data-lucide="alert-circle" style="width: 18px; height: 18px; flex-shrink: 0;"></i>
-        <span>{{ error }}</span>
+  {% elif state == 'dictionary_exhausted' %}
+    <div class="card text-center" style="padding: 2rem 1.5rem; border-color: rgba(245, 158, 11, 0.3);">
+      <div style="font-size: 2.25rem; margin-bottom: 0.75rem;">🏆</div>
+      <h3 style="margin-bottom: 0.375rem;">Словарь исчерпан!</h3>
+      <p style="color: var(--text-muted); margin-bottom: 1.25rem;">
+        Вы изучили все доступные слова для текущего уровня и словаря.
+      </p>
+      <a href="/settings" role="button" class="secondary">Сменить уровень или словарь</a>
+    </div>
+
+  {% else %}
+
+    {% if level_up %}
+    <div class="flash-success" style="justify-content: center; font-size: 0.9375rem; margin-bottom: 1.25rem;">
+      <i data-lucide="trending-up" style="width: 18px; height: 18px;"></i>
+      🎉 Уровень повышен до <strong>{{ new_level }}</strong>! Добавлены слова нового уровня.
     </div>
     {% endif %}
 
-    {% if limit_reached and paywall_reason == 'free_limit_reached' %}
-        <!-- Полный пейволл: бесплатные уроки исчерпаны -->
-        {% include "partials/paywall.html" %}
+    <form hx-post="/lesson/start"
+          hx-target="body"
+          hx-swap="innerHTML"
+          hx-indicator="#start-spinner"
+          x-data="{ idempotencyKey: generateUUID() }">
+      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+      <input type="hidden" name="idempotency_key" :value="idempotencyKey">
+      {% for w in all_words %}
+        <input type="hidden" name="word_ids" value="{{ w.word_id }}">
+      {% endfor %}
 
-    {% elif limit_reached and paywall_reason == 'daily_limit' %}
-        <!-- Дневной лимит исчерпан -->
-        <div class="card text-center" style="padding: 3rem 2rem; border-color: rgba(16, 185, 129, 0.3);">
-            <div style="font-size: 3rem; margin-bottom: 1rem;">🎉</div>
-            <h3 style="margin-bottom: 0.5rem;">Лимит на сегодня исчерпан!</h3>
-            <p style="color: var(--text-muted); margin-bottom: 1rem;">
-                Вы прошли {{ lessons_today }} из {{ daily_lesson_limit }} уроков. Отдохните, мозг тоже нуждается в перезагрузке.
-            </p>
-            {% if not is_premium %}
-            <div style="padding: 1.25rem 1.5rem; background: rgba(99, 102, 241, 0.05); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: var(--radius-md); margin-bottom: 1.5rem; text-align: left; max-width: 480px; margin-left: auto; margin-right: auto;">
-                <p style="margin: 0 0 0.5rem 0; color: var(--text-secondary); font-size: 0.9375rem; display: flex; align-items: flex-start; gap: 0.5rem;">
-                    <span style="flex-shrink: 0;">💡</span>
-                    <span>На <strong>бесплатном тарифе</strong> доступен <strong>1 урок в день</strong> и 5 уроков всего.</span>
-                </p>
-                <p style="margin: 0; color: var(--text-secondary); font-size: 0.9375rem; display: flex; align-items: flex-start; gap: 0.5rem;">
-                    <span style="flex-shrink: 0;">👑</span>
-                    <span>С <strong>Premium</strong> — до <strong>5 уроков в день</strong> и без ограничений по общему числу.</span>
-                </p>
+      <!-- Блок: На повторение -->
+      {% if due_words %}
+      <div class="mb-3">
+        <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; color: var(--text-primary);">
+          <i data-lucide="rotate-ccw" style="width: 18px; height: 18px; color: var(--brand-accent);"></i>
+          На повторение
+          <span class="badge badge-review" style="margin-left: 0.25rem;">{{ due_words | length }}</span>
+        </h3>
+        <div class="grid grid-3" style="gap: 0.75rem;">
+          {% for w in due_words %}
+          <div class="card fade-in-up" style="padding: 0.875rem 1rem; border-left: 4px solid var(--brand-accent); transition: all 0.2s ease; cursor: default;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+              <div>
+                <div style="font-weight: 700; font-size: 1.0625rem; color: var(--text-primary);">{{ w.lemma }}</div>
+                <div style="color: var(--text-muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
+              </div>
+              <span class="badge badge-active" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">Stage {{ w.stage }}</span>
             </div>
-            <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-                <a href="/billing/plans" role="button" style="background: var(--gradient-primary); display: inline-flex; align-items: center; gap: 0.5rem;">
-                    <i data-lucide="crown" style="width: 16px; height: 16px;"></i>
-                    Подключить Premium
-                </a>
-                <a href="/dashboard" role="button" class="secondary">На дашборд</a>
+            <div style="padding-top: 0.5rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.875rem; line-height: 1.4;">
+              {{ w.translations | join(', ') }}
             </div>
-            {% else %}
-            <a href="/dashboard" role="button">На дашборд</a>
-            {% endif %}
+          </div>
+          {% endfor %}
         </div>
+      </div>
+      {% endif %}
 
-    {% elif state == 'dictionary_exhausted' %}
-        <div class="card text-center" style="padding: 3rem 2rem; border-color: rgba(245, 158, 11, 0.3);">
-            <div style="font-size: 3rem; margin-bottom: 1rem;">🏆</div>
-            <h3 style="margin-bottom: 0.5rem;">Словарь исчерпан!</h3>
-            <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
-                Вы изучили все доступные слова для текущего уровня и словаря.
-            </p>
-            <a href="/settings" role="button" class="secondary">Сменить уровень или словарь</a>
+      <!-- Блок: Новые слова -->
+      {% if new_words %}
+      <div class="mb-3">
+        <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; color: var(--text-primary);">
+          <i data-lucide="plus-circle" style="width: 18px; height: 18px; color: var(--brand-secondary);"></i>
+          Новые слова
+          <span class="badge badge-new" style="margin-left: 0.25rem;">{{ new_words | length }}</span>
+        </h3>
+        <div class="grid grid-3" style="gap: 0.75rem;">
+          {% for w in new_words %}
+          <div class="card fade-in-up" style="padding: 0.875rem 1rem; border-left: 4px solid var(--brand-secondary); transition: all 0.2s ease; cursor: default;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+              <div>
+                <div style="font-weight: 700; font-size: 1.0625rem; color: var(--text-primary);">{{ w.lemma }}</div>
+                <div style="color: var(--text-muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
+              </div>
+              <span class="badge badge-new">Новое</span>
+            </div>
+            <div style="padding-top: 0.5rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.875rem; line-height: 1.4;">
+              {{ w.translations | join(', ') }}
+            </div>
+          </div>
+          {% endfor %}
         </div>
+      </div>
+      {% endif %}
 
-    {% else %}
-        {% if level_up %}
-        <div class="flash-success" style="justify-content: center; font-size: 1.0625rem; margin-bottom: 2rem;">
-            <i data-lucide="trending-up" style="width: 22px; height: 22px;"></i>
-            🎉 Уровень повышен до <strong>{{ new_level }}</strong>! Добавлены слова нового уровня.
+      <!-- CTA Section -->
+      <div class="cta-section" style="margin-top: 1.5rem; position: relative; overflow: hidden;">
+        <div style="position: absolute; top: -50%; right: -10%; width: 300px; height: 300px; background: rgba(255,255,255,0.1); border-radius: 50%; filter: blur(40px); pointer-events: none;"></div>
+        <h3 style="position: relative; z-index: 1;">Готовы начать?</h3>
+        <p style="position: relative; z-index: 1; opacity: 0.9; max-width: 500px; margin: 0.375rem auto 1rem auto;">
+          В этом уроке <strong>{{ all_words | length }}</strong> слов. ИИ сгенерирует для них уникальный контекст.
+        </p>
+        <div style="position: relative; z-index: 1; display: inline-block;">
+          <button type="submit" class="btn-lg" style="background: white; color: var(--brand-primary); border: none; box-shadow: 0 4px 14px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 0.625rem;">
+            <i data-lucide="play" style="width: 18px; height: 18px; fill: currentColor;"></i>
+            Начать урок
+          </button>
+          <span class="htmx-indicator" id="start-spinner" style="margin-left: 1rem; color: white; font-weight: 500; display: inline-flex; align-items: center; gap: 0.5rem;">
+            <span class="spinner" style="border-color: rgba(255,255,255,0.3); border-top-color: white;"></span>
+            Генерация контекста...
+          </span>
         </div>
-        {% endif %}
+      </div>
+    </form>
+  {% endif %}
 
-        <form hx-post="/lesson/start"
-              hx-target="body"
-              hx-swap="innerHTML"
-              hx-indicator="#start-spinner"
-              x-data="{ idempotencyKey: generateUUID() }">
-
-            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-            <input type="hidden" name="idempotency_key" :value="idempotencyKey">
-            {% for w in all_words %}
-            <input type="hidden" name="word_ids" value="{{ w.word_id }}">
-            {% endfor %}
-
-            <!-- Блок: На повторение -->
-            {% if due_words %}
-            <div class="mb-4">
-                <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: var(--text-primary);">
-                    <i data-lucide="rotate-ccw" style="width: 20px; height: 20px; color: var(--brand-accent);"></i>
-                    На повторение
-                    <span class="badge badge-review" style="margin-left: 0.25rem;">{{ due_words | length }}</span>
-                </h3>
-                <div class="grid grid-3" style="gap: 1rem;">
-                    {% for w in due_words %}
-                    <div class="card fade-in-up" style="padding: 1.25rem; border-left: 4px solid var(--brand-accent); transition: all 0.2s ease; cursor: default;">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
-                            <div>
-                                <div style="font-weight: 700; font-size: 1.25rem; color: var(--text-primary);">{{ w.lemma }}</div>
-                                <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
-                            </div>
-                            <span class="badge badge-active" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">Stage {{ w.stage }}</span>
-                        </div>
-                        <div style="padding-top: 0.75rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.5;">
-                            {{ w.translations | join(', ') }}
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
-            <!-- Блок: Новые слова -->
-            {% if new_words %}
-            <div class="mb-4">
-                <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; color: var(--text-primary);">
-                    <i data-lucide="plus-circle" style="width: 20px; height: 20px; color: var(--brand-secondary);"></i>
-                    Новые слова
-                    <span class="badge badge-new" style="margin-left: 0.25rem;">{{ new_words | length }}</span>
-                </h3>
-                <div class="grid grid-3" style="gap: 1rem;">
-                    {% for w in new_words %}
-                    <div class="card fade-in-up" style="padding: 1.25rem; border-left: 4px solid var(--brand-secondary); transition: all 0.2s ease; cursor: default;">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
-                            <div>
-                                <div style="font-weight: 700; font-size: 1.25rem; color: var(--text-primary);">{{ w.lemma }}</div>
-                                <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
-                            </div>
-                            <span class="badge badge-new">Новое</span>
-                        </div>
-                        <div style="padding-top: 0.75rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.5;">
-                            {{ w.translations | join(', ') }}
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
-            <!-- CTA Section -->
-            <div class="cta-section" style="margin-top: 3rem; position: relative; overflow: hidden;">
-                <div style="position: absolute; top: -50%; right: -10%; width: 300px; height: 300px; background: rgba(255,255,255,0.1); border-radius: 50%; filter: blur(40px); pointer-events: none;"></div>
-                <h3 style="position: relative; z-index: 1;">Готовы начать?</h3>
-                <p style="position: relative; z-index: 1; opacity: 0.9; max-width: 500px; margin: 0.5rem auto 1.5rem auto;">
-                    В этом уроке <strong>{{ all_words | length }}</strong> слов. ИИ сгенерирует для них уникальный контекст.
-                </p>
-                <div style="position: relative; z-index: 1; display: inline-block;">
-                    <button type="submit" class="btn-lg" style="background: white; color: var(--brand-primary); border: none; box-shadow: 0 4px 14px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 0.75rem;">
-                        <i data-lucide="play" style="width: 20px; height: 20px; fill: currentColor;"></i>
-                        Начать урок
-                    </button>
-                    <span class="htmx-indicator" id="start-spinner" style="margin-left: 1rem; color: white; font-weight: 500; display: inline-flex; align-items: center; gap: 0.5rem;">
-                        <span class="spinner" style="border-color: rgba(255,255,255,0.3); border-top-color: white;"></span>
-                        Генерация контекста...
-                    </span>
-                </div>
-            </div>
-        </form>
-    {% endif %}
 </div>
 {% endblock %}
 ### end of app/templates/lesson/preview.html ########################################################################
@@ -9701,60 +9650,60 @@ aria-label="Пропустить слово {{ sw.lemma }}">
 ### app/templates/lesson/summary.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Итоги урока #{{ lesson.lesson_number }} — 101slovo{% endblock %}
-
 {% block content %}
 <div class="container--narrow" style="margin: 0 auto; text-align: center;">
 
-    <div style="margin-bottom: 2rem;">
-        <div style="font-size: 4rem; margin-bottom: 0.5rem;" aria-hidden="true">🎉</div>
-        <h1 style="margin: 0; background: var(--gradient-success); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-            Урок #{{ lesson.lesson_number }} завершён!
-        </h1>
-        <p style="color: var(--text-muted); margin-top: 0.5rem;">Отличная работа! Посмотрим результаты</p>
-    </div>
+  <div style="margin-bottom: 1.25rem;">
+    <div style="font-size: 2.5rem; margin-bottom: 0.375rem;" aria-hidden="true">🎉</div>
+    <h1 style="margin: 0; background: var(--gradient-success); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+      Урок #{{ lesson.lesson_number }} завершён!
+    </h1>
+    <p style="color: var(--text-muted); margin-top: 0.375rem;">Отличная работа! Посмотрим результаты</p>
+  </div>
 
-    <div class="grid grid-4 mb-4">
-        <div class="stat-card">
-            <div class="stat-card__value">{{ total_exercises }}</div>
-            <div class="stat-card__label">Упражнений</div>
-        </div>
-        <div class="stat-card" style="border-color: var(--bg-success-border);">
-            <div class="stat-card__value" style="color: var(--text-success-strong);">{{ correct_words }}</div>
-            <div class="stat-card__label">Верно</div>
-        </div>
-        <div class="stat-card" style="border-color: var(--bg-warning-border);">
-            <div class="stat-card__value" style="color: var(--text-warning-strong);">{{ typo_words }}</div>
-            <div class="stat-card__label">Опечатки</div>
-        </div>
-        <div class="stat-card" style="border-color: var(--bg-error-border);">
-            <div class="stat-card__value" style="color: var(--text-error-strong);">{{ failed_words }}</div>
-            <div class="stat-card__label">Ошибки</div>
-        </div>
+  <div class="grid grid-4 mb-3">
+    <div class="stat-card">
+      <div class="stat-card__value">{{ total_exercises }}</div>
+      <div class="stat-card__label">Упражнений</div>
     </div>
+    <div class="stat-card" style="border-color: var(--bg-success-border);">
+      <div class="stat-card__value" style="color: var(--text-success-strong);">{{ correct_words }}</div>
+      <div class="stat-card__label">Верно</div>
+    </div>
+    <div class="stat-card" style="border-color: var(--bg-warning-border);">
+      <div class="stat-card__value" style="color: var(--text-warning-strong);">{{ typo_words }}</div>
+      <div class="stat-card__label">Опечатки</div>
+    </div>
+    <div class="stat-card" style="border-color: var(--bg-error-border);">
+      <div class="stat-card__value" style="color: var(--text-error-strong);">{{ failed_words }}</div>
+      <div class="stat-card__label">Ошибки</div>
+    </div>
+  </div>
 
-    <div class="card" style="background: var(--gradient-primary); color: white; border: none; padding: 2rem;">
-        <div class="summary-streak-flex" style="display: flex; justify-content: center; gap: 3rem; align-items: center; flex-wrap: wrap;">
-            <div>
-                <div style="font-size: 2.5rem; font-weight: 800; line-height: 1;" aria-hidden="true">🔥 {{ streak.current }}</div>
-                <div style="opacity: 0.9; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Дней подряд</div>
-            </div>
-            <div>
-                <div style="font-size: 2.5rem; font-weight: 800; line-height: 1;" aria-hidden="true">🏆 {{ streak.longest }}</div>
-                <div style="opacity: 0.9; font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.05em;">Рекорд</div>
-            </div>
-        </div>
+  <div class="card" style="background: var(--gradient-primary); color: white; border: none; padding: 1.25rem;">
+    <div class="summary-streak-flex" style="display: flex; justify-content: center; gap: 2rem; align-items: center; flex-wrap: wrap;">
+      <div>
+        <div style="font-size: 1.75rem; font-weight: 800; line-height: 1;" aria-hidden="true">🔥 {{ streak.current }}</div>
+        <div style="opacity: 0.9; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Дней подряд</div>
+      </div>
+      <div>
+        <div style="font-size: 1.75rem; font-weight: 800; line-height: 1;" aria-hidden="true">🏆 {{ streak.longest }}</div>
+        <div style="opacity: 0.9; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Рекорд</div>
+      </div>
     </div>
+  </div>
 
-    <div style="display: flex; gap: 0.75rem; justify-content: center; margin-top: 2rem; flex-wrap: wrap;">
-        <a href="/dashboard" role="button" class="btn-lg">
-            <i data-lucide="home" style="width: 16px; height: 16px;" aria-hidden="true"></i>
-            На дашборд
-        </a>
-        <a href="/vocabulary" role="button" class="secondary btn-lg">
-            <i data-lucide="book" style="width: 16px; height: 16px;" aria-hidden="true"></i>
-            В словарь
-        </a>
-    </div>
+  <div style="display: flex; gap: 0.625rem; justify-content: center; margin-top: 1.25rem; flex-wrap: wrap;">
+    <a href="/dashboard" role="button" class="btn-lg">
+      <i data-lucide="home" style="width: 14px; height: 14px;" aria-hidden="true"></i>
+      На дашборд
+    </a>
+    <a href="/vocabulary" role="button" class="secondary btn-lg">
+      <i data-lucide="book" style="width: 14px; height: 14px;" aria-hidden="true"></i>
+      В словарь
+    </a>
+  </div>
+
 </div>
 {% endblock %}
 ### end of app/templates/lesson/summary.html ########################################################################

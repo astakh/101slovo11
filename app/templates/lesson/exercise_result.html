@@ -1,164 +1,172 @@
 {% if error %}
 <div class="flash-error" role="alert">
-<i data-lucide="alert-circle" style="width: 20px; height: 20px;" aria-hidden="true"></i>
-{{ error }}
+  <i data-lucide="alert-circle" style="width: 18px; height: 18px;" aria-hidden="true"></i>
+  {{ error }}
 </div>
 <button onclick="location.reload()" class="secondary">
-<i data-lucide="rotate-ccw" style="width: 16px; height: 16px;" aria-hidden="true"></i>
-Попробовать снова
+  <i data-lucide="rotate-ccw" style="width: 14px; height: 14px;" aria-hidden="true"></i>
+  Попробовать снова
 </button>
 {% else %}
+
 <!-- Status Card -->
-<div class="exercise-card" style="margin-bottom: 1.5rem;" role="status" aria-live="polite">
-{% set eval_status = evaluation.status %}
-{% if eval_status == 'correct' %}
-<div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
-<div style="width: 48px; height: 48px; border-radius: 50%; background: var(--bg-success); display: flex; align-items: center; justify-content: center; font-size: 1.5rem;" aria-hidden="true">✅</div>
-<div>
-<h3 style="margin: 0; color: var(--text-success);">Отлично!</h3>
-<p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">Перевод верный</p>
+<div class="exercise-card" style="margin-bottom: 1rem;" role="status" aria-live="polite">
+  {% set eval_status = evaluation.status %}
+  {% if eval_status == 'correct' %}
+  <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.875rem;">
+    <div style="width: 40px; height: 40px; border-radius: 50%; background: var(--bg-success); display: flex; align-items: center; justify-content: center; font-size: 1.25rem;" aria-hidden="true">✅</div>
+    <div>
+      <h3 style="margin: 0; color: var(--text-success);">Отлично!</h3>
+      <p style="margin: 0; color: var(--text-muted); font-size: 0.8125rem;">Перевод верный</p>
+    </div>
+  </div>
+  {% elif eval_status == 'typo' %}
+  <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.875rem;">
+    <div style="width: 40px; height: 40px; border-radius: 50%; background: var(--bg-warning); display: flex; align-items: center; justify-content: center; font-size: 1.25rem;" aria-hidden="true">⚠️</div>
+    <div>
+      <h3 style="margin: 0; color: var(--text-warning);">Почти верно</h3>
+      <p style="margin: 0; color: var(--text-muted); font-size: 0.8125rem;">Есть мелкие недочёты</p>
+    </div>
+  </div>
+  {% else %}
+  <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.875rem;">
+    <div style="width: 40px; height: 40px; border-radius: 50%; background: var(--bg-error); display: flex; align-items: center; justify-content: center; font-size: 1.25rem;" aria-hidden="true">❌</div>
+    <div>
+      <h3 style="margin: 0; color: var(--text-error);">Не совсем так</h3>
+      <p style="margin: 0; color: var(--text-muted); font-size: 0.8125rem;">Давай разберёмся</p>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if evaluation.feedback %}
+  <div style="padding: 0.875rem; background: var(--surface-50); border-radius: var(--radius-md); margin-bottom: 0.875rem; border-left: 3px solid var(--brand-primary);">
+    <em>{{ evaluation.feedback }}</em>
+  </div>
+  {% endif %}
+
+  <!-- Исходное предложение -->
+  <div style="margin-bottom: 1rem; padding: 1rem; background: var(--surface-50); border-radius: var(--radius-md); border: 1px solid var(--border-light);">
+    <div style="font-size: 0.6875rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.375rem; font-weight: 600;">
+      <i data-lucide="message-circle" style="width: 13px; height: 13px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
+      Исходное предложение
+    </div>
+    <p style="font-size: 1rem; font-weight: 600; margin: 0; color: var(--text-primary); line-height: 1.5;">{{ exercise.target_sentence }}</p>
+  </div>
+
+  <div class="exercise-result-grid">
+    <div>
+      <div style="font-size: 0.6875rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Эталон</div>
+      <div style="font-weight: 500;">{{ exercise.reference_translation }}</div>
+    </div>
+    {% if exercise.user_translation %}
+    <div>
+      <div style="font-size: 0.6875rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Ваш перевод</div>
+      <div style="font-weight: 500;">{{ exercise.user_translation }}</div>
+    </div>
+    {% endif %}
+  </div>
 </div>
-</div>
-{% elif eval_status == 'typo' %}
-<div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
-<div style="width: 48px; height: 48px; border-radius: 50%; background: var(--bg-warning); display: flex; align-items: center; justify-content: center; font-size: 1.5rem;" aria-hidden="true">⚠️</div>
-<div>
-<h3 style="margin: 0; color: var(--text-warning);">Почти верно</h3>
-<p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">Есть мелкие недочёты</p>
-</div>
-</div>
-{% else %}
-<div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
-<div style="width: 48px; height: 48px; border-radius: 50%; background: var(--bg-error); display: flex; align-items: center; justify-content: center; font-size: 1.5rem;" aria-hidden="true">❌</div>
-<div>
-<h3 style="margin: 0; color: var(--text-error);">Не совсем так</h3>
-<p style="margin: 0; color: var(--text-muted); font-size: 0.875rem;">Давай разберёмся</p>
-</div>
-</div>
-{% endif %}
-{% if evaluation.feedback %}
-<div style="padding: 1rem; background: var(--surface-50); border-radius: var(--radius-md); margin-bottom: 1rem; border-left: 3px solid var(--brand-primary);">
-<em>{{ evaluation.feedback }}</em>
-</div>
-{% endif %}
-<!-- Исходное предложение -->
-<div style="margin-bottom: 1.5rem; padding: 1.25rem; background: var(--surface-50); border-radius: var(--radius-md); border: 1px solid var(--border-light);">
-<div style="font-size: 0.8125rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; font-weight: 600;">
-<i data-lucide="message-circle" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
-Исходное предложение
-</div>
-<p style="font-size: 1.125rem; font-weight: 600; margin: 0; color: var(--text-primary); line-height: 1.5;">{{ exercise.target_sentence }}</p>
-</div>
-<div class="exercise-result-grid">
-<div>
-<div style="font-size: 0.8125rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Эталон</div>
-<div style="font-weight: 500;">{{ exercise.reference_translation }}</div>
-</div>
-{% if exercise.user_translation %}
-<div>
-<div style="font-size: 0.8125rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Ваш перевод</div>
-<div style="font-weight: 500;">{{ exercise.user_translation }}</div>
-</div>
-{% endif %}
-</div>
-</div>
+
 <!-- Word Breakdown -->
 <div class="exercise-card">
-<h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="list-checks" style="width: 18px; height: 18px;" aria-hidden="true"></i>
-Разбор слов
-</h4>
-<div style="display: flex; flex-direction: column; gap: 0.5rem;">
-{% for tw in target_words %}
-<div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: var(--surface-50); border-radius: var(--radius-md); flex-wrap: wrap; gap: 0.5rem;">
-<div style="display: flex; align-items: center; gap: 0.75rem;">
-<strong>{{ tw.lemma }}</strong>
-<span style="color: var(--text-muted); font-size: 0.875rem;">({{ tw.pos }})</span>
+  <h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+    <i data-lucide="list-checks" style="width: 16px; height: 16px;" aria-hidden="true"></i>
+    Разбор слов
+  </h4>
+  <div style="display: flex; flex-direction: column; gap: 0.375rem;">
+    {% for tw in target_words %}
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.625rem 0.875rem; background: var(--surface-50); border-radius: var(--radius-md); flex-wrap: wrap; gap: 0.5rem;">
+      <div style="display: flex; align-items: center; gap: 0.625rem;">
+        <strong>{{ tw.lemma }}</strong>
+        <span style="color: var(--text-muted); font-size: 0.8125rem;">({{ tw.pos }})</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 0.5rem;">
+        {% if tw.eval_status == 'mastered' %}
+          <span class="badge badge-mastered">✓ Усвоено</span>
+        {% elif tw.eval_status == 'failed' %}
+          <span class="badge badge-ignored">✗ Ошибка</span>
+        {% else %}
+          <span class="badge badge-active">~ В процессе</span>
+        {% endif %}
+      </div>
+    </div>
+    {% if tw.eval_comment %}
+    <div style="padding: 0 0.875rem 0.375rem 0.875rem; color: var(--text-secondary); font-size: 0.8125rem; font-style: italic;">
+      💬 {{ tw.eval_comment }}
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
 </div>
-<div style="display: flex; align-items: center; gap: 0.5rem;">
-{% if tw.eval_status == 'mastered' %}
-<span class="badge badge-mastered">✓ Усвоено</span>
-{% elif tw.eval_status == 'failed' %}
-<span class="badge badge-ignored">✗ Ошибка</span>
-{% else %}
-<span class="badge badge-active">~ В процессе</span>
-{% endif %}
-</div>
-</div>
-{% if tw.eval_comment %}
-<div style="padding: 0 1rem 0.5rem 1rem; color: var(--text-secondary); font-size: 0.875rem; font-style: italic;">
-💬 {{ tw.eval_comment }}
-</div>
-{% endif %}
-{% endfor %}
-</div>
-</div>
+
 <!-- Suggested Words -->
 {% if suggested_words %}
 <div class="exercise-card">
-<h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="lightbulb" style="width: 18px; height: 18px; color: var(--text-warning-strong);" aria-hidden="true"></i>
-Новые слова из вашего перевода
-</h4>
-<p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0;">
-Хотите добавить их в свой словарь?
-</p>
-{% for sw in suggested_words %}
-<div class="suggestion-card {% if sw.state == 'added' %}suggestion-card--added{% elif sw.state == 'ignored' %}suggestion-card--ignored{% endif %}"
-role="status" aria-live="polite">
-{% if sw.state == 'added' %}
-<div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-success-strong);">
-<i data-lucide="check-circle" style="width: 18px; height: 18px;" aria-hidden="true"></i>
-<strong>{{ sw.lemma }}</strong> — {{ sw.translation }}
+  <h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+    <i data-lucide="lightbulb" style="width: 16px; height: 16px; color: var(--text-warning-strong);" aria-hidden="true"></i>
+    Новые слова из вашего перевода
+  </h4>
+  <p style="color: var(--text-muted); font-size: 0.8125rem; margin-top: 0;">
+    Хотите добавить их в свой словарь?
+  </p>
+  {% for sw in suggested_words %}
+  <div class="suggestion-card {% if sw.state == 'added' %}suggestion-card--added{% elif sw.state == 'ignored' %}suggestion-card--ignored{% endif %}"
+       role="status" aria-live="polite">
+    {% if sw.state == 'added' %}
+      <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-success-strong);">
+        <i data-lucide="check-circle" style="width: 16px; height: 16px;" aria-hidden="true"></i>
+        <strong>{{ sw.lemma }}</strong> — {{ sw.translation }}
+      </div>
+    {% elif sw.state == 'ignored' %}
+      <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-muted);">
+        <i data-lucide="x-circle" style="width: 16px; height: 16px;" aria-hidden="true"></i>
+        <s>{{ sw.lemma }}</s> — <s>{{ sw.translation }}</s>
+      </div>
+    {% else %}
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.875rem; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+          <strong style="font-size: 0.9375rem;">{{ sw.lemma }}</strong>
+          <div style="color: var(--text-secondary);">{{ sw.translation }}</div>
+          {% if sw.reason %}
+          <div style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem;">💬 {{ sw.reason }}</div>
+          {% endif %}
+        </div>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+          <button hx-post="/lesson/suggestions/{{ exercise.id }}/{{ loop.index0 }}"
+                  hx-target="closest .suggestion-card"
+                  hx-swap="outerHTML"
+                  hx-vals='{"action": "add", "csrf_token": "{{ request.state.csrf_token }}"}'
+                  style="padding: 0.375rem 0.875rem; font-size: 0.8125rem;"
+                  aria-label="Добавить слово {{ sw.lemma }} в словарь">
+            <i data-lucide="plus" style="width: 12px; height: 12px;" aria-hidden="true"></i>
+            Добавить
+          </button>
+          <button hx-post="/lesson/suggestions/{{ exercise.id }}/{{ loop.index0 }}"
+                  hx-target="closest .suggestion-card"
+                  hx-swap="outerHTML"
+                  hx-vals='{"action": "ignore", "csrf_token": "{{ request.state.csrf_token }}"}'
+                  class="secondary"
+                  style="padding: 0.375rem 0.875rem; font-size: 0.8125rem;"
+                  aria-label="Пропустить слово {{ sw.lemma }}">
+            Пропустить
+          </button>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+  {% endfor %}
 </div>
-{% elif sw.state == 'ignored' %}
-<div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-muted);">
-<i data-lucide="x-circle" style="width: 18px; height: 18px;" aria-hidden="true"></i>
-<s>{{ sw.lemma }}</s> — <s>{{ sw.translation }}</s>
-</div>
-{% else %}
-<div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
-<div style="flex: 1; min-width: 200px;">
-<strong style="font-size: 1.0625rem;">{{ sw.lemma }}</strong>
-<div style="color: var(--text-secondary);">{{ sw.translation }}</div>
-{% if sw.reason %}
-<div style="color: var(--text-muted); font-size: 0.8125rem; margin-top: 0.25rem;">💬 {{ sw.reason }}</div>
 {% endif %}
-</div>
-<div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-<button hx-post="/lesson/suggestions/{{ exercise.id }}/{{ loop.index0 }}"
-hx-target="closest .suggestion-card"
-hx-swap="outerHTML"
-hx-vals='{"action": "add", "csrf_token": "{{ request.state.csrf_token }}"}'
-style="padding: 0.375rem 0.875rem; font-size: 0.875rem;"
-aria-label="Добавить слово {{ sw.lemma }} в словарь">
-<i data-lucide="plus" style="width: 14px; height: 14px;" aria-hidden="true"></i>
-Добавить
-</button>
-<button hx-post="/lesson/suggestions/{{ exercise.id }}/{{ loop.index0 }}"
-hx-target="closest .suggestion-card"
-hx-swap="outerHTML"
-hx-vals='{"action": "ignore", "csrf_token": "{{ request.state.csrf_token }}"}'
-class="secondary"
-style="padding: 0.375rem 0.875rem; font-size: 0.875rem;"
-aria-label="Пропустить слово {{ sw.lemma }}">
-Пропустить
-</button>
-</div>
-</div>
-{% endif %}
-</div>
-{% endfor %}
-</div>
-{% endif %}
+
 <!-- Next Button -->
 {% if lesson_completed %}
 <a href="/lesson/{{ lesson_id }}/summary" role="button" class="btn-lg" style="width: 100%; text-align: center; background: var(--gradient-success);">
-📊 Посмотреть итоги урока
+  📊 Посмотреть итоги урока
 </a>
 {% else %}
 <a href="/lesson/{{ lesson_id }}" role="button" class="btn-lg" style="width: 100%; text-align: center;">
-Далее →
+  Далее →
 </a>
 {% endif %}
+
 {% endif %}

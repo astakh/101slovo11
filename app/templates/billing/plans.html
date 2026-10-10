@@ -2,114 +2,120 @@
 {% block title %}Тарифы — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-<div class="text-center mb-4">
-<div style="font-size: 3rem; margin-bottom: 0.5rem;">👑</div>
-<h1 style="margin: 0; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-Premium подписка
-</h1>
-<p style="color: var(--text-muted); margin-top: 0.5rem; font-size: 1.0625rem;">
-Безлимитные уроки без ограничений
-</p>
-</div>
-{% if subscription.is_premium %}
-<div class="flash-info mb-4">
-<i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
-У вас уже активна подписка <strong>{{ subscription.plan }}</strong>
-до {{ subscription.expires_at.strftime('%d.%m.%Y') }}.
-При покупке нового тарифа оставшиеся дни будут добавлены.
-</div>
-{% endif %}
-<div class="grid grid-3" style="align-items: stretch;">
-<!-- Free -->
-<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--border-light);">
-<h3 style="margin-top: 0;">Free</h3>
-<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">0 ₽</div>
-<ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
-<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-1 урок в день
-</li>
-<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-5 уроков всего
-</li>
-<li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-До 10 слов в уроке
-</li>
-</ul>
-<button disabled class="secondary" style="width: 100%;">Текущий план</button>
-</div>
-<!-- Monthly -->
-<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
-<div class="badge badge-active" style="align-self: flex-start; margin-bottom: 1rem;">Популярный</div>
-<h3 style="margin-top: 0;">Месячная</h3>
-<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.5rem;">
-{{ "%.0f" | format(monthly_price) }} ₽
-<span style="font-size: 1rem; font-weight: 400; color: var(--text-muted);">/мес</span>
-</div>
-<ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
-<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-До 5 уроков в день
-</li>
-<li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-До 10 слов в уроке
-</li>
-</ul>
-<form method="POST" action="/billing/subscribe">
-<input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-<input type="hidden" name="plan" value="monthly">
-<label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer; line-height: 1.5;">
-<input type="checkbox" required style="width: auto; margin-top: 2px; flex-shrink: 0;">
-<span>
-Согласен с <a href="/legal/offer" target="_blank">публичной офертой</a>,
-<a href="/legal/privacy" target="_blank">политикой конфиденциальности</a>
-и даю согласие на
-<a href="/legal/consent" target="_blank">обработку персональных данных</a>
-и автоматическое списание средств
-</span>
-</label>
-<button type="submit" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</button>
-</form>
-</div>
-<!-- 6 Months -->
-<div class="card" style="display: flex; flex-direction: column; padding: 2rem; border-color: #10b981; position: relative;">
-<div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 1rem;">
-−{{ discount_percent }}%
-</div>
-<h3 style="margin-top: 0;">6 месяцев</h3>
-<div style="font-size: 2.5rem; font-weight: 800; margin-bottom: 0.25rem;">
-{{ "%.0f" | format(six_month_price) }} ₽
-</div>
-<div style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 0.5rem;">
-{{ "%.0f" | format(six_month_per_month) }} ₽/мес ·
-<s>{{ "%.0f" | format(six_month_full) }} ₽</s> ·
-экономия {{ "%.0f" | format(six_month_saving) }} ₽
-</div>
-<ul style="list-style: none; padding: 0; margin: 0 0 1.5rem 0; flex: 1;">
-<li style="padding: 0.5rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-До 5 уроков в день
-</li>
-<li style="padding: 0.5rem 0; display: flex; align-items: center; gap: 0.5rem;">
-<i data-lucide="check" style="width: 16px; height: 16px; color: #10b981;"></i>
-До 10 слов в уроке
-</li>
-</ul>
-<form method="POST" action="/billing/subscribe">
-<input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-<input type="hidden" name="plan" value="six_months">
-<label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.8125rem; color: var(--text-muted); cursor: pointer;">
-<input type="checkbox" required style="width: auto;">
-Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
-</label>
-<button type="submit" style="width: 100%; background: #10b981;">
-Подключить за {{ "%.0f" | format(six_month_price) }} ₽
-</button>
-</form>
-</div>
-</div>
+
+  <div class="text-center mb-3">
+    <div style="font-size: 2.25rem; margin-bottom: 0.375rem;">👑</div>
+    <h1 style="margin: 0; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+      Premium подписка
+    </h1>
+    <p style="color: var(--text-muted); margin-top: 0.375rem; font-size: 0.9375rem;">
+      Безлимитные уроки без ограничений
+    </p>
+  </div>
+
+  {% if subscription.is_premium %}
+  <div class="flash-info mb-3">
+    <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
+    У вас уже активна подписка <strong>{{ subscription.plan }}</strong>
+    до {{ subscription.expires_at.strftime('%d.%m.%Y') }}.
+    При покупке нового тарифа оставшиеся дни будут добавлены.
+  </div>
+  {% endif %}
+
+  <div class="grid grid-3" style="align-items: stretch;">
+    <!-- Free -->
+    <div class="card" style="display: flex; flex-direction: column; padding: 1.5rem; border-color: var(--border-light);">
+      <h3 style="margin-top: 0;">Free</h3>
+      <div style="font-size: 1.875rem; font-weight: 800; margin-bottom: 0.375rem;">0 ₽</div>
+      <ul style="list-style: none; padding: 0; margin: 0 0 1.25rem 0; flex: 1;">
+        <li style="padding: 0.375rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+          {{ free_daily_limit }} урок{% if free_daily_limit != 1 %}а{% endif %} в день
+        </li>
+        <li style="padding: 0.375rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+          {{ free_lessons_total }} уроков всего
+        </li>
+        <li style="padding: 0.375rem 0; display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+          До {{ words_per_lesson_max }} слов в уроке
+        </li>
+      </ul>
+      <button disabled class="secondary" style="width: 100%;">Текущий план</button>
+    </div>
+
+    <!-- Monthly -->
+    <div class="card" style="display: flex; flex-direction: column; padding: 1.5rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
+      <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 0.75rem;">Популярный</div>
+      <h3 style="margin-top: 0;">Месячная</h3>
+      <div style="font-size: 1.875rem; font-weight: 800; margin-bottom: 0.375rem;">
+        {{ "%.0f" | format(monthly_price) }} ₽
+        <span style="font-size: 0.9375rem; font-weight: 400; color: var(--text-muted);">/мес</span>
+      </div>
+      <ul style="list-style: none; padding: 0; margin: 0 0 1.25rem 0; flex: 1;">
+        <li style="padding: 0.375rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+          До {{ daily_lesson_limit_max }} уроков в день
+        </li>
+        <li style="padding: 0.375rem 0; display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+          До {{ words_per_lesson_max }} слов в уроке
+        </li>
+      </ul>
+      <form method="POST" action="/billing/subscribe">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <input type="hidden" name="plan" value="monthly">
+        <label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.875rem; font-size: 0.75rem; color: var(--text-muted); cursor: pointer; line-height: 1.5;">
+          <input type="checkbox" required style="width: auto; margin-top: 2px; flex-shrink: 0;">
+          <span>
+            Согласен с <a href="/legal/offer" target="_blank">публичной офертой</a>,
+            <a href="/legal/privacy" target="_blank">политикой конфиденциальности</a>
+            и даю согласие на
+            <a href="/legal/consent" target="_blank">обработку персональных данных</a>
+            и автоматическое списание средств
+          </span>
+        </label>
+        <button type="submit" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</button>
+      </form>
+    </div>
+
+    <!-- 6 Months -->
+    <div class="card" style="display: flex; flex-direction: column; padding: 1.5rem; border-color: #10b981; position: relative;">
+      <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 0.75rem;">
+        −{{ discount_percent }}%
+      </div>
+      <h3 style="margin-top: 0;">6 месяцев</h3>
+      <div style="font-size: 1.875rem; font-weight: 800; margin-bottom: 0.25rem;">
+        {{ "%.0f" | format(six_month_price) }} ₽
+      </div>
+      <div style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 0.375rem;">
+        {{ "%.0f" | format(six_month_per_month) }} ₽/мес ·
+        <s>{{ "%.0f" | format(six_month_full) }} ₽</s> ·
+        экономия {{ "%.0f" | format(six_month_saving) }} ₽
+      </div>
+      <ul style="list-style: none; padding: 0; margin: 0 0 1.25rem 0; flex: 1;">
+        <li style="padding: 0.375rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+          До {{ daily_lesson_limit_max }} уроков в день
+        </li>
+        <li style="padding: 0.375rem 0; display: flex; align-items: center; gap: 0.5rem;">
+          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+          До {{ words_per_lesson_max }} слов в уроке
+        </li>
+      </ul>
+      <form method="POST" action="/billing/subscribe">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <input type="hidden" name="plan" value="six_months">
+        <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.875rem; font-size: 0.75rem; color: var(--text-muted); cursor: pointer;">
+          <input type="checkbox" required style="width: auto;">
+          Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
+        </label>
+        <button type="submit" style="width: 100%; background: #10b981;">
+          Подключить за {{ "%.0f" | format(six_month_price) }} ₽
+        </button>
+      </form>
+    </div>
+  </div>
+
 </div>
 {% endblock %}
