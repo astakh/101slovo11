@@ -2,26 +2,26 @@
 {% block title %}Вход — 101slovo{% endblock %}
 {% block content %}
 <div class="container--narrow" style="margin: 1.5rem auto;">
-  <div class="card" style="max-width: 440px; margin: 0 auto; padding: 1.5rem;">
-    <div class="text-center mb-3">
-      <div style="font-size: 2.25rem; margin-bottom: 0.375rem;">👋</div>
+  <div class="card card--auth">
+    <div class="page-header">
+      <div class="page-header__emoji">👋</div>
       <h2 style="margin: 0;">С возвращением!</h2>
-      <p style="color: var(--text-muted); margin-top: 0.375rem;">Войдите, чтобы продолжить обучение</p>
+      <p class="page-header__subtitle">Войдите, чтобы продолжить обучение</p>
     </div>
 
     {% if error %}
     <div class="flash-error">
-      <i data-lucide="alert-circle" style="width: 16px; height: 16px;"></i>
+      <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
       {{ error }}
     </div>
     {% endif %}
 
     <form method="POST" action="/login">
-      <div style="margin-bottom: 0.875rem;">
+      <div class="form-group">
         <label for="email">Email</label>
         <input type="email" id="email" name="email" value="{{ email|default('') }}" required placeholder="you@example.com">
       </div>
-      <div style="margin-bottom: 1.25rem;">
+      <div class="form-group--last">
         <label for="password">Пароль</label>
         <input type="password" id="password" name="password" required placeholder="••••••••">
       </div>

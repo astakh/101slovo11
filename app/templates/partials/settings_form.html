@@ -1,0 +1,101 @@
+{#
+  Общая форма настроек (уровень, словарь, слова, лимит).
+  Параметры:
+    form_action  — URL для method="POST"
+    submit_text  — текст кнопки
+    submit_icon  — имя иконки Lucide для кнопки
+#}
+<form method="POST" action="{{ form_action }}">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+
+  <!-- 1. Уровень -->
+  <div class="card card--settings mb-3">
+    <label class="section-header" style="margin-bottom: 0.75rem;">
+      <span style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; color: var(--text-primary);">
+        <i data-lucide="graduation-cap" class="icon-lg" style="color: var(--brand-primary);" aria-hidden="true"></i>
+        <strong>1. Ваш уровень английского</strong>
+      </span>
+    </label>
+    <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;">
+      {% for lvl in levels %}
+      <label class="option-card"
+             x-data="{ checked: '{{ selected_level }}' === '{{ lvl }}' }"
+             :class="{ 'option-card--active': checked }"
+             @click="checked = true; $el.querySelector('input').checked = true; $el.querySelectorAll('input').forEach(i => i.dispatchEvent(new Event('change', {bubbles: true})))">
+        <input type="radio" name="level" value="{{ lvl }}" required
+               {% if selected_level == lvl %}checked{% endif %}
+               style="position: absolute; opacity: 0; pointer-events: none;">
+        <span style="font-weight: 700; font-size: 1.0625rem;">{{ lvl }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- 2. Словарь -->
+  <div class="card card--settings mb-3">
+    <label class="section-header" style="margin-bottom: 0.75rem;">
+      <span style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; color: var(--text-primary);">
+        <i data-lucide="book" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
+        <strong>2. Тематический словарь</strong>
+      </span>
+    </label>
+    <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;">
+      {% for dict in dictionaries %}
+      <label class="option-card"
+             x-data="{ checked: '{{ selected_dictionary }}' === '{{ dict.code }}' }"
+             :class="{ 'option-card--active': checked }"
+             @click="checked = true; $el.querySelector('input').checked = true">
+        <input type="radio" name="dictionary_code" value="{{ dict.code }}" required
+               {% if selected_dictionary == dict.code %}checked{% endif %}
+               style="position: absolute; opacity: 0; pointer-events: none;">
+        <span style="font-weight: 600;">{{ dict.name }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- 3. Слов в уроке -->
+  <div class="card card--settings mb-3" x-data="{ val: {{ words_value }} }">
+    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
+      <i data-lucide="type" class="icon-lg" style="color: var(--color-success);" aria-hidden="true"></i>
+      <strong>3. Слов в одном уроке:</strong>
+      <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
+    </label>
+    <input type="range" name="words_per_lesson"
+           min="{{ words_min }}" max="{{ words_max }}"
+           value="{{ words_value }}" required
+           @input="val = $event.target.value"
+           style="width: 100%;">
+    <div style="display: flex; justify-content: space-between; font-size: 0.6875rem; color: var(--text-muted); margin-top: 0.25rem;">
+      <span>{{ words_min }}</span>
+      <span>{{ words_max }}</span>
+    </div>
+  </div>
+
+  <!-- 4. Уроков в день -->
+  <div class="card card--settings mb-3" x-data="{ val: {{ limit_value }} }">
+    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
+      <i data-lucide="calendar" class="icon-lg" style="color: var(--color-warning);" aria-hidden="true"></i>
+      <strong>4. Уроков в день:</strong>
+      <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
+    </label>
+    <input type="range" name="daily_lesson_limit"
+           min="1" max="{{ limit_max }}"
+           value="{{ limit_value }}" required
+           @input="val = $event.target.value"
+           style="width: 100%;">
+    <div class="info-box" style="margin-top: 0.625rem;">
+      <i data-lucide="info" class="icon-sm" style="flex-shrink: 0; margin-top: 1px; color: var(--color-info);" aria-hidden="true"></i>
+      <span>
+        На бесплатном тарифе доступен <strong>{{ free_daily_limit }} урок в день</strong>.
+        Выбранный лимит (<span x-text="val" style="font-weight: 600;"></span>) будет действовать при подключении <strong>Premium</strong>.
+      </span>
+    </div>
+  </div>
+
+  <!-- Кнопка отправки -->
+  <button type="submit" class="btn-lg" style="width: 100%; padding: 0.875rem;">
+    <i data-lucide="{{ submit_icon }}" class="icon-lg" aria-hidden="true"></i>
+    {{ submit_text }}
+  </button>
+</form>

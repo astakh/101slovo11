@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}403 Доступ запрещен{% endblock %}
 {% block content %}
-<div style="text-align: center; margin-top: 4rem;">
-    <h1>403</h1>
-    <p>Доступ запрещен. Возможно, проблема с сессией или CSRF-токеном.</p>
-    <a href="/">Вернуться на главную</a>
+<div class="error-page">
+  <h1>403</h1>
+  <p>Доступ запрещен. Возможно, проблема с сессией или CSRF-токеном.</p>
+  <a href="/" role="button" class="secondary">Вернуться на главную</a>
 </div>
 {% endblock %}

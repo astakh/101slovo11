@@ -1,77 +1,77 @@
 {% extends "base.html" %}
 {% block title %}Админ — Статистика токенов{% endblock %}
 {% block content %}
-<div style="max-width: 1000px; margin: 2rem auto;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-        <h2 style="margin: 0;">📊 Статистика расхода токенов</h2>
-        <a href="/admin/prompts" class="secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem;">
-            <i data-lucide="shield" style="width: 16px; height: 16px;"></i>
-            Промпты
-        </a>
-    </div>
-    <p style="color: var(--text-muted); margin-bottom: 2rem;">
-        Данные по использованию GigaChat API для генерации предложений и оценки переводов.
-    </p>
+<div class="container--medium" style="margin: 2rem auto;">
+  <div class="section-header">
+    <h1 style="margin: 0;">📊 Статистика расхода токенов</h1>
+    <a href="/admin/prompts" class="secondary">
+      <i data-lucide="shield" class="icon-md" aria-hidden="true"></i>
+      Промпты
+    </a>
+  </div>
+  <p style="color: var(--text-muted); margin-bottom: 2rem;">
+    Данные по использованию GigaChat API для генерации предложений и оценки переводов.
+  </p>
 
-    <!-- Сводная таблица -->
-    <div class="card" style="overflow-x: auto; padding: 0;">
-        <table>
-            <thead>
-                <tr>
-                    <th>Период</th>
-                    <th style="text-align: right;">Уроков</th>
-                    <th style="text-align: right;">Всего токенов</th>
-                    <th style="text-align: right;">Средний на урок</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for key in ['today', 'week', 'month', 'all'] %}
-                {% set s = stats[key] %}
-                <tr>
-                    <td><strong>{{ s.label }}</strong></td>
-                    <td style="text-align: right;">{{ s.lessons_count }}</td>
-                    <td style="text-align: right; font-weight: 700;">{{ "{:,}".format(s.total_tokens) }}</td>
-                    <td style="text-align: right;">{{ "{:,}".format(s.avg_tokens_per_lesson) }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+  <!-- Сводная таблица -->
+  <div class="card table-scroll" style="padding: 0;">
+    <table>
+      <thead>
+        <tr>
+          <th>Период</th>
+          <th style="text-align: right;">Уроков</th>
+          <th style="text-align: right;">Всего токенов</th>
+          <th style="text-align: right;">Средний на урок</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for key in ['today', 'week', 'month', 'all'] %}
+        {% set s = stats[key] %}
+        <tr>
+          <td><strong>{{ s.label }}</strong></td>
+          <td style="text-align: right;">{{ s.lessons_count }}</td>
+          <td style="text-align: right; font-weight: 700;">{{ "{:,}".format(s.total_tokens) }}</td>
+          <td style="text-align: right;">{{ "{:,}".format(s.avg_tokens_per_lesson) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
-    <!-- Детальная разбивка -->
-    <h3 style="margin-top: 2.5rem; margin-bottom: 1rem;">Детальная разбивка по операциям</h3>
-    <div class="card" style="overflow-x: auto; padding: 0;">
-        <table>
-            <thead>
-                <tr>
-                    <th>Период</th>
-                    <th style="text-align: right;">Генерация · prompt</th>
-                    <th style="text-align: right;">Генерация · completion</th>
-                    <th style="text-align: right;">Оценка · prompt</th>
-                    <th style="text-align: right;">Оценка · completion</th>
-                    <th style="text-align: right;">Итого</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for key in ['today', 'week', 'month', 'all'] %}
-                {% set s = stats[key] %}
-                <tr>
-                    <td><strong>{{ s.label }}</strong></td>
-                    <td style="text-align: right;">{{ "{:,}".format(s.gen_prompt_tokens) }}</td>
-                    <td style="text-align: right;">{{ "{:,}".format(s.gen_completion_tokens) }}</td>
-                    <td style="text-align: right;">{{ "{:,}".format(s.eval_prompt_tokens) }}</td>
-                    <td style="text-align: right;">{{ "{:,}".format(s.eval_completion_tokens) }}</td>
-                    <td style="text-align: right; font-weight: 700;">{{ "{:,}".format(s.total_tokens) }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+  <!-- Детальная разбивка -->
+  <h2 style="margin-top: 2.5rem; margin-bottom: 1rem;">Детальная разбивка по операциям</h2>
+  <div class="card table-scroll" style="padding: 0;">
+    <table>
+      <thead>
+        <tr>
+          <th>Период</th>
+          <th style="text-align: right;">Генерация · prompt</th>
+          <th style="text-align: right;">Генерация · completion</th>
+          <th style="text-align: right;">Оценка · prompt</th>
+          <th style="text-align: right;">Оценка · completion</th>
+          <th style="text-align: right;">Итого</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for key in ['today', 'week', 'month', 'all'] %}
+        {% set s = stats[key] %}
+        <tr>
+          <td><strong>{{ s.label }}</strong></td>
+          <td style="text-align: right;">{{ "{:,}".format(s.gen_prompt_tokens) }}</td>
+          <td style="text-align: right;">{{ "{:,}".format(s.gen_completion_tokens) }}</td>
+          <td style="text-align: right;">{{ "{:,}".format(s.eval_prompt_tokens) }}</td>
+          <td style="text-align: right;">{{ "{:,}".format(s.eval_completion_tokens) }}</td>
+          <td style="text-align: right; font-weight: 700;">{{ "{:,}".format(s.total_tokens) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
-    <p style="margin-top: 1.5rem; font-size: 0.8125rem; color: var(--text-muted);">
-        💡 <strong>Генерация</strong> — токены на создание предложений для урока.
-        <strong>Оценка</strong> — токены на проверку переводов пользователя.
-        Данные учитывают все завершённые и незавершённые уроки за период.
-    </p>
+  <p style="margin-top: 1.5rem; font-size: 0.8125rem; color: var(--text-muted);">
+    💡 <strong>Генерация</strong> — токены на создание предложений для урока.
+    <strong>Оценка</strong> — токены на проверку переводов пользователя.
+    Данные учитывают все завершённые и незавершённые уроки за период.
+  </p>
 </div>
 {% endblock %}

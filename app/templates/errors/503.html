@@ -1,13 +1,15 @@
 {% extends "base.html" %}
 {% block title %}503 Сервис недоступен{% endblock %}
 {% block content %}
-<div style="text-align: center; margin-top: 4rem;">
-    <h1>503</h1>
-    <p>Сервис генерации временно недоступен.</p>
-    {% if error %}
-    <p><small>{{ error }}</small></p>
-    {% endif %}
+<div class="error-page">
+  <h1>503</h1>
+  <p>Сервис генерации временно недоступен.</p>
+  {% if error %}
+  <p><small>{{ error }}</small></p>
+  {% endif %}
+  <div style="display: flex; gap: 0.75rem; justify-content: center; margin-top: 1rem;">
     <a href="javascript:location.reload()" role="button">🔄 Повторить</a>
     <a href="/dashboard" role="button" class="secondary">На дашборд</a>
+  </div>
 </div>
 {% endblock %}

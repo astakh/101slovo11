@@ -2,71 +2,69 @@
 {% block title %}Подписка — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+  <div class="section-header">
     <h1 style="margin: 0;">💳 Подписка</h1>
-    <a href="/billing/plans" class="secondary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
-      <i data-lucide="crown" style="width: 14px; height: 14px;" aria-hidden="true"></i>
+    <a href="/billing/plans" class="secondary">
+      <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
       Тарифы
     </a>
   </div>
 
   <!-- Текущая подписка -->
-  <div class="card mb-3" style="padding: 1.25rem;">
+  <div class="card mb-3">
     <h3 style="margin-top: 0;">Текущий статус</h3>
 
     {% if subscription.is_premium %}
-      <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
-        <span class="badge badge-mastered" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">
-          <i data-lucide="crown" style="width: 12px; height: 12px;" aria-hidden="true"></i>
-          Premium активна
-        </span>
-      </div>
+    <div style="margin-bottom: 1rem;">
+      <span class="badge badge-mastered badge--md">
+        <i data-lucide="crown" class="icon-xs" aria-hidden="true"></i>
+        Premium активна
+      </span>
+    </div>
 
-      <div class="grid grid-3" style="margin-bottom: 1rem;">
-        <div>
-          <div style="color: var(--text-muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em;">Тариф</div>
-          <div style="font-weight: 700; font-size: 1.0625rem;">{{ subscription.plan }}</div>
-        </div>
-        <div>
-          <div style="color: var(--text-muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em;">Действует до</div>
-          <div style="font-weight: 700; font-size: 1.0625rem;">{{ subscription.expires_at.strftime('%d.%m.%Y') }}</div>
-        </div>
-        <div>
-          <div style="color: var(--text-muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em;">Осталось дней</div>
-          <div style="font-weight: 700; font-size: 1.0625rem;">{{ subscription.days_left }}</div>
-        </div>
+    <div class="grid grid-3" style="margin-bottom: 1rem;">
+      <div>
+        <div class="stat-row">Тариф</div>
+        <div class="stat-row__value">{{ subscription.plan }}</div>
       </div>
+      <div>
+        <div class="stat-row">Действует до</div>
+        <div class="stat-row__value">{{ subscription.expires_at.strftime('%d.%m.%Y') }}</div>
+      </div>
+      <div>
+        <div class="stat-row">Осталось дней</div>
+        <div class="stat-row__value">{{ subscription.days_left }}</div>
+      </div>
+    </div>
 
-      <div style="display: flex; gap: 0.75rem;">
-        <a href="/billing/plans" role="button">Продлить / Сменить тариф</a>
-        <form method="POST" action="/billing/cancel" style="display: inline;">
-          <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-          <button type="submit" class="secondary" onclick="return confirm('Отменить подписку? Доступ сохранится до конца оплаченного периода.')">
-            Отменить подписку
-          </button>
-        </form>
-      </div>
+    <div style="display: flex; gap: 0.75rem;">
+      <a href="/billing/plans" role="button">Продлить / Сменить тариф</a>
+      <form method="POST" action="/billing/cancel" style="display: inline;">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <button type="submit" class="secondary" onclick="return confirm('Отменить подписку? Доступ сохранится до конца оплаченного периода.')">
+          Отменить подписку
+        </button>
+      </form>
+    </div>
+
     {% else %}
-      <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;">
-        <span class="badge badge-active" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">
-          Free
-        </span>
-      </div>
-      <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-        У вас бесплатный план: 1 урок в день, 5 уроков всего.
-      </p>
-      <a href="/billing/plans" role="button" style="background: var(--gradient-primary);">
-        <i data-lucide="crown" style="width: 14px; height: 14px;" aria-hidden="true"></i>
-        Подключить Premium
-      </a>
+    <div style="margin-bottom: 0.75rem;">
+      <span class="badge badge-active badge--md">Free</span>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      У вас бесплатный план: 1 урок в день, 5 уроков всего.
+    </p>
+    <a href="/billing/plans" role="button" style="background: var(--gradient-primary);">
+      <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
+      Подключить Premium
+    </a>
     {% endif %}
   </div>
 
   <!-- Реферальная программа -->
-  <div class="card mb-3" style="padding: 1.25rem;">
+  <div class="card mb-3">
     <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
-      <i data-lucide="gift" style="width: 18px; height: 18px; color: var(--brand-secondary);" aria-hidden="true"></i>
+      <i data-lucide="gift" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
       Пригласи друга — получи месяц бесплатно
     </h3>
     <p style="color: var(--text-secondary); margin-bottom: 1rem;">
@@ -76,15 +74,13 @@
     </p>
 
     <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
-      <div style="background: var(--surface-100); border: 2px dashed var(--brand-primary); border-radius: var(--radius-md); padding: 0.5rem 1.25rem; font-size: 1.25rem; font-weight: 800; letter-spacing: 0.1em; color: var(--brand-primary);"
-           aria-label="Ваш промокод: {{ referral.promo_code }}">
+      <div class="promo-box" aria-label="Ваш промокод: {{ referral.promo_code }}">
         {{ referral.promo_code }}
       </div>
-      <button type="button"
-              class="secondary"
+      <button type="button" class="secondary"
               onclick="handleCopyPromo(this, '{{ referral.promo_code }}')"
               aria-label="Скопировать промокод {{ referral.promo_code }} в буфер обмена">
-        <i data-lucide="copy" style="width: 14px; height: 14px;" aria-hidden="true"></i>
+        <i data-lucide="copy" class="icon-sm" aria-hidden="true"></i>
         Скопировать
       </button>
     </div>
@@ -106,20 +102,17 @@
     </div>
     {% endif %}
   </div>
-
 </div>
 
 <script>
 async function handleCopyPromo(button, code) {
   const ok = await copyToClipboard(code);
   if (ok) {
-    button.innerHTML = '<i data-lucide="check" style="width: 14px; height: 14px;" aria-hidden="true"></i> Скопировано!';
+    button.innerHTML = '<i data-lucide="check" class="icon-sm" aria-hidden="true"></i> Скопировано!';
   } else {
-    button.innerHTML = '<i data-lucide="alert-circle" style="width: 14px; height: 14px;" aria-hidden="true"></i> Ошибка';
+    button.innerHTML = '<i data-lucide="alert-circle" class="icon-sm" aria-hidden="true"></i> Ошибка';
   }
-  if (window.lucide) {
-    lucide.createIcons();
-  }
+  if (window.lucide) { lucide.createIcons(); }
 }
 </script>
 {% endblock %}
