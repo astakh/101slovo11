@@ -1,46 +1,48 @@
 {% extends "base.html" %}
 {% block title %}Регистрация — 101slovo{% endblock %}
+
 {% block content %}
 <div class="container--narrow" style="margin: 1.5rem auto;">
-  <div class="card card--auth">
-    <div class="page-header">
-      <div class="page-header__emoji">🚀</div>
-      <h2 style="margin: 0;">Создать аккаунт</h2>
-      <p class="page-header__subtitle">Начните учить английский уже сегодня</p>
+    <div class="card card--auth">
+        <div class="page-header">
+            <div class="page-header__emoji">🚀</div>
+            <h2 style="margin: 0;">Создать аккаунт</h2>
+            <p class="page-header__subtitle">Начните учить английский уже сегодня</p>
+        </div>
+
+        {% if error %}
+        <div class="flash-error">
+            <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/register">
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" value="{{ email|default('') }}" required placeholder="you@example.com">
+            </div>
+            <div class="form-group">
+                <label for="password">Пароль (мин. 8 символов)</label>
+                <input type="password" id="password" name="password" minlength="8" maxlength="72" required placeholder="••••••••">
+            </div>
+            <div class="form-group">
+                <label for="password_confirm">Повторите пароль</label>
+                <input type="password" id="password_confirm" name="password_confirm" minlength="8" maxlength="72" required placeholder="••••••••">
+            </div>
+            <div class="form-group--last">
+                <label for="promo_code">Промокод (необязательно)</label>
+                <input type="text" id="promo_code" name="promo_code" value="{{ ref_code|default('') }}"
+                       placeholder="Если вас пригласил друг" maxlength="9"
+                       style="text-transform: uppercase;">
+            </div>
+
+            <button type="submit" style="width: 100%; padding: 0.75rem;">Создать аккаунт</button>
+        </form>
+
+        <p class="text-center mt-3" style="color: var(--text-muted); font-size: 0.875rem;">
+            Уже есть аккаунт? <a href="/login" style="font-weight: 600;">Войти</a>
+        </p>
     </div>
-
-    {% if error %}
-    <div class="flash-error">
-      <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
-      {{ error }}
-    </div>
-    {% endif %}
-
-    <form method="POST" action="/register">
-      <div class="form-group">
-        <label for="email">Email</label>
-        <input type="email" id="email" name="email" value="{{ email|default('') }}" required placeholder="you@example.com">
-      </div>
-      <div class="form-group">
-        <label for="password">Пароль (мин. 8 символов)</label>
-        <input type="password" id="password" name="password" minlength="8" maxlength="72" required placeholder="••••••••">
-      </div>
-      <div class="form-group">
-        <label for="password_confirm">Повторите пароль</label>
-        <input type="password" id="password_confirm" name="password_confirm" minlength="8" maxlength="72" required placeholder="••••••••">
-      </div>
-      <div class="form-group--last">
-        <label for="promo_code">Промокод (необязательно)</label>
-        <input type="text" id="promo_code" name="promo_code" value="{{ ref_code|default('') }}"
-               placeholder="Если вас пригласил друг" maxlength="6"
-               style="text-transform: uppercase;">
-      </div>
-      <button type="submit" style="width: 100%; padding: 0.75rem;">Создать аккаунт</button>
-    </form>
-
-    <p class="text-center mt-3" style="color: var(--text-muted); font-size: 0.875rem;">
-      Уже есть аккаунт? <a href="/login" style="font-weight: 600;">Войти</a>
-    </p>
-  </div>
 </div>
 {% endblock %}

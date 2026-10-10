@@ -48,9 +48,12 @@ def render_settings(
             "error": error,
             "form": form,
             "settings": settings,
+            # ✅ Передаём параметры для settings_form.html
+            "form_action": "/settings",
+            "submit_text": "Сохранить настройки",
+            "submit_icon": "save",
         },
     )
-
 
 @router.get("/settings")
 async def settings_page(

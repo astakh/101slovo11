@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Регистрация партнёра — 101slovo{% endblock %}
+
+{% block content %}
+<div class="container--narrow" style="margin: 1.5rem auto;">
+    <div class="card card--auth">
+        <div class="page-header">
+            <div class="page-header__emoji">🤝</div>
+            <h2 style="margin: 0;">Стать партнёром</h2>
+            <p class="page-header__subtitle">Регистрация по приглашению</p>
+        </div>
+
+        {% if invite_error %}
+        <div class="flash-error">
+            <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
+            {{ invite_error }}
+        </div>
+        {% endif %}
+
+        {% if valid_invite %}
+        <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+            Заполните данные. После регистрации вы сразу попадёте в кабинет партнёра.
+        </p>
+        <form method="POST" action="/partner/register">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <input type="hidden" name="invite" value="{{ invite_token }}">
+
+            {% if not request.state.user %}
+            <!-- Данные аккаунта (если не залогинен) -->
+            <fieldset>
+                <legend>Аккаунт</legend>
+                <div class="form-group">
+                    <label for="email">Email *</label>
+                    <input type="email" id="email" name="email" required placeholder="you@example.com">
+                </div>
+                <div class="form-group">
+                    <label for="password">Пароль (мин. 8 символов) *</label>
+                    <input type="password" id="password" name="password" minlength="8" maxlength="72" required placeholder="••••••••">
+                </div>
+                <div class="form-group--last" style="margin-bottom: 0;">
+                    <label for="password_confirm">Повторите пароль *</label>
+                    <input type="password" id="password_confirm" name="password_confirm" minlength="8" maxlength="72" required placeholder="••••••••">
+                </div>
+            </fieldset>
+            {% endif %}
+
+            <!-- Данные партнёра -->
+            <fieldset>
+                <legend>Данные партнёра</legend>
+                <div class="form-group">
+                    <label for="name">Название / ФИО *</label>
+                    <input type="text" id="name" name="name" required
+                           placeholder="Например: Школа 'SpeakUp' или Иван Иванов">
+                </div>
+
+                <div class="form-group">
+                    <label for="partner_type">Тип партнёра *</label>
+                    <select id="partner_type" name="partner_type" required>
+                        <option value="">Выберите тип</option>
+                        <option value="self_employed">Самозанятый</option>
+                        <option value="individual">ИП</option>
+                        <option value="company">Юридическое лицо</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="inn">ИНН (необязательно)</label>
+                    <input type="text" id="inn" name="inn" maxlength="12" placeholder="10 или 12 цифр">
+                </div>
+
+                <div class="form-group--last" style="margin-bottom: 0;">
+                    <label for="payout_details">Реквизиты для выплаты (необязательно)</label>
+                    <textarea id="payout_details" name="payout_details" rows="2"
+                              placeholder="Номер карты, расчётный счёт и т.д."></textarea>
+                    <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem;">
+                        Можно заполнить позже в кабинете партнёра.
+                    </p>
+                </div>
+            </fieldset>
+
+            <button type="submit" style="width: 100%; padding: 0.75rem; margin-top: 1rem;">
+                <i data-lucide="user-plus" class="icon-sm" aria-hidden="true"></i>
+                Зарегистрироваться как партнёр
+            </button>
+        </form>
+        {% elif not invite_error %}
+        <p style="color: var(--text-muted); text-align: center;">
+            Перейдите по инвайт-ссылке, полученной от администратора.
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

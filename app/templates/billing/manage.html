@@ -1,118 +1,123 @@
 {% extends "base.html" %}
 {% block title %}Подписка — 101slovo{% endblock %}
+
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-  <div class="section-header">
-    <h1 style="margin: 0;">💳 Подписка</h1>
-    <a href="/billing/plans" class="secondary">
-      <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
-      Тарифы
-    </a>
-  </div>
-
-  <!-- Текущая подписка -->
-  <div class="card mb-3">
-    <h3 style="margin-top: 0;">Текущий статус</h3>
-
-    {% if subscription.is_premium %}
-    <div style="margin-bottom: 1rem;">
-      <span class="badge badge-mastered badge--md">
-        <i data-lucide="crown" class="icon-xs" aria-hidden="true"></i>
-        Premium активна
-      </span>
+    <div class="section-header">
+        <h1 style="margin: 0;">💳 Подписка</h1>
+        <div style="display: flex; gap: 0.5rem;">
+            {% if is_partner %}
+            <a href="/partner/dashboard" class="secondary">
+                <i data-lucide="handshake" class="icon-sm" aria-hidden="true"></i>
+                Кабинет партнёра
+            </a>
+            {% endif %}
+            <a href="/billing/plans" class="secondary">
+                <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
+                Тарифы
+            </a>
+        </div>
     </div>
 
-    <div class="grid grid-3" style="margin-bottom: 1rem;">
-      <div>
-        <div class="stat-row">Тариф</div>
-        <div class="stat-row__value">{{ subscription.plan }}</div>
-      </div>
-      <div>
-        <div class="stat-row">Действует до</div>
-        <div class="stat-row__value">{{ subscription.expires_at.strftime('%d.%m.%Y') }}</div>
-      </div>
-      <div>
-        <div class="stat-row">Осталось дней</div>
-        <div class="stat-row__value">{{ subscription.days_left }}</div>
-      </div>
+    <!-- Текущая подписка -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0;">Текущий статус</h3>
+        {% if subscription.is_premium %}
+        <div style="margin-bottom: 1rem;">
+            <span class="badge badge-mastered badge--md">
+                <i data-lucide="crown" class="icon-xs" aria-hidden="true"></i>
+                Premium активна
+            </span>
+        </div>
+        <div class="grid grid-3" style="margin-bottom: 1rem;">
+            <div>
+                <div class="stat-row">Тариф</div>
+                <div class="stat-row__value">{{ subscription.plan }}</div>
+            </div>
+            <div>
+                <div class="stat-row">Действует до</div>
+                <div class="stat-row__value">{{ subscription.expires_at.strftime('%d.%m.%Y') }}</div>
+            </div>
+            <div>
+                <div class="stat-row">Осталось дней</div>
+                <div class="stat-row__value">{{ subscription.days_left }}</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+            <a href="/billing/plans" role="button">Продлить / Сменить тариф</a>
+            <form method="POST" action="/billing/cancel" style="display: inline;">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit" class="secondary" onclick="return confirm('Отменить подписку? Доступ сохранится до конца оплаченного периода.')">
+                    Отменить подписку
+                </button>
+            </form>
+        </div>
+        {% else %}
+        <div style="margin-bottom: 0.75rem;">
+            <span class="badge badge-active badge--md">Free</span>
+        </div>
+        <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+            У вас бесплатный план: 1 урок в день, 5 уроков всего.
+        </p>
+        <a href="/billing/plans" role="button" style="background: var(--gradient-primary);">
+            <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
+            Подключить Premium
+        </a>
+        {% endif %}
     </div>
 
-    <div style="display: flex; gap: 0.75rem;">
-      <a href="/billing/plans" role="button">Продлить / Сменить тариф</a>
-      <form method="POST" action="/billing/cancel" style="display: inline;">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-        <button type="submit" class="secondary" onclick="return confirm('Отменить подписку? Доступ сохранится до конца оплаченного периода.')">
-          Отменить подписку
-        </button>
-      </form>
+    <!-- Реферальная программа (для обычных пользователей) -->
+    {% if not is_partner %}
+    <div class="card mb-3">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="gift" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
+            Пригласи друга — получи месяц бесплатно
+        </h3>
+        <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+            Поделись промокодом с другом. Когда он купит подписку, ты получишь
+            <strong>+{{ referral_bonus_days }} дней Premium</strong>.
+            Твой друг тоже получит <strong>+{{ referral_bonus_days }} дней</strong> к своей подписке.
+        </p>
+        <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
+            <div class="promo-box" aria-label="Ваш промокод: {{ referral.promo_code }}">
+                {{ referral.promo_code }}
+            </div>
+            <button type="button" class="secondary"
+                    onclick="handleCopyPromo(this, '{{ referral.promo_code }}')"
+                    aria-label="Скопировать промокод {{ referral.promo_code }} в буфер обмена">
+                <i data-lucide="copy" class="icon-sm" aria-hidden="true"></i>
+                Скопировать
+            </button>
+        </div>
+        {% if referral.total_invited > 0 %}
+        <div class="grid grid-3 grid-3--stats">
+            <div class="stat-card" style="padding: 0.875rem;">
+                <div class="stat-card__value" style="font-size: 1.5rem;">{{ referral.total_invited }}</div>
+                <div class="stat-card__label">Приглашено</div>
+            </div>
+            <div class="stat-card" style="padding: 0.875rem;">
+                <div class="stat-card__value" style="font-size: 1.5rem;">{{ referral.total_rewarded }}</div>
+                <div class="stat-card__label">Подписались</div>
+            </div>
+            <div class="stat-card" style="padding: 0.875rem;">
+                <div class="stat-card__value" style="font-size: 1.5rem;">{{ referral.total_bonus_days }}</div>
+                <div class="stat-card__label">Бонусных дней</div>
+            </div>
+        </div>
+        {% endif %}
     </div>
-
-    {% else %}
-    <div style="margin-bottom: 0.75rem;">
-      <span class="badge badge-active badge--md">Free</span>
-    </div>
-    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-      У вас бесплатный план: 1 урок в день, 5 уроков всего.
-    </p>
-    <a href="/billing/plans" role="button" style="background: var(--gradient-primary);">
-      <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
-      Подключить Premium
-    </a>
     {% endif %}
-  </div>
-
-  <!-- Реферальная программа -->
-  <div class="card mb-3">
-    <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
-      <i data-lucide="gift" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
-      Пригласи друга — получи месяц бесплатно
-    </h3>
-    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-      Поделись промокодом с другом. Когда он купит подписку, ты получишь
-      <strong>+{{ referral_bonus_days }} дней Premium</strong>.
-      Твой друг тоже получит <strong>+{{ referral_bonus_days }} дней</strong> к своей подписке.
-    </p>
-
-    <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
-      <div class="promo-box" aria-label="Ваш промокод: {{ referral.promo_code }}">
-        {{ referral.promo_code }}
-      </div>
-      <button type="button" class="secondary"
-              onclick="handleCopyPromo(this, '{{ referral.promo_code }}')"
-              aria-label="Скопировать промокод {{ referral.promo_code }} в буфер обмена">
-        <i data-lucide="copy" class="icon-sm" aria-hidden="true"></i>
-        Скопировать
-      </button>
-    </div>
-
-    {% if referral.total_invited > 0 %}
-    <div class="grid grid-3 grid-3--stats">
-      <div class="stat-card" style="padding: 0.875rem;">
-        <div class="stat-card__value" style="font-size: 1.5rem;">{{ referral.total_invited }}</div>
-        <div class="stat-card__label">Приглашено</div>
-      </div>
-      <div class="stat-card" style="padding: 0.875rem;">
-        <div class="stat-card__value" style="font-size: 1.5rem;">{{ referral.total_rewarded }}</div>
-        <div class="stat-card__label">Подписались</div>
-      </div>
-      <div class="stat-card" style="padding: 0.875rem;">
-        <div class="stat-card__value" style="font-size: 1.5rem;">{{ referral.total_bonus_days }}</div>
-        <div class="stat-card__label">Бонусных дней</div>
-      </div>
-    </div>
-    {% endif %}
-  </div>
 </div>
 
 <script>
 async function handleCopyPromo(button, code) {
-  const ok = await copyToClipboard(code);
-  if (ok) {
-    button.innerHTML = '<i data-lucide="check" class="icon-sm" aria-hidden="true"></i> Скопировано!';
-  } else {
-    button.innerHTML = '<i data-lucide="alert-circle" class="icon-sm" aria-hidden="true"></i> Ошибка';
-  }
-  if (window.lucide) { lucide.createIcons(); }
+    const ok = await copyToClipboard(code);
+    if (ok) {
+        button.innerHTML = '<i data-lucide="check" class="icon-sm" aria-hidden="true"></i> Скопировано!';
+    } else {
+        button.innerHTML = '<i data-lucide="alert-circle" class="icon-sm" aria-hidden="true"></i> Ошибка';
+    }
+    if (window.lucide) { lucide.createIcons(); }
 }
 </script>
 {% endblock %}

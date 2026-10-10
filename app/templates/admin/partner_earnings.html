@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Админ — Начисления партнёра{% endblock %}
+
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+    <div class="section-header">
+        <h1 style="margin: 0;">💰 Начисления партнёра (user_id: {{ partner_user_id }})</h1>
+        <a href="/admin/partners" class="secondary">
+            <i data-lucide="arrow-left" class="icon-sm" aria-hidden="true"></i> К списку
+        </a>
+    </div>
+
+    {% if earnings %}
+    <div class="table-scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>Дата</th><th>Пользователь</th>
+                    <th style="text-align: right;">Оплата</th>
+                    <th style="text-align: right;">%</th>
+                    <th style="text-align: right;">Начисление</th>
+                    <th>Статус</th><th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in earnings %}
+                {% set e = item.earning %}
+                <tr>
+                    <td>{{ e.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td>{{ item.user_email_masked }}</td>
+                    <td style="text-align: right;">{{ "%.0f" | format(e.payment_amount_kop / 100) }} ₽</td>
+                    <td style="text-align: right;">{{ e.commission_percent }}%</td>
+                    <td style="text-align: right; font-weight: 600;">{{ "%.0f" | format(e.earning_amount_kop / 100) }} ₽</td>
+                    <td>
+                        {% if e.status == 'pending' %}<span class="badge badge-active">Ожидает</span>
+                        {% elif e.status == 'paid' %}<span class="badge badge-mastered">Выплачено {{ e.paid_at.strftime('%d.%m') }}</span>
+                        {% else %}<span class="badge badge-ignored">{{ e.status }}</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if e.status == 'pending' %}
+                        <form method="POST" action="/admin/partners/mark-paid/{{ e.id }}"
+                              onsubmit="return confirm('Отметить как выплаченное?');">
+                            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                            <button type="submit" class="btn--sm btn--success">✓ Выплачено</button>
+                        </form>
+                        {% else %}—{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="card text-center" style="padding: 3rem;">
+        <p style="color: var(--text-muted);">Начислений пока нет</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

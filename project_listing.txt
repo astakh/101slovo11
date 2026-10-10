@@ -6556,6 +6556,13 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   --brand-secondary: #ec4899;
   --brand-accent: #06b6d4;
 
+  /* Semantic colors (заменяют хардкод #10b981, #3b82f6 и т.д.) */
+  --color-success: #10b981;
+  --color-success-hover: #059669;
+  --color-info: #3b82f6;
+  --color-warning: #f59e0b;
+  --color-accent: #06b6d4;
+
   /* Gradients */
   --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   --gradient-success: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
@@ -6628,6 +6635,7 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   --surface-100: #334155;
   --surface-200: #475569;
   --surface-300: #64748b;
+
   --text-primary: #f1f5f9;
   --text-secondary: #cbd5e1;
   --text-muted: #94a3b8;
@@ -6642,6 +6650,7 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   --text-brand: #a5b4fc;
   --text-brand-secondary: #f9a8d4;
   --text-accent: #67e8f9;
+
   --bg-success: rgba(16, 185, 129, 0.12);
   --bg-success-border: rgba(16, 185, 129, 0.3);
   --bg-error: rgba(239, 68, 68, 0.12);
@@ -6650,9 +6659,17 @@ def is_webhook_ip_allowed(ip: str) -> bool:
   --bg-info-border: rgba(59, 130, 246, 0.3);
   --bg-warning: rgba(245, 158, 11, 0.12);
   --bg-warning-border: rgba(245, 158, 11, 0.3);
+
   --border-light: #334155;
   --border-medium: #475569;
   --border: #334155;
+
+  /* Семантические цвета в тёмной теме */
+  --color-success: #34d399;
+  --color-success-hover: #6ee7b7;
+  --color-info: #60a5fa;
+  --color-warning: #fbbf24;
+  --color-accent: #67e8f9;
 }
 
 body {
@@ -6660,8 +6677,8 @@ body {
   font-feature-settings: 'cv11', 'ss01';
   color: var(--text-primary);
   background: var(--surface-50);
-  font-size: 0.9375rem;   /* 15px (было 16) */
-  line-height: 1.5;       /* было 1.6 */
+  font-size: 0.9375rem;
+  line-height: 1.5;
   letter-spacing: -0.011em;
   -webkit-font-smoothing: antialiased;
 }
@@ -6671,11 +6688,10 @@ h1, h2, h3, h4, h5, h6 {
   letter-spacing: -0.025em;
   line-height: 1.2;
 }
-
-h1 { font-size: 2rem; }       /* было 2.5rem */
-h2 { font-size: 1.5rem; }     /* было 2rem */
-h3 { font-size: 1.25rem; }    /* было 1.5rem */
-h4 { font-size: 1.0625rem; }  /* было 1.25rem */
+h1 { font-size: 2rem; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.25rem; }
+h4 { font-size: 1.0625rem; }
 
 /* === A11Y: визуально скрытый, но доступный скринридеру === */
 .visually-hidden {
@@ -6690,7 +6706,56 @@ h4 { font-size: 1.0625rem; }  /* было 1.25rem */
   border: 0;
 }
 
-/* === NAVBAR === */
+/* ============================================
+   УТИЛИТЫ: градиентный текст
+   ============================================ */
+.text-gradient {
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ============================================
+   SECTION HEADER (заголовок секции + действие)
+   Заменяет инлайн-флекс:
+   display:flex; justify-content:space-between; align-items:center
+   ============================================ */
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+.section-header--start {
+  align-items: flex-start;
+}
+
+/* ============================================
+   PAGE HEADER (центрированный заголовок страницы)
+   ============================================ */
+.page-header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+.page-header__emoji {
+  font-size: 2.25rem;
+  margin-bottom: 0.375rem;
+}
+.page-header__title {
+  margin: 0;
+}
+.page-header__subtitle {
+  color: var(--text-muted);
+  margin-top: 0.375rem;
+  font-size: 0.9375rem;
+}
+
+/* ============================================
+   NAVBAR
+   ============================================ */
 .navbar {
   position: sticky;
   top: 0;
@@ -6699,7 +6764,7 @@ h4 { font-size: 1.0625rem; }  /* было 1.25rem */
   backdrop-filter: saturate(180%) blur(12px);
   -webkit-backdrop-filter: saturate(180%) blur(12px);
   border-bottom: 1px solid var(--border-light);
-  padding: 0.5rem 0;   /* было 0.875rem */
+  padding: 0.5rem 0;
 }
 [data-theme="dark"] .navbar {
   background: rgba(15, 23, 42, 0.8);
@@ -6707,15 +6772,15 @@ h4 { font-size: 1.0625rem; }  /* было 1.25rem */
 .navbar-inner {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 0 1rem;      /* было 0 1.5rem */
+  padding: 0 1rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1rem;            /* было 2rem */
+  gap: 1rem;
 }
 .navbar-brand {
   font-weight: 800;
-  font-size: 1.125rem;  /* было 1.25rem */
+  font-size: 1.125rem;
   background: var(--gradient-primary);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -6759,7 +6824,7 @@ h4 { font-size: 1.0625rem; }  /* было 1.25rem */
   background: var(--surface-0);
   border-bottom: 1px solid var(--border-light);
   box-shadow: var(--shadow-lg);
-  padding: 0.5rem 0.75rem;   /* было 0.75rem 1rem */
+  padding: 0.5rem 0.75rem;
   flex-direction: column;
   gap: 0.125rem;
   z-index: 99;
@@ -6774,8 +6839,8 @@ h4 { font-size: 1.0625rem; }  /* было 1.25rem */
 .navbar-mobile-menu .nav-link {
   width: 100%;
   justify-content: flex-start;
-  padding: 0.625rem 1rem;   /* было 0.75rem 1rem */
-  font-size: 0.9375rem;      /* было 1rem */
+  padding: 0.625rem 1rem;
+  font-size: 0.9375rem;
 }
 .navbar-mobile-menu .navbar-logout {
   width: 100%;
@@ -6784,11 +6849,11 @@ h4 { font-size: 1.0625rem; }  /* было 1.25rem */
   text-align: center;
 }
 .nav-link {
-  padding: 0.375rem 0.75rem;   /* было 0.5rem 0.875rem */
+  padding: 0.375rem 0.75rem;
   color: var(--text-secondary);
   text-decoration: none;
   font-weight: 500;
-  font-size: 0.875rem;          /* было 0.925rem */
+  font-size: 0.875rem;
   border-radius: var(--radius-md);
   transition: all var(--transition-fast);
   display: inline-flex;
@@ -6823,15 +6888,17 @@ h4 { font-size: 1.0625rem; }  /* было 1.25rem */
   background: rgba(239, 68, 68, 0.05);
 }
 
-/* === BUTTONS === */
+/* ============================================
+   BUTTONS
+   ============================================ */
 button, .button, [role="button"], input[type="submit"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.5rem 1.125rem;   /* было 0.625rem 1.25rem */
+  padding: 0.5rem 1.125rem;
   font-weight: 600;
-  font-size: 0.875rem;        /* было 0.925rem */
+  font-size: 0.875rem;
   border-radius: var(--radius-md);
   border: none;
   cursor: pointer;
@@ -6857,6 +6924,7 @@ input[type="submit"]:hover {
   transform: translateY(-1px);
 }
 button:active, .button:active, [role="button"]:active { transform: translateY(0); }
+
 .secondary, [role="button"].secondary {
   background: var(--surface-100);
   color: var(--text-secondary);
@@ -6866,22 +6934,45 @@ button:active, .button:active, [role="button"]:active { transform: translateY(0)
   background: var(--surface-200);
   color: var(--text-primary);
 }
+
+/* Модификаторы размеров кнопок */
+.btn--sm {
+  padding: 0.375rem 0.875rem;
+  font-size: 0.8125rem;
+}
 .btn-lg, [role="button"][style*="font-size: 1.2rem"],
 [role="button"][style*="padding: 1rem 2rem"] {
-  padding: 0.75rem 1.5rem;   /* было 1rem 2rem */
-  font-size: 1rem;           /* было 1.1rem */
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
   border-radius: var(--radius-lg);
 }
 
-/* === FORMS === */
+/* Модификаторы цвета кнопок */
+.btn--success {
+  background: var(--color-success) !important;
+  color: var(--text-inverse) !important;
+}
+.btn--success:hover {
+  background: var(--color-success-hover) !important;
+}
+.btn--ghost {
+  background: var(--surface-0) !important;
+  color: var(--brand-primary) !important;
+  border: none;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.15);
+}
+
+/* ============================================
+   FORMS
+   ============================================ */
 input[type="text"], input[type="email"], input[type="password"],
 input[type="number"], input[type="search"], textarea, select {
-  padding: 0.5rem 0.75rem;    /* было 0.75rem 1rem */
+  padding: 0.5rem 0.75rem;
   border: 1.5px solid var(--border-light);
   border-radius: var(--radius-md);
   background: var(--surface-0);
   color: var(--text-primary);
-  font-size: 0.9375rem;       /* было 0.95rem */
+  font-size: 0.9375rem;
   font-family: inherit;
   transition: all var(--transition-fast);
   width: 100%;
@@ -6894,18 +6985,28 @@ input:focus, textarea:focus, select:focus {
 }
 input::placeholder, textarea::placeholder { color: var(--text-muted); }
 textarea { resize: vertical; min-height: 90px; line-height: 1.5; }
+
 label {
   display: block;
-  margin-bottom: 0.375rem;    /* было 0.5rem */
+  margin-bottom: 0.375rem;
   font-weight: 600;
-  font-size: 0.8125rem;       /* было 0.875rem */
+  font-size: 0.8125rem;
   color: var(--text-secondary);
 }
+
+/* Группа формы (заменяет инлайн margin-bottom) */
+.form-group {
+  margin-bottom: 0.875rem;
+}
+.form-group--last {
+  margin-bottom: 1.25rem;
+}
+
 fieldset {
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
-  padding: 1rem;              /* было 1.25rem */
-  margin-bottom: 1rem;        /* было 1.25rem */
+  padding: 1rem;
+  margin-bottom: 1rem;
   background: var(--surface-50);
 }
 legend { font-weight: 600; padding: 0 0.5rem; font-size: 0.9rem; }
@@ -6950,17 +7051,23 @@ input[type="range"]::-moz-range-track {
   border: none;
 }
 
-/* === BADGES === */
+/* ============================================
+   BADGES
+   ============================================ */
 .badge {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.2rem 0.5rem;     /* было 0.25rem 0.625rem */
+  padding: 0.2rem 0.5rem;
   border-radius: var(--radius-full);
-  font-size: 0.6875rem;       /* было 0.75rem */
+  font-size: 0.6875rem;
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+}
+.badge--md {
+  font-size: 0.8125rem;
+  padding: 0.375rem 0.75rem;
 }
 .badge-active { background: rgba(99, 102, 241, 0.12); color: var(--text-brand); }
 .badge-mastered { background: var(--bg-success); color: var(--text-success-strong); }
@@ -6968,13 +7075,15 @@ input[type="range"]::-moz-range-track {
 .badge-new { background: rgba(236, 72, 153, 0.12); color: var(--text-brand-secondary); }
 .badge-review { background: rgba(6, 182, 212, 0.12); color: var(--text-accent); }
 
-/* === FLASH === */
+/* ============================================
+   FLASH
+   ============================================ */
 .flash-success, .flash-error, .flash-info, .flash-warning {
-  padding: 0.75rem 1rem;      /* было 1rem 1.25rem */
+  padding: 0.75rem 1rem;
   border-radius: var(--radius-md);
-  margin-bottom: 0.875rem;    /* было 1.25rem */
+  margin-bottom: 0.875rem;
   font-weight: 500;
-  font-size: 0.875rem;        /* было 0.925rem */
+  font-size: 0.875rem;
   display: flex;
   align-items: center;
   gap: 0.625rem;
@@ -6986,7 +7095,9 @@ input[type="range"]::-moz-range-track {
 .flash-info { background: var(--bg-info); border-color: var(--bg-info-border); color: var(--text-info); }
 .flash-warning { background: var(--bg-warning); border-color: var(--bg-warning-border); color: var(--text-warning); }
 
-/* === TABLES === */
+/* ============================================
+   TABLES
+   ============================================ */
 table {
   width: 100%;
   border-collapse: separate;
@@ -6999,19 +7110,19 @@ table {
 }
 thead { background: var(--surface-50); }
 th {
-  padding: 0.625rem 0.75rem;   /* было 0.875rem 1rem */
+  padding: 0.625rem 0.75rem;
   text-align: left;
   font-weight: 600;
-  font-size: 0.75rem;          /* было 0.8125rem */
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border-light);
 }
 td {
-  padding: 0.625rem 0.75rem;   /* было 1rem */
+  padding: 0.625rem 0.75rem;
   border-bottom: 1px solid var(--border-light);
-  font-size: 0.875rem;         /* было 0.925rem */
+  font-size: 0.875rem;
 }
 tbody tr { transition: background var(--transition-fast); }
 tbody tr:hover { background: var(--surface-50); }
@@ -7021,11 +7132,13 @@ tbody tr:last-child td { border-bottom: none; }
   -webkit-overflow-scrolling: touch;
 }
 
-/* === STAT CARDS === */
+/* ============================================
+   STAT CARDS
+   ============================================ */
 .stat-card {
   position: relative;
   overflow: hidden;
-  padding: 1.25rem;            /* было 1.5rem */
+  padding: 1.25rem;
   background: var(--surface-0);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
@@ -7050,32 +7163,32 @@ tbody tr:last-child td { border-bottom: none; }
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px; height: 40px;   /* было 48px */
+  width: 40px; height: 40px;
   border-radius: var(--radius-md);
   background: rgba(99, 102, 241, 0.1);
   color: var(--brand-primary);
-  margin-bottom: 0.75rem;      /* было 1rem */
-  font-size: 1.25rem;          /* было 1.5rem */
+  margin-bottom: 0.75rem;
+  font-size: 1.25rem;
 }
 .stat-card__icon--fire { background: var(--bg-warning); color: var(--text-warning-strong); }
 .stat-card__icon--book { background: var(--bg-success); color: var(--text-success-strong); }
 .stat-card__icon--calendar { background: var(--bg-info); color: var(--text-info-strong); }
 .stat-card__value {
-  font-size: 2rem;             /* было 2.5rem */
+  font-size: 2rem;
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1;
   margin-bottom: 0.25rem;
 }
 .stat-card__label {
-  font-size: 0.75rem;          /* было 0.875rem */
+  font-size: 0.75rem;
   color: var(--text-muted);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 .stat-card__sublabel {
-  font-size: 0.75rem;          /* было 0.8125rem */
+  font-size: 0.75rem;
   color: var(--text-muted);
   margin-top: 0.25rem;
 }
@@ -7100,49 +7213,61 @@ tbody tr:last-child td { border-bottom: none; }
   .stat-card--compact .stat-card__sublabel { font-size: 0.6875rem; margin-top: 0; }
 }
 
-/* === CARD === */
+/* ============================================
+   CARD
+   ============================================ */
 .card {
   background: var(--surface-0);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
-  padding: 1.25rem;            /* было 1.5rem */
+  padding: 1.25rem;
   box-shadow: var(--shadow-sm);
 }
+/* Модификаторы карточек */
+.card--compact { padding: 0.875rem 1rem; }
+.card--spacious { padding: 1.75rem; }
+.card--legal { padding: 2rem; line-height: 1.8; }
+.card--auth { max-width: 440px; margin: 0 auto; padding: 1.5rem; }
+.card--settings { padding: 1.125rem; }
 
-/* === EXERCISE === */
+/* ============================================
+   EXERCISE
+   ============================================ */
 .exercise-card {
   background: var(--surface-0);
   border: 1px solid var(--border-light);
-  border-radius: var(--radius-lg);   /* было xl */
-  padding: 1.5rem;                   /* было 2rem */
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
   box-shadow: var(--shadow-md);
-  margin-bottom: 1rem;               /* было 1.5rem */
+  margin-bottom: 1rem;
 }
 .exercise-sentence {
-  font-size: 1.25rem;            /* было 1.5rem */
+  font-size: 1.25rem;
   font-weight: 600;
   line-height: 1.4;
-  margin-bottom: 0.75rem;        /* было 1rem */
+  margin-bottom: 0.75rem;
   letter-spacing: -0.01em;
 }
 .exercise-words {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.375rem;                 /* было 0.5rem */
-  margin-bottom: 1rem;           /* было 1.5rem */
+  gap: 0.375rem;
+  margin-bottom: 1rem;
 }
 .exercise-result-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;                  /* было 1rem */
+  gap: 0.75rem;
 }
 
-/* === SUGGESTION === */
+/* ============================================
+   SUGGESTION
+   ============================================ */
 .suggestion-card {
-  padding: 0.75rem 1rem;         /* было 1rem 1.25rem */
+  padding: 0.75rem 1rem;
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  margin-bottom: 0.5rem;         /* было 0.75rem */
+  margin-bottom: 0.5rem;
   background: var(--surface-50);
   transition: all var(--transition-fast);
 }
@@ -7160,12 +7285,15 @@ tbody tr:last-child td { border-bottom: none; }
   border-color: rgba(148, 163, 184, 0.2);
   opacity: 0.7;
 }
+
 .text-success { color: var(--text-success-strong); }
 .text-error { color: var(--text-error-strong); }
 .text-warning { color: var(--text-warning-strong); }
 .text-info { color: var(--text-info-strong); }
 
-/* === SPINNER === */
+/* ============================================
+   SPINNER
+   ============================================ */
 .htmx-indicator {
   display: none;
   align-items: center;
@@ -7187,13 +7315,15 @@ tbody tr:last-child td { border-bottom: none; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* === PAGINATION === */
+/* ============================================
+   PAGINATION
+   ============================================ */
 .pagination {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 0.375rem;                 /* было 0.5rem */
-  margin-top: 1.5rem;            /* было 2rem */
+  gap: 0.375rem;
+  margin-top: 1.5rem;
   flex-wrap: wrap;
 }
 .pagination a {
@@ -7215,16 +7345,18 @@ tbody tr:last-child td { border-bottom: none; }
   border-color: var(--brand-primary);
 }
 
-/* === WORD ITEM (vocabulary) === */
+/* ============================================
+   WORD ITEM (vocabulary)
+   ============================================ */
 .word-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1rem;         /* было 1rem 1.25rem */
+  padding: 0.75rem 1rem;
   background: var(--surface-0);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
-  margin-bottom: 0.375rem;       /* было 0.5rem */
+  margin-bottom: 0.375rem;
   transition: all var(--transition-fast);
   text-decoration: none;
   color: inherit;
@@ -7237,16 +7369,16 @@ tbody tr:last-child td { border-bottom: none; }
 .word-item__main {
   display: flex;
   align-items: center;
-  gap: 0.75rem;                  /* было 1rem */
+  gap: 0.75rem;
   flex: 1;
   min-width: 0;
 }
 .word-item__lemma {
   font-weight: 700;
-  font-size: 0.9375rem;          /* было 1.0625rem */
+  font-size: 0.9375rem;
 }
 .word-item__pos {
-  font-size: 0.75rem;            /* было 0.8125rem */
+  font-size: 0.75rem;
   color: var(--text-muted);
   padding: 0.125rem 0.5rem;
   background: var(--surface-100);
@@ -7254,7 +7386,7 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .word-item__translation {
   color: var(--text-secondary);
-  font-size: 0.875rem;           /* было 0.925rem */
+  font-size: 0.875rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7262,11 +7394,11 @@ tbody tr:last-child td { border-bottom: none; }
 .word-item__meta {
   display: flex;
   align-items: center;
-  gap: 0.5rem;                   /* было 0.75rem */
+  gap: 0.5rem;
   flex-shrink: 0;
 }
 .word-item__due {
-  font-size: 0.75rem;            /* было 0.8125rem */
+  font-size: 0.75rem;
   color: var(--text-muted);
   padding: 0.2rem 0.5rem;
   background: var(--surface-100);
@@ -7280,24 +7412,26 @@ tbody tr:last-child td { border-bottom: none; }
   align-items: end;
 }
 
-/* === CTA SECTION === */
+/* ============================================
+   CTA SECTION
+   ============================================ */
 .cta-section {
   text-align: center;
-  padding: 2rem 1.5rem;          /* было 3rem 2rem */
+  padding: 2rem 1.5rem;
   background: var(--gradient-primary);
   border-radius: var(--radius-lg);
   color: var(--text-inverse);
-  margin: 1.5rem 0;              /* было 2rem 0 */
+  margin: 1.5rem 0;
   box-shadow: var(--shadow-lg), 0 8px 32px rgba(99, 102, 241, 0.25);
 }
-.cta-section h3 { color: var(--text-inverse); font-size: 1.375rem; margin-bottom: 0.375rem; } /* было 1.75rem */
+.cta-section h3 { color: var(--text-inverse); font-size: 1.375rem; margin-bottom: 0.375rem; }
 .cta-section p { opacity: 0.9; margin-bottom: 1rem; font-size: 0.9375rem; }
 .cta-section .button, .cta-section [role="button"] {
   background: var(--surface-0);
   color: var(--brand-primary);
   border: none;
-  padding: 0.75rem 1.75rem;      /* было 1rem 2.5rem */
-  font-size: 1rem;               /* было 1.1rem */
+  padding: 0.75rem 1.75rem;
+  font-size: 1rem;
   font-weight: 700;
   box-shadow: var(--shadow-lg);
 }
@@ -7306,19 +7440,21 @@ tbody tr:last-child td { border-bottom: none; }
   box-shadow: var(--shadow-xl);
 }
 
-/* === HERO === */
+/* ============================================
+   HERO
+   ============================================ */
 .hero {
-  padding: 1rem 0;               /* было 2rem 0 */
-  margin-bottom: 1.25rem;        /* было 2rem */
+  padding: 1rem 0;
+  margin-bottom: 1.25rem;
 }
 .hero__greeting {
-  font-size: 1rem;               /* было 1.125rem */
+  font-size: 1rem;
   color: var(--text-muted);
   font-weight: 500;
   margin-bottom: 0.125rem;
 }
 .hero__title {
-  font-size: 2rem;               /* было 2.5rem */
+  font-size: 2rem;
   font-weight: 800;
   letter-spacing: -0.03em;
   margin: 0;
@@ -7328,10 +7464,14 @@ tbody tr:last-child td { border-bottom: none; }
   background-clip: text;
 }
 
-/* === UTILS === */
+/* ============================================
+   UTILS
+   ============================================ */
 .container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
+.container--xs { max-width: 480px; }
 .container--narrow { max-width: 720px; }
 .container--medium { max-width: 960px; }
+
 .text-center { text-align: center; }
 .mt-1 { margin-top: 0.5rem; }
 .mt-2 { margin-top: 1rem; }
@@ -7343,6 +7483,216 @@ tbody tr:last-child td { border-bottom: none; }
 .grid { display: grid; gap: 1rem; }
 .grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
+
+/* ============================================
+   ICON SIZES (заменяют инлайн width/height)
+   ============================================ */
+.icon-xs { width: 12px; height: 12px; }
+.icon-sm { width: 14px; height: 14px; }
+.icon-md { width: 16px; height: 16px; }
+.icon-lg { width: 18px; height: 18px; }
+.icon-xl { width: 22px; height: 22px; }
+.icon-2xl { width: 24px; height: 24px; }
+
+/* ============================================
+   INFO BOX (заменяет инлайн-блоки с иконкой)
+   ============================================ */
+.info-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-info);
+  border: 1px solid var(--bg-info-border);
+  border-radius: var(--radius-md);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+/* ============================================
+   OPTION CARD (для уровней/словарей в настройках)
+   Заменяет .level-option и .dict-option
+   ============================================ */
+.option-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem;
+  background: var(--surface-50);
+  border: 2px solid var(--border-light);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: center;
+  color: var(--text-secondary);
+}
+.option-card:hover {
+  border-color: var(--brand-primary-light);
+  background: var(--surface-0);
+  transform: translateY(-1px);
+}
+.option-card--active {
+  border-color: var(--brand-primary) !important;
+  background: rgba(99, 102, 241, 0.08) !important;
+  color: var(--brand-primary) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+/* ============================================
+   PRICING CARD (тарифы)
+   ============================================ */
+.pricing-card {
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem;
+}
+.pricing-card--popular {
+  border-color: var(--brand-primary);
+  box-shadow: var(--shadow-glow);
+}
+.pricing-card--best {
+  border-color: var(--color-success);
+}
+.pricing-card__price {
+  font-size: 1.875rem;
+  font-weight: 800;
+  margin-bottom: 0.375rem;
+}
+.pricing-card__period {
+  font-size: 0.9375rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.pricing-card__note {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-bottom: 0.375rem;
+}
+.pricing-card__features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.25rem 0;
+  flex: 1;
+}
+.pricing-card__features li {
+  padding: 0.375rem 0;
+  border-bottom: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.pricing-card__features li:last-child {
+  border-bottom: none;
+}
+
+/* ============================================
+   WORD CARD (lesson preview)
+   ============================================ */
+.word-card {
+  padding: 0.875rem 1rem;
+  border-left: 4px solid var(--brand-accent);
+  transition: all 0.2s ease;
+  cursor: default;
+}
+.word-card--new {
+  border-left-color: var(--brand-secondary);
+}
+.word-card__lemma {
+  font-weight: 700;
+  font-size: 1.0625rem;
+  color: var(--text-primary);
+}
+.word-card__pos {
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.word-card__translations {
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+/* ============================================
+   EVAL ICON (иконка статуса оценки)
+   ============================================ */
+.eval-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+.eval-icon--success { background: var(--bg-success); }
+.eval-icon--warning { background: var(--bg-warning); }
+.eval-icon--error { background: var(--bg-error); }
+
+/* ============================================
+   STAT ROW (для подписей в биллинге)
+   ============================================ */
+.stat-row {
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.stat-row__value {
+  font-weight: 700;
+  font-size: 1.0625rem;
+}
+
+/* ============================================
+   FEEDBACK BLOCK (цитата от ИИ)
+   ============================================ */
+.feedback-block {
+  padding: 0.875rem;
+  background: var(--surface-50);
+  border-radius: var(--radius-md);
+  margin-bottom: 0.875rem;
+  border-left: 3px solid var(--brand-primary);
+}
+
+/* ============================================
+   LEGAL BLOCK (реквизиты)
+   ============================================ */
+.legal-requisites {
+  background: var(--surface-50);
+  padding: 1.5rem;
+  border-radius: var(--radius-md);
+  margin-top: 1rem;
+}
+.legal-requisites p {
+  margin: 0.25rem 0;
+}
+
+/* ============================================
+   PROMO CODE BOX
+   ============================================ */
+.promo-box {
+  background: var(--surface-100);
+  border: 2px dashed var(--brand-primary);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 1.25rem;
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: var(--brand-primary);
+}
+
+/* ============================================
+   ERROR PAGE
+   ============================================ */
+.error-page {
+  text-align: center;
+  padding-top: 4rem;
+}
 
 /* === Skeleton Loading === */
 .skeleton {
@@ -7388,15 +7738,15 @@ tbody tr:last-child td { border-bottom: none; }
   overflow-y: auto;
   background: var(--surface-0);
   border-radius: var(--radius-lg);
-  padding: 1.5rem;               /* было 2rem */
+  padding: 1.5rem;
   box-shadow: var(--shadow-xl);
   animation: fadeInUp 0.25s ease-out;
 }
 .word-option-card {
   display: flex;
   align-items: flex-start;
-  gap: 0.875rem;                 /* было 1rem */
-  padding: 0.75rem 1rem;         /* было 1rem 1.25rem */
+  gap: 0.875rem;
+  padding: 0.75rem 1rem;
   background: var(--surface-50);
   border: 1.5px solid var(--border-light);
   border-radius: var(--radius-md);
@@ -7458,40 +7808,34 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 @media (max-width: 768px) {
-  body { font-size: 0.875rem; }   /* 14px на мобильных */
+  body { font-size: 0.875rem; }
   .grid-3, .grid-4 { grid-template-columns: 1fr; }
-  /* Компактные сетки не сворачиваются в 1 колонку */
   .grid-3--stats, .grid-3--compact { grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
-  .grid-4 { grid-template-columns: repeat(2, 1fr); gap: 0.625rem; } /* итоги урока 2×2 */
-
+  .grid-4 { grid-template-columns: repeat(2, 1fr); gap: 0.625rem; }
   h1 { font-size: 1.5rem; }
   h2 { font-size: 1.25rem; }
   h3 { font-size: 1.125rem; }
   h4 { font-size: 1rem; }
   .stat-card__value { font-size: 1.625rem; }
   .hero__title { font-size: 1.625rem; }
-
   .navbar-menu--desktop { display: none; }
   .navbar-burger { display: flex; }
   .navbar-inner { gap: 0.75rem; }
-
   .exercise-result-grid { grid-template-columns: 1fr; }
   .vocab-filters { grid-template-columns: 1fr; }
   .vocab-filters select { min-width: unset; }
-
   .container { padding: 0 0.875rem; }
   .grid { gap: 0.75rem; }
   .card { padding: 1rem; }
+  .card--legal { padding: 1.25rem; }
   .exercise-card { padding: 1rem; }
   .stat-card { padding: 0.875rem 1rem; }
   .cta-section { padding: 1.5rem 1rem; }
   .cta-section h3 { font-size: 1.25rem; }
   fieldset { padding: 1rem; margin-bottom: 1rem; }
   .exercise-sentence { font-size: 1.125rem; }
-
   .modal-overlay { padding: 5vh 0.75rem 1.5rem 0.75rem; }
   .modal-panel { padding: 1.25rem; }
-
   .word-item { flex-wrap: wrap; gap: 0.5rem; }
   .word-item__meta { width: 100%; justify-content: flex-start; }
   .summary-streak-flex { gap: 1.25rem !important; }
@@ -7500,26 +7844,23 @@ tbody tr:last-child td { border-bottom: none; }
 @media (max-width: 480px) {
   .container { padding: 0 0.75rem; }
   .card { padding: 0.875rem; }
+  .card--legal { padding: 1rem; }
   .exercise-card { padding: 0.875rem; }
   .stat-card { padding: 0.75rem; }
   .cta-section { padding: 1.25rem 0.875rem; }
   .modal-overlay { padding: 3vh 0.5rem 1rem 0.5rem; }
   .modal-panel { padding: 1rem; }
-
   h1 { font-size: 1.375rem; }
   h2 { font-size: 1.1875rem; }
   .hero__title { font-size: 1.5rem; }
   .stat-card__value { font-size: 1.5rem; }
   .exercise-sentence { font-size: 1.0625rem; }
-
   .flash-success, .flash-error, .flash-info, .flash-warning {
     padding: 0.625rem 0.875rem;
     font-size: 0.8125rem;
   }
   .pagination { gap: 0.25rem; }
   .pagination a { min-width: 32px; height: 32px; font-size: 0.875rem; }
-
-  /* На очень узких экранах уровни/словари — 3 колонки, но плотнее */
   .grid-3--compact { gap: 0.375rem; }
 }
 ### end of app/static/css/custom.css ########################################################################
@@ -7615,40 +7956,36 @@ async function copyToClipboard(text) {
 ### app/templates/admin/prompts.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Админ — Промпты{% endblock %}
-
 {% block content %}
 <div class="container--medium" style="margin: 2rem auto;">
-    <h2>🛠 Управление промптами</h2>
+  <h1>🛠 Управление промптами</h1>
 
-    {% if error %}
-    <div class="flash-error">{{ error }}</div>
-    {% endif %}
+  {% if error %}
+  <div class="flash-error">{{ error }}</div>
+  {% endif %}
 
-    {% for prompt in prompts %}
-    <div class="card" style="margin-bottom: 1.5rem;"
-         x-data="{ open: {% if edit_key == prompt.key %}true{% else %}false{% endif %} }">
-
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
-            <h4 style="margin: 0;">{{ prompt.key }}</h4>
-            <button @click="open = !open" class="secondary" style="padding: 0.2rem 0.8rem;">
-                <span x-text="open ? 'Свернуть' : 'Редактировать'"></span>
-            </button>
-        </div>
-
-        <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">
-            Обновлён: {{ prompt.updated_at.strftime('%d.%m.%Y %H:%M') }}
-        </p>
-
-        <div x-show="open" x-transition style="margin-top: 1rem;">
-            <form method="POST" action="/admin/prompts/{{ prompt.key }}">
-                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-                <textarea name="system_template" rows="15"
-                          style="width: 100%; font-family: monospace; font-size: 0.9rem;">{% if edit_key == prompt.key %}{{ edit_value }}{% else %}{{ prompt.system_template }}{% endif %}</textarea>
-                <button type="submit">💾 Сохранить</button>
-            </form>
-        </div>
+  {% for prompt in prompts %}
+  <div class="card mb-3"
+       x-data="{ open: {% if edit_key == prompt.key %}true{% else %}false{% endif %} }">
+    <div class="section-header" style="margin-bottom: 0;">
+      <h4 style="margin: 0;">{{ prompt.key }}</h4>
+      <button @click="open = !open" class="secondary btn--sm">
+        <span x-text="open ? 'Свернуть' : 'Редактировать'"></span>
+      </button>
     </div>
-    {% endfor %}
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.5rem;">
+      Обновлён: {{ prompt.updated_at.strftime('%d.%m.%Y %H:%M') }}
+    </p>
+    <div x-show="open" x-transition style="margin-top: 1rem;">
+      <form method="POST" action="/admin/prompts/{{ prompt.key }}">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <textarea name="system_template" rows="15"
+                  style="width: 100%; font-family: monospace; font-size: 0.9rem;">{% if edit_key == prompt.key %}{{ edit_value }}{% else %}{{ prompt.system_template }}{% endif %}</textarea>
+        <button type="submit">💾 Сохранить</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
 </div>
 {% endblock %}
 ### end of app/templates/admin/prompts.html ########################################################################
@@ -7657,78 +7994,78 @@ async function copyToClipboard(text) {
 {% extends "base.html" %}
 {% block title %}Админ — Статистика токенов{% endblock %}
 {% block content %}
-<div style="max-width: 1000px; margin: 2rem auto;">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-        <h2 style="margin: 0;">📊 Статистика расхода токенов</h2>
-        <a href="/admin/prompts" class="secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem;">
-            <i data-lucide="shield" style="width: 16px; height: 16px;"></i>
-            Промпты
-        </a>
-    </div>
-    <p style="color: var(--text-muted); margin-bottom: 2rem;">
-        Данные по использованию GigaChat API для генерации предложений и оценки переводов.
-    </p>
+<div class="container--medium" style="margin: 2rem auto;">
+  <div class="section-header">
+    <h1 style="margin: 0;">📊 Статистика расхода токенов</h1>
+    <a href="/admin/prompts" class="secondary">
+      <i data-lucide="shield" class="icon-md" aria-hidden="true"></i>
+      Промпты
+    </a>
+  </div>
+  <p style="color: var(--text-muted); margin-bottom: 2rem;">
+    Данные по использованию GigaChat API для генерации предложений и оценки переводов.
+  </p>
 
-    <!-- Сводная таблица -->
-    <div class="card" style="overflow-x: auto; padding: 0;">
-        <table>
-            <thead>
-                <tr>
-                    <th>Период</th>
-                    <th style="text-align: right;">Уроков</th>
-                    <th style="text-align: right;">Всего токенов</th>
-                    <th style="text-align: right;">Средний на урок</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for key in ['today', 'week', 'month', 'all'] %}
-                {% set s = stats[key] %}
-                <tr>
-                    <td><strong>{{ s.label }}</strong></td>
-                    <td style="text-align: right;">{{ s.lessons_count }}</td>
-                    <td style="text-align: right; font-weight: 700;">{{ "{:,}".format(s.total_tokens) }}</td>
-                    <td style="text-align: right;">{{ "{:,}".format(s.avg_tokens_per_lesson) }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+  <!-- Сводная таблица -->
+  <div class="card table-scroll" style="padding: 0;">
+    <table>
+      <thead>
+        <tr>
+          <th>Период</th>
+          <th style="text-align: right;">Уроков</th>
+          <th style="text-align: right;">Всего токенов</th>
+          <th style="text-align: right;">Средний на урок</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for key in ['today', 'week', 'month', 'all'] %}
+        {% set s = stats[key] %}
+        <tr>
+          <td><strong>{{ s.label }}</strong></td>
+          <td style="text-align: right;">{{ s.lessons_count }}</td>
+          <td style="text-align: right; font-weight: 700;">{{ "{:,}".format(s.total_tokens) }}</td>
+          <td style="text-align: right;">{{ "{:,}".format(s.avg_tokens_per_lesson) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
-    <!-- Детальная разбивка -->
-    <h3 style="margin-top: 2.5rem; margin-bottom: 1rem;">Детальная разбивка по операциям</h3>
-    <div class="card" style="overflow-x: auto; padding: 0;">
-        <table>
-            <thead>
-                <tr>
-                    <th>Период</th>
-                    <th style="text-align: right;">Генерация · prompt</th>
-                    <th style="text-align: right;">Генерация · completion</th>
-                    <th style="text-align: right;">Оценка · prompt</th>
-                    <th style="text-align: right;">Оценка · completion</th>
-                    <th style="text-align: right;">Итого</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for key in ['today', 'week', 'month', 'all'] %}
-                {% set s = stats[key] %}
-                <tr>
-                    <td><strong>{{ s.label }}</strong></td>
-                    <td style="text-align: right;">{{ "{:,}".format(s.gen_prompt_tokens) }}</td>
-                    <td style="text-align: right;">{{ "{:,}".format(s.gen_completion_tokens) }}</td>
-                    <td style="text-align: right;">{{ "{:,}".format(s.eval_prompt_tokens) }}</td>
-                    <td style="text-align: right;">{{ "{:,}".format(s.eval_completion_tokens) }}</td>
-                    <td style="text-align: right; font-weight: 700;">{{ "{:,}".format(s.total_tokens) }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+  <!-- Детальная разбивка -->
+  <h2 style="margin-top: 2.5rem; margin-bottom: 1rem;">Детальная разбивка по операциям</h2>
+  <div class="card table-scroll" style="padding: 0;">
+    <table>
+      <thead>
+        <tr>
+          <th>Период</th>
+          <th style="text-align: right;">Генерация · prompt</th>
+          <th style="text-align: right;">Генерация · completion</th>
+          <th style="text-align: right;">Оценка · prompt</th>
+          <th style="text-align: right;">Оценка · completion</th>
+          <th style="text-align: right;">Итого</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for key in ['today', 'week', 'month', 'all'] %}
+        {% set s = stats[key] %}
+        <tr>
+          <td><strong>{{ s.label }}</strong></td>
+          <td style="text-align: right;">{{ "{:,}".format(s.gen_prompt_tokens) }}</td>
+          <td style="text-align: right;">{{ "{:,}".format(s.gen_completion_tokens) }}</td>
+          <td style="text-align: right;">{{ "{:,}".format(s.eval_prompt_tokens) }}</td>
+          <td style="text-align: right;">{{ "{:,}".format(s.eval_completion_tokens) }}</td>
+          <td style="text-align: right; font-weight: 700;">{{ "{:,}".format(s.total_tokens) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 
-    <p style="margin-top: 1.5rem; font-size: 0.8125rem; color: var(--text-muted);">
-        💡 <strong>Генерация</strong> — токены на создание предложений для урока.
-        <strong>Оценка</strong> — токены на проверку переводов пользователя.
-        Данные учитывают все завершённые и незавершённые уроки за период.
-    </p>
+  <p style="margin-top: 1.5rem; font-size: 0.8125rem; color: var(--text-muted);">
+    💡 <strong>Генерация</strong> — токены на создание предложений для урока.
+    <strong>Оценка</strong> — токены на проверку переводов пользователя.
+    Данные учитывают все завершённые и незавершённые уроки за период.
+  </p>
 </div>
 {% endblock %}
 ### end of app/templates/admin/stats.html ########################################################################
@@ -7738,26 +8075,26 @@ async function copyToClipboard(text) {
 {% block title %}Вход — 101slovo{% endblock %}
 {% block content %}
 <div class="container--narrow" style="margin: 1.5rem auto;">
-  <div class="card" style="max-width: 440px; margin: 0 auto; padding: 1.5rem;">
-    <div class="text-center mb-3">
-      <div style="font-size: 2.25rem; margin-bottom: 0.375rem;">👋</div>
+  <div class="card card--auth">
+    <div class="page-header">
+      <div class="page-header__emoji">👋</div>
       <h2 style="margin: 0;">С возвращением!</h2>
-      <p style="color: var(--text-muted); margin-top: 0.375rem;">Войдите, чтобы продолжить обучение</p>
+      <p class="page-header__subtitle">Войдите, чтобы продолжить обучение</p>
     </div>
 
     {% if error %}
     <div class="flash-error">
-      <i data-lucide="alert-circle" style="width: 16px; height: 16px;"></i>
+      <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
       {{ error }}
     </div>
     {% endif %}
 
     <form method="POST" action="/login">
-      <div style="margin-bottom: 0.875rem;">
+      <div class="form-group">
         <label for="email">Email</label>
         <input type="email" id="email" name="email" value="{{ email|default('') }}" required placeholder="you@example.com">
       </div>
-      <div style="margin-bottom: 1.25rem;">
+      <div class="form-group--last">
         <label for="password">Пароль</label>
         <input type="password" id="password" name="password" required placeholder="••••••••">
       </div>
@@ -7777,34 +8114,34 @@ async function copyToClipboard(text) {
 {% block title %}Регистрация — 101slovo{% endblock %}
 {% block content %}
 <div class="container--narrow" style="margin: 1.5rem auto;">
-  <div class="card" style="max-width: 440px; margin: 0 auto; padding: 1.5rem;">
-    <div class="text-center mb-3">
-      <div style="font-size: 2.25rem; margin-bottom: 0.375rem;">🚀</div>
+  <div class="card card--auth">
+    <div class="page-header">
+      <div class="page-header__emoji">🚀</div>
       <h2 style="margin: 0;">Создать аккаунт</h2>
-      <p style="color: var(--text-muted); margin-top: 0.375rem;">Начните учить английский уже сегодня</p>
+      <p class="page-header__subtitle">Начните учить английский уже сегодня</p>
     </div>
 
     {% if error %}
     <div class="flash-error">
-      <i data-lucide="alert-circle" style="width: 16px; height: 16px;"></i>
+      <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
       {{ error }}
     </div>
     {% endif %}
 
     <form method="POST" action="/register">
-      <div style="margin-bottom: 0.875rem;">
+      <div class="form-group">
         <label for="email">Email</label>
         <input type="email" id="email" name="email" value="{{ email|default('') }}" required placeholder="you@example.com">
       </div>
-      <div style="margin-bottom: 0.875rem;">
+      <div class="form-group">
         <label for="password">Пароль (мин. 8 символов)</label>
         <input type="password" id="password" name="password" minlength="8" maxlength="72" required placeholder="••••••••">
       </div>
-      <div style="margin-bottom: 0.875rem;">
+      <div class="form-group">
         <label for="password_confirm">Повторите пароль</label>
         <input type="password" id="password_confirm" name="password_confirm" minlength="8" maxlength="72" required placeholder="••••••••">
       </div>
-      <div style="margin-bottom: 1.25rem;">
+      <div class="form-group--last">
         <label for="promo_code">Промокод (необязательно)</label>
         <input type="text" id="promo_code" name="promo_code" value="{{ ref_code|default('') }}"
                placeholder="Если вас пригласил друг" maxlength="6"
@@ -7854,7 +8191,7 @@ async function copyToClipboard(text) {
   {% block head %}{% endblock %}
 </head>
 <body>
-  <a href="#main-content" class="visually-hidden" style="position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden;">
+  <a href="#main-content" class="visually-hidden">
     Перейти к основному содержимому
   </a>
 
@@ -7891,71 +8228,69 @@ async function copyToClipboard(text) {
 {% block title %}Подписка — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+  <div class="section-header">
     <h1 style="margin: 0;">💳 Подписка</h1>
-    <a href="/billing/plans" class="secondary" style="display: inline-flex; align-items: center; gap: 0.5rem;">
-      <i data-lucide="crown" style="width: 14px; height: 14px;" aria-hidden="true"></i>
+    <a href="/billing/plans" class="secondary">
+      <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
       Тарифы
     </a>
   </div>
 
   <!-- Текущая подписка -->
-  <div class="card mb-3" style="padding: 1.25rem;">
+  <div class="card mb-3">
     <h3 style="margin-top: 0;">Текущий статус</h3>
 
     {% if subscription.is_premium %}
-      <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
-        <span class="badge badge-mastered" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">
-          <i data-lucide="crown" style="width: 12px; height: 12px;" aria-hidden="true"></i>
-          Premium активна
-        </span>
-      </div>
+    <div style="margin-bottom: 1rem;">
+      <span class="badge badge-mastered badge--md">
+        <i data-lucide="crown" class="icon-xs" aria-hidden="true"></i>
+        Premium активна
+      </span>
+    </div>
 
-      <div class="grid grid-3" style="margin-bottom: 1rem;">
-        <div>
-          <div style="color: var(--text-muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em;">Тариф</div>
-          <div style="font-weight: 700; font-size: 1.0625rem;">{{ subscription.plan }}</div>
-        </div>
-        <div>
-          <div style="color: var(--text-muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em;">Действует до</div>
-          <div style="font-weight: 700; font-size: 1.0625rem;">{{ subscription.expires_at.strftime('%d.%m.%Y') }}</div>
-        </div>
-        <div>
-          <div style="color: var(--text-muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em;">Осталось дней</div>
-          <div style="font-weight: 700; font-size: 1.0625rem;">{{ subscription.days_left }}</div>
-        </div>
+    <div class="grid grid-3" style="margin-bottom: 1rem;">
+      <div>
+        <div class="stat-row">Тариф</div>
+        <div class="stat-row__value">{{ subscription.plan }}</div>
       </div>
+      <div>
+        <div class="stat-row">Действует до</div>
+        <div class="stat-row__value">{{ subscription.expires_at.strftime('%d.%m.%Y') }}</div>
+      </div>
+      <div>
+        <div class="stat-row">Осталось дней</div>
+        <div class="stat-row__value">{{ subscription.days_left }}</div>
+      </div>
+    </div>
 
-      <div style="display: flex; gap: 0.75rem;">
-        <a href="/billing/plans" role="button">Продлить / Сменить тариф</a>
-        <form method="POST" action="/billing/cancel" style="display: inline;">
-          <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-          <button type="submit" class="secondary" onclick="return confirm('Отменить подписку? Доступ сохранится до конца оплаченного периода.')">
-            Отменить подписку
-          </button>
-        </form>
-      </div>
+    <div style="display: flex; gap: 0.75rem;">
+      <a href="/billing/plans" role="button">Продлить / Сменить тариф</a>
+      <form method="POST" action="/billing/cancel" style="display: inline;">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+        <button type="submit" class="secondary" onclick="return confirm('Отменить подписку? Доступ сохранится до конца оплаченного периода.')">
+          Отменить подписку
+        </button>
+      </form>
+    </div>
+
     {% else %}
-      <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;">
-        <span class="badge badge-active" style="font-size: 0.8125rem; padding: 0.375rem 0.75rem;">
-          Free
-        </span>
-      </div>
-      <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-        У вас бесплатный план: 1 урок в день, 5 уроков всего.
-      </p>
-      <a href="/billing/plans" role="button" style="background: var(--gradient-primary);">
-        <i data-lucide="crown" style="width: 14px; height: 14px;" aria-hidden="true"></i>
-        Подключить Premium
-      </a>
+    <div style="margin-bottom: 0.75rem;">
+      <span class="badge badge-active badge--md">Free</span>
+    </div>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+      У вас бесплатный план: 1 урок в день, 5 уроков всего.
+    </p>
+    <a href="/billing/plans" role="button" style="background: var(--gradient-primary);">
+      <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
+      Подключить Premium
+    </a>
     {% endif %}
   </div>
 
   <!-- Реферальная программа -->
-  <div class="card mb-3" style="padding: 1.25rem;">
+  <div class="card mb-3">
     <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
-      <i data-lucide="gift" style="width: 18px; height: 18px; color: var(--brand-secondary);" aria-hidden="true"></i>
+      <i data-lucide="gift" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
       Пригласи друга — получи месяц бесплатно
     </h3>
     <p style="color: var(--text-secondary); margin-bottom: 1rem;">
@@ -7965,15 +8300,13 @@ async function copyToClipboard(text) {
     </p>
 
     <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
-      <div style="background: var(--surface-100); border: 2px dashed var(--brand-primary); border-radius: var(--radius-md); padding: 0.5rem 1.25rem; font-size: 1.25rem; font-weight: 800; letter-spacing: 0.1em; color: var(--brand-primary);"
-           aria-label="Ваш промокод: {{ referral.promo_code }}">
+      <div class="promo-box" aria-label="Ваш промокод: {{ referral.promo_code }}">
         {{ referral.promo_code }}
       </div>
-      <button type="button"
-              class="secondary"
+      <button type="button" class="secondary"
               onclick="handleCopyPromo(this, '{{ referral.promo_code }}')"
               aria-label="Скопировать промокод {{ referral.promo_code }} в буфер обмена">
-        <i data-lucide="copy" style="width: 14px; height: 14px;" aria-hidden="true"></i>
+        <i data-lucide="copy" class="icon-sm" aria-hidden="true"></i>
         Скопировать
       </button>
     </div>
@@ -7995,20 +8328,17 @@ async function copyToClipboard(text) {
     </div>
     {% endif %}
   </div>
-
 </div>
 
 <script>
 async function handleCopyPromo(button, code) {
   const ok = await copyToClipboard(code);
   if (ok) {
-    button.innerHTML = '<i data-lucide="check" style="width: 14px; height: 14px;" aria-hidden="true"></i> Скопировано!';
+    button.innerHTML = '<i data-lucide="check" class="icon-sm" aria-hidden="true"></i> Скопировано!';
   } else {
-    button.innerHTML = '<i data-lucide="alert-circle" style="width: 14px; height: 14px;" aria-hidden="true"></i> Ошибка';
+    button.innerHTML = '<i data-lucide="alert-circle" class="icon-sm" aria-hidden="true"></i> Ошибка';
   }
-  if (window.lucide) {
-    lucide.createIcons();
-  }
+  if (window.lucide) { lucide.createIcons(); }
 }
 </script>
 {% endblock %}
@@ -8019,20 +8349,15 @@ async function handleCopyPromo(button, code) {
 {% block title %}Тарифы — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-
-  <div class="text-center mb-3">
-    <div style="font-size: 2.25rem; margin-bottom: 0.375rem;">👑</div>
-    <h1 style="margin: 0; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-      Premium подписка
-    </h1>
-    <p style="color: var(--text-muted); margin-top: 0.375rem; font-size: 0.9375rem;">
-      Безлимитные уроки без ограничений
-    </p>
+  <div class="page-header">
+    <div class="page-header__emoji">👑</div>
+    <h1 class="page-header__title text-gradient">Premium подписка</h1>
+    <p class="page-header__subtitle">Безлимитные уроки без ограничений</p>
   </div>
 
   {% if subscription.is_premium %}
   <div class="flash-info mb-3">
-    <i data-lucide="check-circle" style="width: 16px; height: 16px;"></i>
+    <i data-lucide="check-circle" class="icon-md" aria-hidden="true"></i>
     У вас уже активна подписка <strong>{{ subscription.plan }}</strong>
     до {{ subscription.expires_at.strftime('%d.%m.%Y') }}.
     При покупке нового тарифа оставшиеся дни будут добавлены.
@@ -8041,20 +8366,20 @@ async function handleCopyPromo(button, code) {
 
   <div class="grid grid-3" style="align-items: stretch;">
     <!-- Free -->
-    <div class="card" style="display: flex; flex-direction: column; padding: 1.5rem; border-color: var(--border-light);">
+    <div class="card pricing-card">
       <h3 style="margin-top: 0;">Free</h3>
-      <div style="font-size: 1.875rem; font-weight: 800; margin-bottom: 0.375rem;">0 ₽</div>
-      <ul style="list-style: none; padding: 0; margin: 0 0 1.25rem 0; flex: 1;">
-        <li style="padding: 0.375rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+      <div class="pricing-card__price">0 ₽</div>
+      <ul class="pricing-card__features">
+        <li>
+          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
           {{ free_daily_limit }} урок{% if free_daily_limit != 1 %}а{% endif %} в день
         </li>
-        <li style="padding: 0.375rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+        <li>
+          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
           {{ free_lessons_total }} уроков всего
         </li>
-        <li style="padding: 0.375rem 0; display: flex; align-items: center; gap: 0.5rem;">
-          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+        <li>
+          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
           До {{ words_per_lesson_max }} слов в уроке
         </li>
       </ul>
@@ -8062,20 +8387,20 @@ async function handleCopyPromo(button, code) {
     </div>
 
     <!-- Monthly -->
-    <div class="card" style="display: flex; flex-direction: column; padding: 1.5rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
+    <div class="card pricing-card pricing-card--popular">
       <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 0.75rem;">Популярный</div>
       <h3 style="margin-top: 0;">Месячная</h3>
-      <div style="font-size: 1.875rem; font-weight: 800; margin-bottom: 0.375rem;">
+      <div class="pricing-card__price">
         {{ "%.0f" | format(monthly_price) }} ₽
-        <span style="font-size: 0.9375rem; font-weight: 400; color: var(--text-muted);">/мес</span>
+        <span class="pricing-card__period">/мес</span>
       </div>
-      <ul style="list-style: none; padding: 0; margin: 0 0 1.25rem 0; flex: 1;">
-        <li style="padding: 0.375rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+      <ul class="pricing-card__features">
+        <li>
+          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
           До {{ daily_lesson_limit_max }} уроков в день
         </li>
-        <li style="padding: 0.375rem 0; display: flex; align-items: center; gap: 0.5rem;">
-          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+        <li>
+          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
           До {{ words_per_lesson_max }} слов в уроке
         </li>
       </ul>
@@ -8097,26 +8422,22 @@ async function handleCopyPromo(button, code) {
     </div>
 
     <!-- 6 Months -->
-    <div class="card" style="display: flex; flex-direction: column; padding: 1.5rem; border-color: #10b981; position: relative;">
-      <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 0.75rem;">
-        −{{ discount_percent }}%
-      </div>
+    <div class="card pricing-card pricing-card--best">
+      <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 0.75rem;">−{{ discount_percent }}%</div>
       <h3 style="margin-top: 0;">6 месяцев</h3>
-      <div style="font-size: 1.875rem; font-weight: 800; margin-bottom: 0.25rem;">
-        {{ "%.0f" | format(six_month_price) }} ₽
-      </div>
-      <div style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 0.375rem;">
+      <div class="pricing-card__price">{{ "%.0f" | format(six_month_price) }} ₽</div>
+      <div class="pricing-card__note">
         {{ "%.0f" | format(six_month_per_month) }} ₽/мес ·
         <s>{{ "%.0f" | format(six_month_full) }} ₽</s> ·
         экономия {{ "%.0f" | format(six_month_saving) }} ₽
       </div>
-      <ul style="list-style: none; padding: 0; margin: 0 0 1.25rem 0; flex: 1;">
-        <li style="padding: 0.375rem 0; border-bottom: 1px solid var(--border-light); display: flex; align-items: center; gap: 0.5rem;">
-          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+      <ul class="pricing-card__features">
+        <li>
+          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
           До {{ daily_lesson_limit_max }} уроков в день
         </li>
-        <li style="padding: 0.375rem 0; display: flex; align-items: center; gap: 0.5rem;">
-          <i data-lucide="check" style="width: 14px; height: 14px; color: #10b981;"></i>
+        <li>
+          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
           До {{ words_per_lesson_max }} слов в уроке
         </li>
       </ul>
@@ -8127,13 +8448,12 @@ async function handleCopyPromo(button, code) {
           <input type="checkbox" required style="width: auto;">
           Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
         </label>
-        <button type="submit" style="width: 100%; background: #10b981;">
+        <button type="submit" class="btn--success" style="width: 100%;">
           Подключить за {{ "%.0f" | format(six_month_price) }} ₽
         </button>
       </form>
     </div>
   </div>
-
 </div>
 {% endblock %}
 ### end of app/templates/billing/plans.html ########################################################################
@@ -8152,28 +8472,28 @@ async function handleCopyPromo(button, code) {
 
   <!-- Subscription banner -->
   {% if subscription.is_premium %}
-    <div class="flash-info mb-3" style="border-color: var(--bg-info-border); background: var(--bg-info);" role="status">
-      <i data-lucide="crown" style="width: 16px; height: 16px; color: var(--brand-primary);" aria-hidden="true"></i>
-      <span>
-        <strong>Premium</strong> активна до {{ subscription.expires_at.strftime('%d.%m.%Y') }}
-        ({{ subscription.days_left }} дн.)
-      </span>
-      <a href="/billing" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Управление →</a>
-    </div>
+  <div class="flash-info mb-3" role="status">
+    <i data-lucide="crown" class="icon-md" style="color: var(--brand-primary);" aria-hidden="true"></i>
+    <span>
+      <strong>Premium</strong> активна до {{ subscription.expires_at.strftime('%d.%m.%Y') }}
+      ({{ subscription.days_left }} дн.)
+    </span>
+    <a href="/billing" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Управление →</a>
+  </div>
   {% elif paywall.paywall_triggered %}
-    <div class="flash-warning mb-3" role="alert">
-      <i data-lucide="alert-triangle" style="width: 16px; height: 16px;" aria-hidden="true"></i>
-      <span>Бесплатные уроки исчерпаны.</span>
-      <a href="/billing/plans" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Подключить Premium →</a>
-    </div>
+  <div class="flash-warning mb-3" role="alert">
+    <i data-lucide="alert-triangle" class="icon-md" aria-hidden="true"></i>
+    <span>Бесплатные уроки исчерпаны.</span>
+    <a href="/billing/plans" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Подключить Premium →</a>
+  </div>
   {% elif paywall.free_lessons_remaining is not none %}
-    <div class="flash-info mb-3" style="background: var(--bg-info);" role="status">
-      <i data-lucide="info" style="width: 16px; height: 16px;" aria-hidden="true"></i>
-      <span>Осталось бесплатных уроков: <strong>{{ paywall.free_lessons_remaining }}</strong> из {{ paywall.free_lessons_total }}</span>
-    </div>
+  <div class="flash-info mb-3" role="status">
+    <i data-lucide="info" class="icon-md" aria-hidden="true"></i>
+    <span>Осталось бесплатных уроков: <strong>{{ paywall.free_lessons_remaining }}</strong> из {{ paywall.free_lessons_total }}</span>
+  </div>
   {% endif %}
 
-  <!-- Stats Grid (компактный, не сворачивается в 1 колонку) -->
+  <!-- Stats Grid -->
   <div class="grid grid-3 grid-3--stats mb-3">
     <div class="stat-card stat-card--compact">
       <div class="stat-card__icon stat-card__icon--fire" aria-hidden="true">🔥</div>
@@ -8200,9 +8520,9 @@ async function handleCopyPromo(button, code) {
         <div class="stat-card__label">Уроков сегодня</div>
         <div class="stat-card__sublabel">
           {% if lessons_today >= paywall.effective_daily_limit %}
-            Лимит достигнут ✓
+          Лимит достигнут ✓
           {% else %}
-            Осталось: {{ paywall.effective_daily_limit - lessons_today }}
+          Осталось: {{ paywall.effective_daily_limit - lessons_today }}
           {% endif %}
         </div>
       </div>
@@ -8213,41 +8533,35 @@ async function handleCopyPromo(button, code) {
   {% if paywall.paywall_triggered %}
     {% include "partials/paywall.html" %}
   {% elif cta == 'resume' %}
-    <div class="cta-section" style="background: var(--gradient-warning);">
-      <h3>⏳ У вас есть незавершённый урок!</h3>
-      <p>Продолжайте с того места, где остановились</p>
-      <a href="/lesson/{{ cta_lesson_id }}" role="button">
-        Продолжить урок →
-      </a>
-    </div>
+  <div class="cta-section" style="background: var(--gradient-warning);">
+    <h3>⏳ У вас есть незавершённый урок!</h3>
+    <p>Продолжайте с того места, где остановились</p>
+    <a href="/lesson/{{ cta_lesson_id }}" role="button">Продолжить урок →</a>
+  </div>
   {% elif cta == 'limit_reached' %}
-    <div class="cta-section" style="background: var(--gradient-success);">
-      <h3>🎉 Отличная работа!</h3>
-      <p>Лимит уроков на сегодня исчерпан. Отдохните — завтра новые вызовы!</p>
-      <a href="/vocabulary" role="button">Повторить слова</a>
-    </div>
+  <div class="cta-section" style="background: var(--gradient-success);">
+    <h3>🎉 Отличная работа!</h3>
+    <p>Лимит уроков на сегодня исчерпан. Отдохните — завтра новые вызовы!</p>
+    <a href="/vocabulary" role="button">Повторить слова</a>
+  </div>
   {% else %}
-    <div class="cta-section">
-      <h3>🚀 Начнём новый урок?</h3>
-      <p>Подберём слова специально для вашего уровня</p>
-      <a href="/lesson/preview" role="button">
-        Подготовиться к уроку
-      </a>
-    </div>
+  <div class="cta-section">
+    <h3>🚀 Начнём новый урок?</h3>
+    <p>Подберём слова специально для вашего уровня</p>
+    <a href="/lesson/preview" role="button">Подготовиться к уроку</a>
+  </div>
   {% endif %}
 
   {% if in_progress_lesson %}
-  <div class="card mt-3" style="background: var(--surface-0);">
-    <div style="display: flex; justify-content: space-between; align-items: center;">
+  <div class="card mt-3">
+    <div class="section-header" style="margin-bottom: 0;">
       <div>
         <h4 style="margin: 0 0 0.25rem 0;">📝 Незавершённый урок #{{ in_progress_lesson.lesson_number }}</h4>
         <p style="margin: 0; color: var(--text-muted); font-size: 0.8125rem;">
           Начат {{ in_progress_lesson.started_at.strftime('%d.%m.%Y в %H:%M') }}
         </p>
       </div>
-      <a href="/lesson/{{ in_progress_lesson.id }}" role="button" class="secondary">
-        Продолжить
-      </a>
+      <a href="/lesson/{{ in_progress_lesson.id }}" role="button" class="secondary">Продолжить</a>
     </div>
   </div>
   {% endif %}
@@ -8260,10 +8574,10 @@ async function handleCopyPromo(button, code) {
 {% extends "base.html" %}
 {% block title %}403 Доступ запрещен{% endblock %}
 {% block content %}
-<div style="text-align: center; margin-top: 4rem;">
-    <h1>403</h1>
-    <p>Доступ запрещен. Возможно, проблема с сессией или CSRF-токеном.</p>
-    <a href="/">Вернуться на главную</a>
+<div class="error-page">
+  <h1>403</h1>
+  <p>Доступ запрещен. Возможно, проблема с сессией или CSRF-токеном.</p>
+  <a href="/" role="button" class="secondary">Вернуться на главную</a>
 </div>
 {% endblock %}
 ### end of app/templates/errors/403.html ########################################################################
@@ -8272,10 +8586,10 @@ async function handleCopyPromo(button, code) {
 {% extends "base.html" %}
 {% block title %}404 Не найдено{% endblock %}
 {% block content %}
-<div style="text-align: center; margin-top: 4rem;">
-    <h1>404</h1>
-    <p>Страница не найдена.</p>
-    <a href="/">Вернуться на главную</a>
+<div class="error-page">
+  <h1>404</h1>
+  <p>Страница не найдена.</p>
+  <a href="/" role="button" class="secondary">Вернуться на главную</a>
 </div>
 {% endblock %}
 ### end of app/templates/errors/404.html ########################################################################
@@ -8284,10 +8598,10 @@ async function handleCopyPromo(button, code) {
 {% extends "base.html" %}
 {% block title %}500 Ошибка сервера{% endblock %}
 {% block content %}
-<div style="text-align: center; margin-top: 4rem;">
-    <h1>500</h1>
-    <p>Внутренняя ошибка сервера. Мы уже работаем над этим.</p>
-    <a href="/">Вернуться на главную</a>
+<div class="error-page">
+  <h1>500</h1>
+  <p>Внутренняя ошибка сервера. Мы уже работаем над этим.</p>
+  <a href="/" role="button" class="secondary">Вернуться на главную</a>
 </div>
 {% endblock %}
 ### end of app/templates/errors/500.html ########################################################################
@@ -8296,14 +8610,16 @@ async function handleCopyPromo(button, code) {
 {% extends "base.html" %}
 {% block title %}503 Сервис недоступен{% endblock %}
 {% block content %}
-<div style="text-align: center; margin-top: 4rem;">
-    <h1>503</h1>
-    <p>Сервис генерации временно недоступен.</p>
-    {% if error %}
-    <p><small>{{ error }}</small></p>
-    {% endif %}
+<div class="error-page">
+  <h1>503</h1>
+  <p>Сервис генерации временно недоступен.</p>
+  {% if error %}
+  <p><small>{{ error }}</small></p>
+  {% endif %}
+  <div style="display: flex; gap: 0.75rem; justify-content: center; margin-top: 1rem;">
     <a href="javascript:location.reload()" role="button">🔄 Повторить</a>
     <a href="/dashboard" role="button" class="secondary">На дашборд</a>
+  </div>
 </div>
 {% endblock %}
 ### end of app/templates/errors/503.html ########################################################################
@@ -8316,14 +8632,12 @@ async function handleCopyPromo(button, code) {
 
   <!-- Hero -->
   <div style="padding: 2rem 0.5rem;">
-    <span class="badge badge-active" style="font-size: 0.8125rem; padding: 0.375rem 0.875rem; margin-bottom: 1rem;">
-      🚀 Powered by GigaChat AI
-    </span>
+    
     <h1 style="font-size: 2.25rem; line-height: 1.15; margin-bottom: 1rem; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-      Забудь зубрёжку.<br>Учи слова в контексте.
+      Забудь зубрёжку.<br>Изучай слова в контексте.
     </h1>
     <p style="font-size: 1.0625rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 1.75rem auto; line-height: 1.5;">
-      101slovo генерирует персонализированные предложения с помощью ИИ и использует интервальное повторение (SRS), чтобы слова запоминались навсегда.
+      101slovo генерирует упражнения для интервального повторения слов в контексте, чтобы слова запоминались навсегда.
     </p>
     <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
       <a href="/register" role="button" class="btn-lg" style="padding: 0.75rem 1.75rem; font-size: 1rem;">
@@ -8349,14 +8663,14 @@ async function handleCopyPromo(button, code) {
         <i data-lucide="sparkles" style="width: 22px; height: 22px;"></i>
       </div>
       <h3>Контекст от ИИ</h3>
-      <p style="color: var(--text-secondary);">GigaChat создаёт уникальные, естественные предложения специально для твоего уровня (A1–C2).</p>
+      <p style="color: var(--text-secondary);">ИИ создаёт уникальные, естественные предложения со словами твоего урока специально для твоего уровня (A1–C2).</p>
     </div>
     <div class="card">
       <div class="stat-card__icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
         <i data-lucide="target" style="width: 22px; height: 22px;"></i>
       </div>
       <h3>Тематические словари</h3>
-      <p style="color: var(--text-secondary);">Выбирай общий, IT или travel словарь. Учи только то, что реально нужно тебе.</p>
+      <p style="color: var(--text-secondary);">Выбирай общий, IT или travel словарь. Изучай то, что реально нужно тебе.</p>
     </div>
   </div>
 
@@ -9232,10 +9546,7 @@ button[type="submit"] {
                 Упражнение {{ exercise.order_index + 1 }}
             </p>
         </div>
-        <a href="/dashboard" class="secondary" style="padding: 0.5rem 1rem;" aria-label="Завершить урок и вернуться на дашборд">
-            <i data-lucide="x" style="width: 16px; height: 16px;" aria-hidden="true"></i>
-            Завершить
-        </a>
+        
     </div>
 
     <div id="exercise-container" translate="no" aria-live="polite" aria-atomic="true">
@@ -9496,14 +9807,9 @@ button[type="submit"] {
           Подготовка к уроку
         </span>
       </h1>
-      <p style="color: var(--text-muted); margin: 0.375rem 0 0 0; font-size: 0.9375rem;">
-        Мы подобрали слова специально для вашего уровня
-      </p>
+      
     </div>
-    <a href="/dashboard" class="secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.875rem;">
-      <i data-lucide="x" style="width: 14px; height: 14px;"></i>
-      Отмена
-    </a>
+    
   </div>
 
   {% if error %}
@@ -9732,164 +10038,43 @@ button[type="submit"] {
 {% set free_daily_limit = settings.FREE_LESSON_PER_DAY_LIMIT if settings else 1 %}
 
 <div class="container--narrow" style="margin: 0 auto;">
-
-  <!-- Заголовок -->
-  <div class="text-center mb-3">
-    <div style="font-size: 2.5rem; margin-bottom: 0.375rem;">🎯</div>
-    <h1 style="margin: 0; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-      Настройка профиля
-    </h1>
-    <p style="color: var(--text-muted); margin-top: 0.375rem; font-size: 0.9375rem;">
+  <div class="page-header">
+    <div class="page-header__emoji">🎯</div>
+    <h1 class="page-header__title text-gradient">Настройка профиля</h1>
+    <p class="page-header__subtitle">
       Это займёт всего минуту, чтобы мы подобрали идеальные слова для вас.
     </p>
   </div>
 
   {% if error %}
   <div class="flash-error">
-    <i data-lucide="alert-circle" style="width: 16px; height: 16px; flex-shrink: 0;"></i>
+    <i data-lucide="alert-circle" class="icon-md" style="flex-shrink: 0;" aria-hidden="true"></i>
     <span>{{ error }}</span>
   </div>
   {% endif %}
 
-  <form method="POST" action="/onboarding/complete">
-    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-
-    <!-- 1. Уровень -->
-    <div class="card mb-3" style="padding: 1.125rem;">
-      <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-        <i data-lucide="graduation-cap" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
-        <strong>1. Ваш уровень английского</strong>
-      </label>
-      <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;">
-        {% for lvl in levels %}
-        <label class="level-option"
-               x-data="{ checked: '{{ selected_level }}' === '{{ lvl }}' }"
-               :class="{ 'level-option--active': checked }"
-               @click="checked = true; $el.querySelector('input').checked = true; $el.querySelectorAll('input').forEach(i => i.dispatchEvent(new Event('change', {bubbles: true})))">
-          <input type="radio" name="level" value="{{ lvl }}" required
-                 {% if selected_level == lvl %}checked{% endif %}
-                 style="position: absolute; opacity: 0; pointer-events: none;">
-          <span style="font-weight: 700; font-size: 1.0625rem;">{{ lvl }}</span>
-        </label>
-        {% endfor %}
-      </div>
-    </div>
-
-    <!-- 2. Словарь -->
-    <div class="card mb-3" style="padding: 1.125rem;">
-      <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-        <i data-lucide="book" style="width: 18px; height: 18px; color: var(--brand-secondary);"></i>
-        <strong>2. Тематический словарь</strong>
-      </label>
-      <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;">
-        {% for dict in dictionaries %}
-        <label class="dict-option"
-               x-data="{ checked: '{{ selected_dictionary }}' === '{{ dict.code }}' }"
-               :class="{ 'dict-option--active': checked }"
-               @click="checked = true; $el.querySelector('input').checked = true">
-          <input type="radio" name="dictionary_code" value="{{ dict.code }}" required
-                 {% if selected_dictionary == dict.code %}checked{% endif %}
-                 style="position: absolute; opacity: 0; pointer-events: none;">
-          <span style="font-weight: 600;">{{ dict.name }}</span>
-        </label>
-        {% endfor %}
-      </div>
-    </div>
-
-    <!-- 3. Слов в уроке -->
-    <div class="card mb-3" style="padding: 1.125rem;" x-data="{ val: {{ words_value }} }">
-      <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-        <i data-lucide="type" style="width: 18px; height: 18px; color: #10b981;"></i>
-        <strong>3. Слов в одном уроке:</strong>
-        <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
-      </label>
-      <input type="range" name="words_per_lesson"
-             min="{{ words_min }}" max="{{ words_max }}"
-             value="{{ words_value }}" required
-             @input="val = $event.target.value"
-             style="width: 100%;">
-      <div style="display: flex; justify-content: space-between; font-size: 0.6875rem; color: var(--text-muted); margin-top: 0.25rem;">
-        <span>{{ words_min }}</span>
-        <span>{{ words_max }}</span>
-      </div>
-    </div>
-
-    <!-- 4. Уроков в день -->
-    <div class="card mb-3" style="padding: 1.125rem;" x-data="{ val: {{ limit_value }} }">
-      <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-        <i data-lucide="calendar" style="width: 18px; height: 18px; color: #f59e0b;"></i>
-        <strong>4. Уроков в день:</strong>
-        <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
-      </label>
-      <input type="range" name="daily_lesson_limit"
-             min="1" max="{{ limit_max }}"
-             value="{{ limit_value }}" required
-             @input="val = $event.target.value"
-             style="width: 100%;">
-      <div style="display: flex; align-items: flex-start; gap: 0.5rem; margin-top: 0.625rem; padding: 0.5rem 0.75rem; background: rgba(59, 130, 246, 0.06); border: 1px solid rgba(59, 130, 246, 0.15); border-radius: var(--radius-md); font-size: 0.75rem; color: var(--text-secondary);">
-        <i data-lucide="info" style="width: 13px; height: 13px; flex-shrink: 0; margin-top: 1px; color: #3b82f6;"></i>
-        <span>
-          На бесплатном тарифе доступен <strong>{{ free_daily_limit }} урок в день</strong>.
-          Выбранный лимит (<span x-text="val" style="font-weight: 600;"></span>) будет действовать при подключении <strong>Premium</strong>.
-        </span>
-      </div>
-    </div>
-
-    <!-- Кнопка отправки -->
-    <button type="submit" class="btn-lg" style="width: 100%; padding: 0.875rem;">
-      <i data-lucide="rocket" style="width: 18px; height: 18px;"></i>
-      Сохранить и начать обучение
-    </button>
-  </form>
-
+  {% include "partials/settings_form.html" with context %}
 </div>
-
-<style>
-  .level-option, .dict-option {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.75rem;
-    background: var(--surface-50);
-    border: 2px solid var(--border-light);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    text-align: center;
-    color: var(--text-secondary);
-  }
-  .level-option:hover, .dict-option:hover {
-    border-color: var(--brand-primary-light);
-    background: var(--surface-0);
-    transform: translateY(-1px);
-  }
-  .level-option--active, .dict-option--active {
-    border-color: var(--brand-primary) !important;
-    background: rgba(99, 102, 241, 0.08) !important;
-    color: var(--brand-primary) !important;
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
-  }
-</style>
 {% endblock %}
 ### end of app/templates/onboarding.html ########################################################################
 
 ### app/templates/partials/flash.html ########################################################################
 {% if request.state.flashes %}
 <div class="container" style="margin-top: 1.5rem;" aria-live="polite" aria-atomic="true">
-    {% for flash in request.state.flashes %}
-    <div class="flash-{{ flash.category }}" role="alert">
-        {% if flash.category == 'success' %}
-        <i data-lucide="check-circle" style="width: 20px; height: 20px; flex-shrink: 0;" aria-hidden="true"></i>
-        {% elif flash.category == 'error' %}
-        <i data-lucide="alert-circle" style="width: 20px; height: 20px; flex-shrink: 0;" aria-hidden="true"></i>
-        {% elif flash.category == 'info' %}
-        <i data-lucide="info" style="width: 20px; height: 20px; flex-shrink: 0;" aria-hidden="true"></i>
-        {% elif flash.category == 'warning' %}
-        <i data-lucide="alert-triangle" style="width: 20px; height: 20px; flex-shrink: 0;" aria-hidden="true"></i>
-        {% endif %}
-        <span>{{ flash.message }}</span>
-    </div>
-    {% endfor %}
+  {% for flash in request.state.flashes %}
+  <div class="flash-{{ flash.category }}" role="alert">
+    {% if flash.category == 'success' %}
+    <i data-lucide="check-circle" class="icon-xl" style="flex-shrink: 0;" aria-hidden="true"></i>
+    {% elif flash.category == 'error' %}
+    <i data-lucide="alert-circle" class="icon-xl" style="flex-shrink: 0;" aria-hidden="true"></i>
+    {% elif flash.category == 'info' %}
+    <i data-lucide="info" class="icon-xl" style="flex-shrink: 0;" aria-hidden="true"></i>
+    {% elif flash.category == 'warning' %}
+    <i data-lucide="alert-triangle" class="icon-xl" style="flex-shrink: 0;" aria-hidden="true"></i>
+    {% endif %}
+    <span>{{ flash.message }}</span>
+  </div>
+  {% endfor %}
 </div>
 {% endif %}
 ### end of app/templates/partials/flash.html ########################################################################
@@ -10064,7 +10249,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 ### app/templates/partials/paywall.html ########################################################################
 {# Пейволл — показывается когда бесплатные уроки исчерпаны #}
-<div class="card text-center" style="padding: 2rem 1.5rem; border-color: rgba(99, 102, 241, 0.3);">
+<div class="card text-center card--spacious" style="border-color: rgba(99, 102, 241, 0.3);">
   <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">🔒</div>
   <h3 style="margin-bottom: 0.375rem;">Бесплатные уроки исчерпаны</h3>
   <p style="color: var(--text-muted); margin-bottom: 0.375rem;">
@@ -10075,16 +10260,120 @@ document.addEventListener('DOMContentLoaded', function() {
   </p>
   <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
     <a href="/billing/plans" role="button" class="btn-lg" style="background: var(--gradient-primary);">
-      <i data-lucide="crown" style="width: 16px; height: 16px;"></i>
+      <i data-lucide="crown" class="icon-md" aria-hidden="true"></i>
       Подключить Premium
     </a>
     <a href="/vocabulary" role="button" class="secondary btn-lg">
-      <i data-lucide="book" style="width: 16px; height: 16px;"></i>
+      <i data-lucide="book" class="icon-md" aria-hidden="true"></i>
       Повторить слова
     </a>
   </div>
 </div>
 ### end of app/templates/partials/paywall.html ########################################################################
+
+### app/templates/partials/settings_form.html ########################################################################
+{#
+  Общая форма настроек (уровень, словарь, слова, лимит).
+  Параметры:
+    form_action  — URL для method="POST"
+    submit_text  — текст кнопки
+    submit_icon  — имя иконки Lucide для кнопки
+#}
+<form method="POST" action="{{ form_action }}">
+  <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+
+  <!-- 1. Уровень -->
+  <div class="card card--settings mb-3">
+    <label class="section-header" style="margin-bottom: 0.75rem;">
+      <span style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; color: var(--text-primary);">
+        <i data-lucide="graduation-cap" class="icon-lg" style="color: var(--brand-primary);" aria-hidden="true"></i>
+        <strong>1. Ваш уровень английского</strong>
+      </span>
+    </label>
+    <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;">
+      {% for lvl in levels %}
+      <label class="option-card"
+             x-data="{ checked: '{{ selected_level }}' === '{{ lvl }}' }"
+             :class="{ 'option-card--active': checked }"
+             @click="checked = true; $el.querySelector('input').checked = true; $el.querySelectorAll('input').forEach(i => i.dispatchEvent(new Event('change', {bubbles: true})))">
+        <input type="radio" name="level" value="{{ lvl }}" required
+               {% if selected_level == lvl %}checked{% endif %}
+               style="position: absolute; opacity: 0; pointer-events: none;">
+        <span style="font-weight: 700; font-size: 1.0625rem;">{{ lvl }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- 2. Словарь -->
+  <div class="card card--settings mb-3">
+    <label class="section-header" style="margin-bottom: 0.75rem;">
+      <span style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; color: var(--text-primary);">
+        <i data-lucide="book" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
+        <strong>2. Тематический словарь</strong>
+      </span>
+    </label>
+    <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;">
+      {% for dict in dictionaries %}
+      <label class="option-card"
+             x-data="{ checked: '{{ selected_dictionary }}' === '{{ dict.code }}' }"
+             :class="{ 'option-card--active': checked }"
+             @click="checked = true; $el.querySelector('input').checked = true">
+        <input type="radio" name="dictionary_code" value="{{ dict.code }}" required
+               {% if selected_dictionary == dict.code %}checked{% endif %}
+               style="position: absolute; opacity: 0; pointer-events: none;">
+        <span style="font-weight: 600;">{{ dict.name }}</span>
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- 3. Слов в уроке -->
+  <div class="card card--settings mb-3" x-data="{ val: {{ words_value }} }">
+    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
+      <i data-lucide="type" class="icon-lg" style="color: var(--color-success);" aria-hidden="true"></i>
+      <strong>3. Слов в одном уроке:</strong>
+      <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
+    </label>
+    <input type="range" name="words_per_lesson"
+           min="{{ words_min }}" max="{{ words_max }}"
+           value="{{ words_value }}" required
+           @input="val = $event.target.value"
+           style="width: 100%;">
+    <div style="display: flex; justify-content: space-between; font-size: 0.6875rem; color: var(--text-muted); margin-top: 0.25rem;">
+      <span>{{ words_min }}</span>
+      <span>{{ words_max }}</span>
+    </div>
+  </div>
+
+  <!-- 4. Уроков в день -->
+  <div class="card card--settings mb-3" x-data="{ val: {{ limit_value }} }">
+    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
+      <i data-lucide="calendar" class="icon-lg" style="color: var(--color-warning);" aria-hidden="true"></i>
+      <strong>4. Уроков в день:</strong>
+      <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
+    </label>
+    <input type="range" name="daily_lesson_limit"
+           min="1" max="{{ limit_max }}"
+           value="{{ limit_value }}" required
+           @input="val = $event.target.value"
+           style="width: 100%;">
+    <div class="info-box" style="margin-top: 0.625rem;">
+      <i data-lucide="info" class="icon-sm" style="flex-shrink: 0; margin-top: 1px; color: var(--color-info);" aria-hidden="true"></i>
+      <span>
+        На бесплатном тарифе доступен <strong>{{ free_daily_limit }} урок в день</strong>.
+        Выбранный лимит (<span x-text="val" style="font-weight: 600;"></span>) будет действовать при подключении <strong>Premium</strong>.
+      </span>
+    </div>
+  </div>
+
+  <!-- Кнопка отправки -->
+  <button type="submit" class="btn-lg" style="width: 100%; padding: 0.875rem;">
+    <i data-lucide="{{ submit_icon }}" class="icon-lg" aria-hidden="true"></i>
+    {{ submit_text }}
+  </button>
+</form>
+### end of app/templates/partials/settings_form.html ########################################################################
 
 ### app/templates/partials/spinner.html ########################################################################
 <span class="htmx-indicator" id="{{ spinner_id | default('spinner') }}">
@@ -10107,144 +10396,23 @@ document.addEventListener('DOMContentLoaded', function() {
 {% set free_daily_limit = settings.FREE_LESSON_PER_DAY_LIMIT if settings else 1 %}
 
 <div class="container--narrow" style="margin: 0 auto;">
-
-  <!-- Заголовок -->
-  <div class="text-center mb-3">
-    <div style="font-size: 2.5rem; margin-bottom: 0.375rem;">⚙️</div>
-    <h1 style="margin: 0; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-      Настройки
-    </h1>
-    <p style="color: var(--text-muted); margin-top: 0.375rem; font-size: 0.9375rem;">
+  <div class="page-header">
+    <div class="page-header__emoji">⚙️</div>
+    <h1 class="page-header__title text-gradient">Настройки</h1>
+    <p class="page-header__subtitle">
       Настройте обучение под себя — изменения применятся к следующим урокам.
     </p>
   </div>
 
   {% if error %}
   <div class="flash-error">
-    <i data-lucide="alert-circle" style="width: 16px; height: 16px; flex-shrink: 0;"></i>
+    <i data-lucide="alert-circle" class="icon-md" style="flex-shrink: 0;" aria-hidden="true"></i>
     <span>{{ error }}</span>
   </div>
   {% endif %}
 
-  <form method="POST" action="/settings">
-    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-
-    <!-- 1. Уровень -->
-    <div class="card mb-3" style="padding: 1.125rem;">
-      <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-        <i data-lucide="graduation-cap" style="width: 18px; height: 18px; color: var(--brand-primary);"></i>
-        <strong>1. Ваш уровень английского</strong>
-      </label>
-      <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;">
-        {% for lvl in levels %}
-        <label class="level-option"
-               x-data="{ checked: '{{ selected_level }}' === '{{ lvl }}' }"
-               :class="{ 'level-option--active': checked }"
-               @click="checked = true; $el.querySelector('input').checked = true">
-          <input type="radio" name="level" value="{{ lvl }}" required
-                 {% if selected_level == lvl %}checked{% endif %}
-                 style="position: absolute; opacity: 0; pointer-events: none;">
-          <span style="font-weight: 700; font-size: 1.0625rem;">{{ lvl }}</span>
-        </label>
-        {% endfor %}
-      </div>
-    </div>
-
-    <!-- 2. Словарь -->
-    <div class="card mb-3" style="padding: 1.125rem;">
-      <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-        <i data-lucide="book" style="width: 18px; height: 18px; color: var(--brand-secondary);"></i>
-        <strong>2. Тематический словарь</strong>
-      </label>
-      <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;">
-        {% for dict in dictionaries %}
-        <label class="dict-option"
-               x-data="{ checked: '{{ selected_dictionary }}' === '{{ dict.code }}' }"
-               :class="{ 'dict-option--active': checked }"
-               @click="checked = true; $el.querySelector('input').checked = true">
-          <input type="radio" name="dictionary_code" value="{{ dict.code }}" required
-                 {% if selected_dictionary == dict.code %}checked{% endif %}
-                 style="position: absolute; opacity: 0; pointer-events: none;">
-          <span style="font-weight: 600;">{{ dict.name }}</span>
-        </label>
-        {% endfor %}
-      </div>
-    </div>
-
-    <!-- 3. Слов в уроке -->
-    <div class="card mb-3" style="padding: 1.125rem;" x-data="{ val: {{ words_value }} }">
-      <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-        <i data-lucide="type" style="width: 18px; height: 18px; color: #10b981;"></i>
-        <strong>3. Слов в одном уроке:</strong>
-        <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
-      </label>
-      <input type="range" name="words_per_lesson"
-             min="{{ words_min }}" max="{{ words_max }}"
-             value="{{ words_value }}" required
-             @input="val = $event.target.value"
-             style="width: 100%;">
-      <div style="display: flex; justify-content: space-between; font-size: 0.6875rem; color: var(--text-muted); margin-top: 0.25rem;">
-        <span>{{ words_min }}</span>
-        <span>{{ words_max }}</span>
-      </div>
-    </div>
-
-    <!-- 4. Уроков в день -->
-    <div class="card mb-3" style="padding: 1.125rem;" x-data="{ val: {{ limit_value }} }">
-      <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-        <i data-lucide="calendar" style="width: 18px; height: 18px; color: #f59e0b;"></i>
-        <strong>4. Уроков в день:</strong>
-        <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
-      </label>
-      <input type="range" name="daily_lesson_limit"
-             min="1" max="{{ limit_max }}"
-             value="{{ limit_value }}" required
-             @input="val = $event.target.value"
-             style="width: 100%;">
-      <div style="display: flex; align-items: flex-start; gap: 0.5rem; margin-top: 0.625rem; padding: 0.5rem 0.75rem; background: rgba(59, 130, 246, 0.06); border: 1px solid rgba(59, 130, 246, 0.15); border-radius: var(--radius-md); font-size: 0.75rem; color: var(--text-secondary);">
-        <i data-lucide="info" style="width: 13px; height: 13px; flex-shrink: 0; margin-top: 1px; color: #3b82f6;"></i>
-        <span>
-          На бесплатном тарифе доступен <strong>{{ free_daily_limit }} урок в день</strong>.
-          Выбранный лимит (<span x-text="val" style="font-weight: 600;"></span>) будет действовать при подключении <strong>Premium</strong>.
-        </span>
-      </div>
-    </div>
-
-    <!-- Кнопка отправки -->
-    <button type="submit" class="btn-lg" style="width: 100%; padding: 0.875rem;">
-      <i data-lucide="save" style="width: 18px; height: 18px;"></i>
-      Сохранить настройки
-    </button>
-  </form>
-
+  {% include "partials/settings_form.html" with context %}
 </div>
-
-<style>
-  .level-option, .dict-option {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.75rem;
-    background: var(--surface-50);
-    border: 2px solid var(--border-light);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    text-align: center;
-    color: var(--text-secondary);
-  }
-  .level-option:hover, .dict-option:hover {
-    border-color: var(--brand-primary-light);
-    background: var(--surface-0);
-    transform: translateY(-1px);
-  }
-  .level-option--active, .dict-option--active {
-    border-color: var(--brand-primary) !important;
-    background: rgba(99, 102, 241, 0.08) !important;
-    color: var(--brand-primary) !important;
-    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
-  }
-</style>
 {% endblock %}
 ### end of app/templates/settings.html ########################################################################
 
@@ -10597,55 +10765,54 @@ function vocabPage() {
 ### app/templates/vocabulary/word.html ########################################################################
 {% extends "base.html" %}
 {% block title %}{{ word.lemma }} — 101slovo{% endblock %}
-
 {% block content %}
-<div style="max-width: 700px; margin: 2rem auto;">
-    <p><a href="/vocabulary">← К словарю</a></p>
+<div class="container--narrow" style="margin: 2rem auto;">
+  <p><a href="/vocabulary">← К словарю</a></p>
 
-    {# Информация о слове #}
-    <div class="card" style="margin-bottom: 1.5rem;">
-        <h2 style="margin-top: 0;">
-            {{ word.lemma }}
-            {% if word.level %}<span class="badge badge-active">{{ word.level }}</span>{% endif %}
-        </h2>
-        <p><strong>Часть речи:</strong> {{ word.pos }}</p>
-        <p><strong>Переводы:</strong> {{ word.translations | join(', ') }}</p>
-        <p>
-            <strong>Словари:</strong>
-            {% if word.in_general %}<span class="badge badge-active">general</span>{% endif %}
-            {% if word.in_it %}<span class="badge badge-active">it</span>{% endif %}
-            {% if word.in_travel %}<span class="badge badge-active">travel</span>{% endif %}
-        </p>
+  {# Информация о слове #}
+  <div class="card mb-3">
+    <h2 style="margin-top: 0;">
+      {{ word.lemma }}
+      {% if word.level %}<span class="badge badge-active">{{ word.level }}</span>{% endif %}
+    </h2>
+    <p><strong>Часть речи:</strong> {{ word.pos }}</p>
+    <p><strong>Переводы:</strong> {{ word.translations | join(', ') }}</p>
+    <p>
+      <strong>Словари:</strong>
+      {% if word.in_general %}<span class="badge badge-active">general</span>{% endif %}
+      {% if word.in_it %}<span class="badge badge-active">it</span>{% endif %}
+      {% if word.in_travel %}<span class="badge badge-active">travel</span>{% endif %}
+    </p>
+  </div>
+
+  {# Статус обучения #}
+  <div class="card mb-3">
+    <h4 style="margin-top: 0;">Статус обучения</h4>
+    {% if user_word %}
+    <p><strong>Статус:</strong> <span class="badge badge-{{ user_word.status }}">{{ user_word.status }}</span></p>
+    <p><strong>Стадия:</strong> {{ user_word.stage }} / 6</p>
+    {% if user_word.status == 'active' and user_word.due_lesson_number is not none %}
+    <p><strong>Повторение:</strong>
+      {% if due_in_lessons == 0 %}
+      доступно сейчас
+      {% else %}
+      через {{ due_in_lessons }} уроков
+      {% endif %}
+    </p>
+    {% endif %}
+    {% if user_word.last_reviewed_at %}
+    <p><strong>Последнее повторение:</strong> {{ user_word.last_reviewed_at.strftime('%d.%m.%Y %H:%M') }}</p>
+    {% endif %}
+    <p><strong>Источник:</strong> {{ user_word.source }}</p>
+    {% else %}
+    <p style="color: var(--text-muted);">Это слово ещё не добавлено в ваш словарь.</p>
+    {% endif %}
+
+    {# Кнопки действий (обновляются через HTMX) #}
+    <div class="word-actions">
+      {% include "vocabulary/_word_actions.html" %}
     </div>
-
-    {# Статус обучения #}
-    <div class="card" style="margin-bottom: 1.5rem;">
-        <h4 style="margin-top: 0;">Статус обучения</h4>
-        {% if user_word %}
-            <p><strong>Статус:</strong> <span class="badge badge-{{ user_word.status }}">{{ user_word.status }}</span></p>
-            <p><strong>Стадия:</strong> {{ user_word.stage }} / 6</p>
-            {% if user_word.status == 'active' and user_word.due_lesson_number is not none %}
-            <p><strong>Повторение:</strong>
-                {% if due_in_lessons == 0 %}
-                    доступно сейчас
-                {% else %}
-                    через {{ due_in_lessons }} уроков
-                {% endif %}
-            </p>
-            {% endif %}
-            {% if user_word.last_reviewed_at %}
-            <p><strong>Последнее повторение:</strong> {{ user_word.last_reviewed_at.strftime('%d.%m.%Y %H:%M') }}</p>
-            {% endif %}
-            <p><strong>Источник:</strong> {{ user_word.source }}</p>
-        {% else %}
-            <p style="color: var(--text-muted);">Это слово ещё не добавлено в ваш словарь.</p>
-        {% endif %}
-
-        {# Кнопки действий (обновляются через HTMX) #}
-        <div class="word-actions">
-            {% include "vocabulary/_word_actions.html" %}
-        </div>
-    </div>
+  </div>
 </div>
 {% endblock %}
 ### end of app/templates/vocabulary/word.html ########################################################################

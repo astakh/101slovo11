@@ -12,9 +12,13 @@ from .subscription import Subscription
 from .payment import Payment
 from .promo_code import PromoCode
 from .referral import Referral
+from .partner import Partner
+from .partner_invite import PartnerInvite
+from .partner_earning import PartnerEarning
 
 __all__ = [
     "Base", "User", "AuthSession", "Word", "UserWord",
     "Lesson", "LessonExercise", "Prompt", "LlmCall", "Event",
     "Subscription", "Payment", "PromoCode", "Referral",
+    "Partner", "PartnerInvite", "PartnerEarning",
 ]

@@ -1,137 +1,148 @@
 <nav class="navbar" x-data="{ mobileMenuOpen: false }" aria-label="Основная навигация">
-  <div class="navbar-inner">
-    <a href="/" class="navbar-brand" aria-label="101slovo — на главную">
-      <i data-lucide="book-open" style="width: 20px; height: 20px;" aria-hidden="true"></i>
-      101slovo
-    </a>
-
-    <!-- Бургер — ВСЕГДА рендерится, виден только на мобильных через CSS -->
-    <!-- ✅ ФИКС: @click.stop предотвращает всплытие до document,
-         иначе @click.outside на мобильном меню мгновенно закроет его -->
-    <button class="navbar-burger"
-            type="button"
-            @click.stop="mobileMenuOpen = !mobileMenuOpen"
-            :aria-expanded="mobileMenuOpen.toString()"
-            aria-controls="mobile-menu"
-            aria-label="Открыть меню навигации">
-      <i data-lucide="menu" x-show="!mobileMenuOpen" style="width: 22px; height: 22px;" aria-hidden="true"></i>
-      <i data-lucide="x" x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
-    </button>
-
-    <!-- ===== ДЕСКТОПНОЕ МЕНЮ (скрыто на мобильных через CSS) ===== -->
-    <div class="navbar-menu--desktop">
-      {% if request.state.user %}
-      <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
-        <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
-      </a>
-      <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
-        <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
-      </a>
-      <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
-        <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
-      </a>
-      <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
-        <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
-      </a>
-      {% if request.state.user.is_admin %}
-      <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
-        <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
-      </a>
-      <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
-        <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
-      </a>
-      {% endif %}
-      <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
-        <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-        <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-      </button>
-      <form action="/logout" method="POST" style="display:inline;margin-left:0.5rem;">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-        <button type="submit" class="navbar-logout" aria-label="Выйти из аккаунта">
-          <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
+    <div class="navbar-inner">
+        <a href="/" class="navbar-brand" aria-label="101slovo — на главную">
+            <i data-lucide="book-open" style="width: 20px; height: 20px;" aria-hidden="true"></i>
+            101slovo
+        </a>
+        <button class="navbar-burger"
+                type="button"
+                @click.stop="mobileMenuOpen = !mobileMenuOpen"
+                :aria-expanded="mobileMenuOpen.toString()"
+                aria-controls="mobile-menu"
+                aria-label="Открыть меню навигации">
+            <i data-lucide="menu" x-show="!mobileMenuOpen" style="width: 22px; height: 22px;" aria-hidden="true"></i>
+            <i data-lucide="x" x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
         </button>
-      </form>
-      {% else %}
-      <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
-        <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-        <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-      </button>
-      <a href="/login" class="nav-link">Войти</a>
-      <a href="/register" class="nav-link nav-link--primary">Регистрация</a>
-      {% endif %}
+
+        <!-- ===== ДЕСКТОПНОЕ МЕНЮ ===== -->
+        <div class="navbar-menu--desktop">
+            {% if request.state.user %}
+            {% if request.state.user.is_onboarded %}
+            <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
+                <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
+            </a>
+            <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
+                <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+            </a>
+            <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
+                <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
+            </a>
+            <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
+                <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
+            </a>
+            {% endif %}
+            {% if request.state.is_partner %}
+            <a href="/partner/dashboard" class="nav-link {% if '/partner' in request.url.path %}active{% endif %}">
+                <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Кабинет партнёра
+            </a>
+            {% endif %}
+            {% if request.state.user.is_admin %}
+            <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
+                <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
+            </a>
+            <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
+                <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
+            </a>
+            <a href="/admin/partners" class="nav-link nav-link--admin {% if '/admin/partners' in request.url.path %}active{% endif %}">
+                <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Партнёры
+            </a>
+            {% endif %}
+            <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+                <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+                <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+            </button>
+            <form action="/logout" method="POST" style="display:inline;margin-left:0.5rem;">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit" class="navbar-logout" aria-label="Выйти из аккаунта">
+                    <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
+                </button>
+            </form>
+            {% else %}
+            <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+                <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+                <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+            </button>
+            <a href="/login" class="nav-link">Войти</a>
+            <a href="/register" class="nav-link nav-link--primary">Регистрация</a>
+            {% endif %}
+        </div>
     </div>
-  </div><!-- /.navbar-inner -->
 
-  <!-- ===== МОБИЛЬНОЕ МЕНЮ ===== -->
-  <!-- По умолчанию СКРЫТО через CSS (display: none).
-       Показывается через добавление класса .is-open (управляется Alpine). -->
-  <div class="navbar-mobile-menu"
-       id="mobile-menu"
-       :class="{ 'is-open': mobileMenuOpen }"
-       @click.outside="mobileMenuOpen = false">
-    {% if request.state.user %}
-    <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" @click="mobileMenuOpen = false">
-      <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
-    </a>
-    <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-      <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
-    </a>
-    <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-      <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
-    </a>
-    <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" @click="mobileMenuOpen = false">
-      <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
-    </a>
-    {% if request.state.user.is_admin %}
-    <a href="/admin/prompts" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-      <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
-    </a>
-    <a href="/admin/stats" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-      <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
-    </a>
-    {% endif %}
-    <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
-      <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-      <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-      Сменить тему
-    </button>
-    <form action="/logout" method="POST" style="margin-top:0.5rem;">
-      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-      <button type="submit" class="navbar-logout" style="width:100%;" aria-label="Выйти">
-        <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
-      </button>
-    </form>
-    {% else %}
-    <a href="/login" class="nav-link" @click="mobileMenuOpen = false">Войти</a>
-    <a href="/register" class="nav-link nav-link--primary" @click="mobileMenuOpen = false">Регистрация</a>
-    <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
-      <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-      <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-      Сменить тему
-    </button>
-    {% endif %}
-  </div><!-- /.navbar-mobile-menu -->
+    <!-- ===== МОБИЛЬНОЕ МЕНЮ ===== -->
+    <div class="navbar-mobile-menu"
+         id="mobile-menu"
+         :class="{ 'is-open': mobileMenuOpen }"
+         @click.outside="mobileMenuOpen = false">
+        {% if request.state.user %}
+        {% if request.state.user.is_onboarded %}
+        <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" @click="mobileMenuOpen = false">
+            <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
+        </a>
+        <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+            <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+        </a>
+        <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+            <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
+        </a>
+        <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" @click="mobileMenuOpen = false">
+            <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
+        </a>
+        {% endif %}
+        {% if request.state.is_partner %}
+        <a href="/partner/dashboard" class="nav-link {% if '/partner' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+            <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Кабинет партнёра
+        </a>
+        {% endif %}
+        {% if request.state.user.is_admin %}
+        <a href="/admin/prompts" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+            <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
+        </a>
+        <a href="/admin/stats" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+            <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
+        </a>
+        <a href="/admin/partners" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+            <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Партнёры
+        </a>
+        {% endif %}
+        <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
+            <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+            <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+            Сменить тему
+        </button>
+        <form action="/logout" method="POST" style="margin-top:0.5rem;">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <button type="submit" class="navbar-logout" style="width:100%;" aria-label="Выйти">
+                <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
+            </button>
+        </form>
+        {% else %}
+        <a href="/login" class="nav-link" @click="mobileMenuOpen = false">Войти</a>
+        <a href="/register" class="nav-link nav-link--primary" @click="mobileMenuOpen = false">Регистрация</a>
+        <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
+            <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+            <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+            Сменить тему
+        </button>
+        {% endif %}
+    </div>
 </nav>
-
 <script>
 function toggleTheme() {
-  var html = document.documentElement;
-  var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-  html.setAttribute('data-theme', next);
-  localStorage.setItem('theme', next);
-  updateThemeIcons(next);
+    var html = document.documentElement;
+    var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+    updateThemeIcons(next);
 }
-
 function updateThemeIcons(theme) {
-  document.querySelectorAll('.theme-icon-sun').forEach(function(el) {
-    el.style.display = theme === 'dark' ? 'block' : 'none';
-  });
-  document.querySelectorAll('.theme-icon-moon').forEach(function(el) {
-    el.style.display = theme === 'dark' ? 'none' : 'block';
-  });
+    document.querySelectorAll('.theme-icon-sun').forEach(function(el) {
+        el.style.display = theme === 'dark' ? 'block' : 'none';
+    });
+    document.querySelectorAll('.theme-icon-moon').forEach(function(el) {
+        el.style.display = theme === 'dark' ? 'none' : 'block';
+    });
 }
-
 document.addEventListener('DOMContentLoaded', function() {
-  updateThemeIcons(document.documentElement.getAttribute('data-theme'));
+    updateThemeIcons(document.documentElement.getAttribute('data-theme'));
 });
 </script>

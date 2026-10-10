@@ -37,34 +37,34 @@ class Settings(BaseSettings):
 
     # Level
     MAX_LEVEL: str = "C2"
-
-    ENV: str = "development"  # "production" или "development"
+    ENV: str = "development"
 
     # ============================================
     # Monetization (обязательные параметры)
     # ============================================
-
-    # Freemium limits
     FREE_LESSON_PER_DAY_LIMIT: int
     FREE_LESSONS_TOTAL_LIMIT: int
 
-    # Subscription pricing (в копейках)
     SUBSCRIPTION_MONTHLY_PRICE_KOP: int
     SUBSCRIPTION_6M_PRICE_KOP: int
     SUBSCRIPTION_6M_DISCOUNT_PERCENT: int
 
-    # Grace period (для будущих рекуррентов)
     GRACE_PERIOD_DAYS: int
 
-    # Referral
     REFERRAL_BONUS_DAYS: int
     REFERRAL_PROMO_MAX_ATTEMPTS: int
 
-    # YooKassa
     YOOKASSA_SHOP_ID: str = ""
     YOOKASSA_SECRET_KEY: str = ""
 
-    # Валидатор для парсинга строки через запятую в список
+    # ============================================
+    # Partner Program
+    # ============================================
+    PARTNER_COMMISSION_PERCENT: int = 20
+    PARTNER_BONUS_DAYS: int = 30
+    PARTNER_MIN_PAYOUT_KOP: int = 300000
+    PARTNER_INVITE_TTL_DAYS: int = 30
+
     @field_validator("AVAILABLE_DICTIONARIES", mode="before")
     @classmethod
     def parse_dictionaries(cls, v):

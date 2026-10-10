@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}Кабинет партнёра — 101slovo{% endblock %}
+
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+    <div class="section-header">
+        <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="handshake" style="width: 28px; height: 28px; color: var(--brand-primary);"></i>
+            Кабинет партнёра
+        </h1>
+    </div>
+
+    <div class="flash-info mb-3">
+        <i data-lucide="info" class="icon-md" aria-hidden="true"></i>
+        <span>
+            Вы получаете <strong>{{ commission_percent }}%</strong> от первой оплаты каждого приглашённого.
+            Приглашённый получает <strong>+{{ partner_bonus_days }} дней</strong> к подписке.
+        </span>
+    </div>
+
+    <!-- Промокод -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="tag" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
+            Ваш промокод
+        </h3>
+
+        {% if not promo %}
+        <form method="POST" action="/partner/propose-promo">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <div class="form-group">
+                <label for="code">Придумайте промокод (3–9 символов, латиница и цифры)</label>
+                <div style="display: flex; gap: 0.75rem;">
+                    <input type="text" id="code" name="code" required
+                           placeholder="Например: MASHA"
+                           maxlength="9" style="text-transform: uppercase; flex: 1;">
+                    <button type="submit">Отправить</button>
+                </div>
+                <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem;">
+                    После отправки промокод будет проверен администратором.
+                </p>
+            </div>
+        </form>
+
+        {% elif promo.status == 'pending' %}
+        <div class="flash-warning" style="margin-bottom: 0;">
+            <i data-lucide="clock" class="icon-md" aria-hidden="true"></i>
+            <span>Промокод <strong>{{ promo.code }}</strong> на модерации. Ожидайте подтверждения.</span>
+        </div>
+
+        {% elif promo.status == 'approved' %}
+        <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
+            <div class="promo-box">{{ promo.code }}</div>
+            <button type="button" class="secondary" onclick="handleCopy(this, '{{ promo.code }}')">
+                <i data-lucide="copy" class="icon-sm" aria-hidden="true"></i> Скопировать
+            </button>
+        </div>
+        {% if partner_link %}
+        <div style="margin-bottom: 1rem;">
+            <label style="font-size: 0.8125rem; color: var(--text-secondary);">Ссылка для регистрации:</label>
+            <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.25rem;">
+                <code style="flex: 1; padding: 0.5rem; background: var(--surface-100); border-radius: var(--radius-sm); font-size: 0.8125rem; word-break: break-all;">{{ partner_link }}</code>
+                <button type="button" class="secondary btn--sm" onclick="handleCopy(this, '{{ partner_link }}')">
+                    <i data-lucide="copy" class="icon-xs" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+        {% endif %}
+
+        {% elif promo.status == 'disabled' %}
+        <div class="flash-error" style="margin-bottom: 0;">
+            <i data-lucide="x-circle" class="icon-md" aria-hidden="true"></i>
+            <span>Промокод <strong>{{ promo.code }}</strong> деактивирован.</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Статистика -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="bar-chart-3" class="icon-lg" style="color: var(--color-info);" aria-hidden="true"></i>
+            Статистика
+        </h3>
+        <div class="grid grid-4" style="gap: 0.75rem;">
+            <div class="stat-card" style="padding: 0.875rem;">
+                <div class="stat-card__value" style="font-size: 1.5rem;">{{ stats.total_registrations }}</div>
+                <div class="stat-card__label">Регистраций</div>
+            </div>
+            <div class="stat-card" style="padding: 0.875rem;">
+                <div class="stat-card__value" style="font-size: 1.5rem;">{{ stats.total_payments }}</div>
+                <div class="stat-card__label">Оплат</div>
+            </div>
+            <div class="stat-card" style="padding: 0.875rem; border-color: var(--bg-success-border);">
+                <div class="stat-card__value" style="font-size: 1.5rem; color: var(--text-success-strong);">
+                    {{ "%.0f" | format(stats.total_earnings_kop / 100) }} ₽
+                </div>
+                <div class="stat-card__label">Заработано</div>
+            </div>
+            <div class="stat-card" style="padding: 0.875rem; border-color: var(--bg-warning-border);">
+                <div class="stat-card__value" style="font-size: 1.5rem; color: var(--text-warning-strong);">
+                    {{ "%.0f" | format(stats.pending_earnings_kop / 100) }} ₽
+                </div>
+                <div class="stat-card__label">К выплате</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Начисления -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="wallet" class="icon-lg" style="color: var(--color-success);" aria-hidden="true"></i>
+            Последние начисления
+        </h3>
+        {% if stats.recent_earnings %}
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Дата</th>
+                        <th>Пользователь</th>
+                        <th style="text-align: right;">Оплата</th>
+                        <th style="text-align: right;">%</th>
+                        <th style="text-align: right;">Начисление</th>
+                        <th>Статус</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in stats.recent_earnings %}
+                    <tr>
+                        <td>{{ e.created_at.strftime('%d.%m.%Y') }}</td>
+                        <td>{{ e.user_email_masked }}</td>
+                        <td style="text-align: right;">{{ "%.0f" | format(e.payment_amount_kop / 100) }} ₽</td>
+                        <td style="text-align: right;">{{ e.commission_percent }}%</td>
+                        <td style="text-align: right; font-weight: 600;">{{ "%.0f" | format(e.earning_amount_kop / 100) }} ₽</td>
+                        <td>
+                            {% if e.status == 'pending' %}<span class="badge badge-active">Ожидает</span>
+                            {% elif e.status == 'paid' %}<span class="badge badge-mastered">Выплачено</span>
+                            {% else %}<span class="badge badge-ignored">{{ e.status }}</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--text-muted); text-align: center; padding: 2rem 0;">
+            Пока нет начислений. Поделитесь промокодом!
+        </p>
+        {% endif %}
+    </div>
+
+    <!-- Профиль -->
+    <div class="card mb-3" x-data="{ editing: false }">
+        <div class="section-header" style="margin-bottom: 0.75rem;">
+            <h3 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="user" class="icon-lg" style="color: var(--brand-primary);" aria-hidden="true"></i>
+                Профиль партнёра
+            </h3>
+            <button @click="editing = !editing" class="secondary btn--sm">
+                <span x-text="editing ? 'Отмена' : 'Редактировать'"></span>
+            </button>
+        </div>
+
+        <div x-show="!editing" style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <div><strong>Название:</strong> {{ partner.name }}</div>
+            <div><strong>Тип:</strong>
+                {% if partner.partner_type == 'self_employed' %}Самозанятый
+                {% elif partner.partner_type == 'individual' %}ИП
+                {% elif partner.partner_type == 'company' %}Юридическое лицо
+                {% endif %}
+            </div>
+            {% if partner.inn %}<div><strong>ИНН:</strong> {{ partner.inn }}</div>{% endif %}
+            {% if partner.payout_details %}<div><strong>Реквизиты:</strong> {{ partner.payout_details }}</div>{% endif %}
+        </div>
+
+        <form x-show="editing" x-cloak method="POST" action="/partner/update-profile" style="margin-top: 1rem;">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <div class="form-group">
+                <label for="edit_name">Название / ФИО *</label>
+                <input type="text" id="edit_name" name="name" required value="{{ partner.name }}">
+            </div>
+            <div class="form-group">
+                <label for="edit_type">Тип партнёра *</label>
+                <select id="edit_type" name="partner_type" required>
+                    <option value="self_employed" {% if partner.partner_type == 'self_employed' %}selected{% endif %}>Самозанятый</option>
+                    <option value="individual" {% if partner.partner_type == 'individual' %}selected{% endif %}>ИП</option>
+                    <option value="company" {% if partner.partner_type == 'company' %}selected{% endif %}>Юрлицо</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="edit_inn">ИНН</label>
+                <input type="text" id="edit_inn" name="inn" value="{{ partner.inn or '' }}" maxlength="12">
+            </div>
+            <div class="form-group--last">
+                <label for="edit_payout">Реквизиты для выплаты</label>
+                <textarea id="edit_payout" name="payout_details" rows="3">{{ partner.payout_details or '' }}</textarea>
+            </div>
+            <button type="submit" style="width: 100%;">💾 Сохранить</button>
+        </form>
+    </div>
+</div>
+
+<script>
+async function handleCopy(button, text) {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+        button.innerHTML = '<i data-lucide="check" class="icon-sm" aria-hidden="true"></i> Скопировано!';
+    } else {
+        button.innerHTML = '<i data-lucide="alert-circle" class="icon-sm" aria-hidden="true"></i> Ошибка';
+    }
+    if (window.lucide) { lucide.createIcons(); }
+}
+</script>
+{% endblock %}

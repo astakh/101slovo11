@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Request, Depends, Form, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.services.onboarding import complete_onboarding
@@ -12,6 +11,7 @@ from app.config import settings
 router = APIRouter(tags=["onboarding"])
 
 LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
+
 DICT_LABELS = {
     "general": "Общий",
     "it": "IT",
@@ -46,6 +46,10 @@ def render_onboarding(
             "error": error,
             "form": form,
             "settings": settings,
+            # ✅ Передаём параметры для settings_form.html
+            "form_action": "/onboarding/complete",
+            "submit_text": "Начать обучение",
+            "submit_icon": "rocket",
         },
     )
 
@@ -57,7 +61,6 @@ async def onboarding_page(
 ):
     if user.is_onboarded:
         return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
-
     return render_onboarding(request, user)
 
 

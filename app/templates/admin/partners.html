@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Админ — Партнёры{% endblock %}
+
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+    <div class="section-header">
+        <h1 style="margin: 0;">🤝 Управление партнёрами</h1>
+        <a href="/admin/prompts" class="secondary">
+            <i data-lucide="shield" class="icon-md" aria-hidden="true"></i> Промпты
+        </a>
+    </div>
+
+    <!-- Инвайты -->
+    <div class="card mb-3">
+        <div class="section-header" style="margin-bottom: 0.75rem;">
+            <h3 style="margin: 0;">Инвайт-ссылки</h3>
+            <form method="POST" action="/admin/partners/create-invite">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit" class="btn--sm">
+                    <i data-lucide="plus" class="icon-sm" aria-hidden="true"></i> Создать инвайт
+                </button>
+            </form>
+        </div>
+        {% if invites_with_links %}
+        <div class="table-scroll">
+            <table>
+                <thead><tr><th>Токен</th><th>Создан</th><th>Истекает</th><th>Статус</th><th>Ссылка</th></tr></thead>
+                <tbody>
+                    {% for item in invites_with_links %}
+                    {% set inv = item.invite %}
+                    <tr>
+                        <td><code>{{ inv.token[:16] }}...</code></td>
+                        <td>{{ inv.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                        <td>{{ inv.expires_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                        <td>{% if inv.is_used %}<span class="badge badge-ignored">Использован</span>{% else %}<span class="badge badge-active">Активен</span>{% endif %}</td>
+                        <td>{% if item.link %}<code style="font-size: 0.75rem;">{{ item.link }}</code>{% else %}—{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--text-muted); text-align: center;">Нет инвайтов</p>
+        {% endif %}
+    </div>
+
+    <!-- Ожидающие промокоды -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0;">Ожидающие подтверждения промокоды</h3>
+        {% if pending_promos %}
+        <div class="table-scroll">
+            <table>
+                <thead><tr><th>Код</th><th>Партнёр (user_id)</th><th>Создан</th><th>Действия</th></tr></thead>
+                <tbody>
+                    {% for promo in pending_promos %}
+                    <tr>
+                        <td><strong style="font-size: 1.125rem;">{{ promo.code }}</strong></td>
+                        <td>{{ promo.owner_user_id }}</td>
+                        <td>{{ promo.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                        <td>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <form method="POST" action="/admin/partners/approve-promo/{{ promo.id }}">
+                                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                    <button type="submit" class="btn--sm btn--success">✓ Подтвердить</button>
+                                </form>
+                                <form method="POST" action="/admin/partners/decline-promo/{{ promo.id }}">
+                                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                    <button type="submit" class="secondary btn--sm">✗ Отклонить</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--text-muted); text-align: center;">Нет промокодов на модерации</p>
+        {% endif %}
+    </div>
+
+    <!-- Список партнёров -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0;">Партнёры</h3>
+        {% if partners_data %}
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Название</th><th>Email</th><th>Тип</th><th>Промокод</th>
+                        <th style="text-align: right;">Регистраций</th>
+                        <th style="text-align: right;">Баланс</th>
+                        <th>Статус</th><th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in partners_data %}
+                    {% set p = item.partner %}
+                    {% set min_payout_kop = (min_payout_rub * 100)|int %}
+                    <tr>
+                        <td><strong>{{ p.name }}</strong></td>
+                        <td>{{ item.email }}</td>
+                        <td>
+                            {% if p.partner_type == 'self_employed' %}Самозанятый
+                            {% elif p.partner_type == 'individual' %}ИП
+                            {% elif p.partner_type == 'company' %}Юрлицо
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.promo_code %}
+                            <span class="badge badge-{% if item.promo_status == 'approved' %}active{% elif item.promo_status == 'pending' %}review{% else %}ignored{% endif %}">{{ item.promo_code }}</span>
+                            {% else %}—{% endif %}
+                        </td>
+                        <td style="text-align: right;">{{ item.total_registrations }}</td>
+                        <td style="text-align: right; font-weight: 600;">
+                            {% if item.pending_balance_kop >= min_payout_kop %}
+                            <span style="color: var(--text-success-strong);">{{ "%.0f" | format(item.pending_balance_kop / 100) }} ₽</span>
+                            {% else %}
+                            <span style="color: var(--text-muted);">{{ "%.0f" | format(item.pending_balance_kop / 100) }} ₽</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if p.is_active %}<span class="badge badge-active">Активен</span>
+                            {% else %}<span class="badge badge-ignored">Деактивирован</span>{% endif %}
+                        </td>
+                        <td>
+                            <div style="display: flex; gap: 0.25rem; flex-wrap: wrap;">
+                                <a href="/admin/partners/{{ p.user_id }}/earnings" class="secondary btn--sm">Начисления</a>
+                                {% if p.is_active %}
+                                <form method="POST" action="/admin/partners/deactivate/{{ p.id }}"
+                                      onsubmit="return confirm('Деактивировать партнёра?');">
+                                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                    <button type="submit" class="secondary btn--sm" style="color: var(--text-error-strong);">Отключить</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.5rem;">
+            * Минимальная сумма для вывода: {{ "%.0f" | format(min_payout_rub) }} ₽
+        </p>
+        {% else %}
+        <p style="color: var(--text-muted); text-align: center;">Партнёров пока нет</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
