@@ -4,7 +4,6 @@ from sqlalchemy.sql import func
 from datetime import datetime
 from .base import Base
 
-
 class User(Base):
     __tablename__ = "users"
 
@@ -18,7 +17,9 @@ class User(Base):
     level: Mapped[str | None] = mapped_column(String(2), nullable=True)
     dictionary_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     words_per_lesson: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=5)
-    daily_lesson_limit: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    # Дневной лимит уроков. По умолчанию = MAX_LESSONS_PER_DAY из конфига.
+    # Может быть изменён администратором для отдельных пользователей.
+    daily_lesson_limit: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=3)
     last_lesson_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # === Monetization fields ===

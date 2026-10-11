@@ -18,7 +18,6 @@ DICT_LABELS = {
     "travel": "Путешествия",
 }
 
-
 def get_dictionaries() -> list[dict]:
     return [
         {
@@ -27,7 +26,6 @@ def get_dictionaries() -> list[dict]:
         }
         for code in settings.AVAILABLE_DICTIONARIES
     ]
-
 
 def render_onboarding(
     request: Request,
@@ -53,7 +51,6 @@ def render_onboarding(
         },
     )
 
-
 @router.get("/onboarding")
 async def onboarding_page(
     request: Request,
@@ -62,7 +59,6 @@ async def onboarding_page(
     if user.is_onboarded:
         return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     return render_onboarding(request, user)
-
 
 @router.post(
     "/onboarding/complete",
@@ -73,7 +69,6 @@ async def onboarding_complete(
     level: str = Form(...),
     dictionary_code: str = Form(...),
     words_per_lesson: int = Form(...),
-    daily_lesson_limit: int = Form(...),
     user: User = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -84,7 +79,6 @@ async def onboarding_complete(
         "level": level,
         "dictionary_code": dictionary_code,
         "words_per_lesson": words_per_lesson,
-        "daily_lesson_limit": daily_lesson_limit,
     }
 
     if level not in LEVELS:
@@ -119,17 +113,6 @@ async def onboarding_complete(
             form=form,
         )
 
-    if not (1 <= daily_lesson_limit <= settings.DAILY_LESSON_LIMIT_MAX):
-        return render_onboarding(
-            request,
-            user,
-            error=(
-                f"Лимит уроков в день должен быть "
-                f"от 1 до {settings.DAILY_LESSON_LIMIT_MAX}."
-            ),
-            form=form,
-        )
-
     try:
         await complete_onboarding(
             db=db,
@@ -137,7 +120,6 @@ async def onboarding_complete(
             level=level,
             dictionary_code=dictionary_code,
             words_per_lesson=words_per_lesson,
-            daily_lesson_limit=daily_lesson_limit,
         )
     except ValueError as e:
         return render_onboarding(

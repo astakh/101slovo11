@@ -1,6 +1,9 @@
 """SRS (Spaced Repetition System) — чистая функция обновления стадии слова."""
 
-INTERVALS: list[int] = [1, 2, 3, 7, 11, 30]
+# Интервалы повторения в уроках.
+# Удвоены относительно исходных [1, 2, 3, 7, 11, 30],
+# т.к. пользователи теперь проходят до 3 уроков в день.
+INTERVALS: list[int] = [2, 4, 6, 14, 22, 60]
 MAX_STAGE: int = 6
 
 
@@ -27,4 +30,5 @@ def srs_update(stage: int, result: str, lesson_number: int) -> tuple[int, int | 
 
     interval = INTERVALS[max(new_stage - 1, 0)]
     due = lesson_number + interval
+
     return (new_stage, due, "active")

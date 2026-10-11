@@ -1,12 +1,10 @@
 """Роуты для уроков."""
 import logging
-
 from fastapi import APIRouter, Request, Depends, Form, status, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
-
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.core.templates import templates
@@ -100,7 +98,6 @@ async def lesson_preview_page(
     )
     result_ip = await db.execute(stmt_ip)
     in_progress = result_ip.scalar_one_or_none()
-
     if in_progress:
         return RedirectResponse(
             url=f"/lesson/{in_progress.id}",
@@ -109,7 +106,6 @@ async def lesson_preview_page(
 
     # === ПРОВЕРКА ПЕЙВОЛЛА (общий лимит для freemium) ===
     access = await check_lesson_access(db, user)
-
     if not access["allowed"]:
         return templates.TemplateResponse(
             "lesson/preview.html",
@@ -125,11 +121,10 @@ async def lesson_preview_page(
             },
         )
 
-    # === ПРОВЕРКА ДНЕВНОГО ЛИМИТА ===
+    # === ПРОВЕРКА ДНЕВНОГО ЛИМИТА (единый для всех) ===
     premium = access["is_premium"]
-    effective_daily_limit = get_effective_daily_limit(user, premium)
+    effective_daily_limit = get_effective_daily_limit(user)
     today = get_user_today(user.timezone)
-
     stmt_today = select(func.count(Lesson.id)).where(
         Lesson.user_id == user.id,
         Lesson.started_local_date == today,
@@ -149,6 +144,8 @@ async def lesson_preview_page(
                 "lessons_today": lessons_today,
                 "daily_lesson_limit": effective_daily_limit,
                 "free_lessons_remaining": access.get("free_lessons_remaining"),
+                "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
+                "max_lessons_per_day": settings.MAX_LESSONS_PER_DAY,
             },
         )
 
@@ -373,14 +370,12 @@ async def lesson_suggestion_action(
     stmt = select(LessonExercise).where(LessonExercise.id == exercise_id)
     result = await db.execute(stmt)
     exercise = result.scalar_one_or_none()
-
     if not exercise:
         raise HTTPException(status_code=404, detail="Упражнение не найдено")
 
     stmt_lesson = select(Lesson).where(Lesson.id == exercise.lesson_id)
     result_lesson = await db.execute(stmt_lesson)
     lesson = result_lesson.scalar_one_or_none()
-
     if not lesson or lesson.user_id != user.id:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
 
@@ -426,7 +421,6 @@ async def lesson_suggestion_action(
                 f"[SUGGESTION] word_id missing for suggestion "
                 f"exercise_id={exercise_id}, word_index={word_index}"
             )
-
         word_data["state"] = "added"
 
     elif action == "ignore":

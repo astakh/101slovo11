@@ -23,17 +23,17 @@ async def check_lesson_access(db: AsyncSession, user: User) -> dict:
     Проверяет, может ли пользователь начать новый урок.
 
     Возвращает:
-        {
-            "allowed": bool,
-            "reason": str | None,  # причина запрета
-            "is_premium": bool,
-            "total_lessons": int,
-            "free_lessons_remaining": int | None,  # только для freemium
-        }
+    {
+        "allowed": bool,
+        "reason": str | None,  # причина запрета
+        "is_premium": bool,
+        "total_lessons": int,
+        "free_lessons_remaining": int | None,  # только для freemium
+    }
     """
     premium = await is_premium(db, user.id)
 
-    # Для Premium — проверяем только дневной лимит
+    # Для Premium — общий лимит не применяется
     if premium:
         return {
             "allowed": True,
@@ -65,33 +65,30 @@ async def check_lesson_access(db: AsyncSession, user: User) -> dict:
     }
 
 
-def get_effective_daily_limit(user: User, is_premium: bool) -> int:
+def get_effective_daily_limit(user: User) -> int:
     """
-    Возвращает эффективный дневной лимит уроков.
+    Возвращает дневной лимит уроков пользователя.
 
-    - Freemium: FREE_LESSON_PER_DAY_LIMIT (1)
-    - Premium: user.daily_lesson_limit (из настроек, до DAILY_LESSON_LIMIT_MAX)
+    Единый для всех тарифов. Берётся из user.daily_lesson_limit,
+    что позволяет администратору назначать особые условия
+    отдельным пользователям.
     """
-    if is_premium:
-        return min(user.daily_lesson_limit, settings.DAILY_LESSON_LIMIT_MAX)
-    return settings.FREE_LESSON_PER_DAY_LIMIT
+    return user.daily_lesson_limit
 
 
 async def get_paywall_context(db: AsyncSession, user: User) -> dict:
     """
     Контекст для отображения пейволла / информации о подписке в шаблонах.
-
     Используется в дашборде, превью урока, настройках.
     """
     access = await check_lesson_access(db, user)
-    premium = access["is_premium"]
 
     return {
-        "is_premium": premium,
+        "is_premium": access["is_premium"],
         "free_lessons_remaining": access.get("free_lessons_remaining"),
         "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
-        "free_daily_limit": settings.FREE_LESSON_PER_DAY_LIMIT,
-        "effective_daily_limit": get_effective_daily_limit(user, premium),
+        "max_lessons_per_day": settings.MAX_LESSONS_PER_DAY,
+        "effective_daily_limit": get_effective_daily_limit(user),
         "paywall_triggered": not access["allowed"],
         "paywall_reason": access.get("reason"),
     }

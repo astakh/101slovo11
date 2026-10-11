@@ -2,7 +2,6 @@
 from fastapi import APIRouter, Request, Depends, Form, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.services.settings import update_user_settings
@@ -14,12 +13,12 @@ from app.utils.flash import add_flash
 router = APIRouter(tags=["settings"])
 
 LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
+
 DICT_LABELS = {
     "general": "Общий",
     "it": "IT",
     "travel": "Путешествия",
 }
-
 
 def get_dictionaries() -> list[dict]:
     return [
@@ -29,7 +28,6 @@ def get_dictionaries() -> list[dict]:
         }
         for code in settings.AVAILABLE_DICTIONARIES
     ]
-
 
 def render_settings(
     request: Request,
@@ -63,9 +61,7 @@ async def settings_page(
     """Страница настроек."""
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
-
     return render_settings(request, user)
-
 
 @router.post("/settings", dependencies=[Depends(require_csrf)])
 async def settings_post(
@@ -73,7 +69,6 @@ async def settings_post(
     level: str = Form(...),
     dictionary_code: str = Form(...),
     words_per_lesson: int = Form(...),
-    daily_lesson_limit: int = Form(...),
     user: User = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -85,7 +80,6 @@ async def settings_post(
         "level": level,
         "dictionary_code": dictionary_code,
         "words_per_lesson": words_per_lesson,
-        "daily_lesson_limit": daily_lesson_limit,
     }
 
     # Валидация уровня
@@ -123,18 +117,6 @@ async def settings_post(
             form=form,
         )
 
-    # Валидация лимита уроков
-    if not (1 <= daily_lesson_limit <= settings.DAILY_LESSON_LIMIT_MAX):
-        return render_settings(
-            request,
-            user,
-            error=(
-                f"Лимит уроков в день должен быть "
-                f"от 1 до {settings.DAILY_LESSON_LIMIT_MAX}."
-            ),
-            form=form,
-        )
-
     # Обновление настроек
     try:
         await update_user_settings(
@@ -143,7 +125,6 @@ async def settings_post(
             level=level,
             dictionary_code=dictionary_code,
             words_per_lesson=words_per_lesson,
-            daily_lesson_limit=daily_lesson_limit,
         )
     except ValueError as e:
         return render_settings(

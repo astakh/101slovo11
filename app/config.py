@@ -2,7 +2,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 from typing import List
 
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
@@ -28,8 +27,8 @@ class Settings(BaseSettings):
     WORDS_PER_LESSON_DEFAULT: int = 5
     WORDS_PER_LESSON_MIN: int = 1
     WORDS_PER_LESSON_MAX: int = 10
-    DAILY_LESSON_LIMIT_DEFAULT: int = 1
-    DAILY_LESSON_LIMIT_MAX: int = 5
+    # Единый дневной лимит уроков для всех пользователей
+    MAX_LESSONS_PER_DAY: int = 3
 
     # Dictionaries
     AVAILABLE_DICTIONARIES: List[str] = ["general", "it", "travel"]
@@ -42,18 +41,13 @@ class Settings(BaseSettings):
     # ============================================
     # Monetization (обязательные параметры)
     # ============================================
-    FREE_LESSON_PER_DAY_LIMIT: int
     FREE_LESSONS_TOTAL_LIMIT: int
-
     SUBSCRIPTION_MONTHLY_PRICE_KOP: int
     SUBSCRIPTION_6M_PRICE_KOP: int
     SUBSCRIPTION_6M_DISCOUNT_PERCENT: int
-
     GRACE_PERIOD_DAYS: int
-
     REFERRAL_BONUS_DAYS: int
     REFERRAL_PROMO_MAX_ATTEMPTS: int
-
     YOOKASSA_SHOP_ID: str = ""
     YOOKASSA_SECRET_KEY: str = ""
 
@@ -71,6 +65,5 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [d.strip() for d in v.split(",")]
         return v
-
 
 settings = Settings()

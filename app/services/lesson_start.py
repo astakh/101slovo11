@@ -1,10 +1,8 @@
 """Идемпотентный старт урока с вызовом LLM."""
 import logging
 from datetime import datetime, timezone
-
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models.user import User
 from app.models.lesson import Lesson
 from app.models.lesson_exercise import LessonExercise
@@ -35,7 +33,6 @@ def _level_index(level: str) -> int:
 
 class LessonStartError(Exception):
     """Ошибка при старте урока."""
-
     def __init__(self, message: str, code: str = "lesson_start_error"):
         super().__init__(message)
         self.code = code
@@ -89,7 +86,7 @@ async def start_lesson(
     1. Проверка идемпотентности.
     2. Проверка незавершённого урока.
     3. Проверка пейволла (общий лимит для freemium).
-    4. Проверка дневного лимита.
+    4. Проверка дневного лимита (единый для всех).
     5. 🔒 Проверка количества слов (<= words_per_lesson).
     6. Загрузка слов и определение эффективного уровня (level-up).
     7. Кластеризация слов.
@@ -110,7 +107,6 @@ async def start_lesson(
     )
     result_idem = await db.execute(stmt_idem)
     existing_lesson = result_idem.scalar_one_or_none()
-
     if existing_lesson:
         if existing_lesson.status == "in_progress":
             return existing_lesson
@@ -122,7 +118,6 @@ async def start_lesson(
     )
     result_ip = await db.execute(stmt_in_progress)
     in_progress = result_ip.scalar_one_or_none()
-
     if in_progress:
         raise LessonStartError(
             "У вас есть незавершённый урок. Завершите его или продолжите.",
@@ -137,11 +132,9 @@ async def start_lesson(
             code="free_limit_reached",
         )
 
-    # 4. Проверка дневного лимита
-    premium = access["is_premium"]
-    effective_daily_limit = get_effective_daily_limit(user, premium)
+    # 4. Проверка дневного лимита (единый для всех тарифов)
+    effective_daily_limit = get_effective_daily_limit(user)
     today = get_user_today(user.timezone)
-
     stmt_today = select(func.count(Lesson.id)).where(
         Lesson.user_id == user.id,
         Lesson.started_local_date == today,
@@ -193,7 +186,6 @@ async def start_lesson(
     # Если среди выбранных слов есть слова более высокого уровня,
     # используем этот уровень для генерации и обновляем пользователя.
     effective_level, level_up = _determine_effective_level(user, list(words))
-
     if level_up:
         logger.info(
             f"[START] Level-up detected: user_id={user.id}, "
@@ -219,7 +211,6 @@ async def start_lesson(
     # Повторная проверка дневного лимита (под блокировкой)
     result_today2 = await db.execute(stmt_today)
     lessons_today2 = result_today2.scalar_one_or_none() or 0
-
     if lessons_today2 >= effective_daily_limit:
         raise LessonStartError(
             "Дневной лимит уроков исчерпан",
@@ -251,7 +242,6 @@ async def start_lesson(
             },
         )
         db.add(event_level)
-
         logger.info(
             f"[START] Level persisted: user_id={user.id}, "
             f"{old_level} → {effective_level}"
@@ -290,7 +280,6 @@ async def start_lesson(
         )
         result_uw = await db.execute(stmt_uw)
         existing_uw = result_uw.scalar_one_or_none()
-
         if not existing_uw:
             uw = UserWord(
                 user_id=locked_user.id,
@@ -313,12 +302,10 @@ async def start_lesson(
         },
     )
     db.add(event)
-
     await db.flush()
 
     logger.info(
         f"[START] Lesson #{next_lesson_number} created for user_id={user.id} "
         f"with {len(word_dicts)} words (level={effective_level}, level_up={level_up})"
     )
-
     return lesson

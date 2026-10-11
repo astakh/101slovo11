@@ -1,6 +1,5 @@
 """Роуты для юридических страниц."""
 from fastapi import APIRouter, Request
-
 from app.core.templates import templates
 from app.config import settings
 
@@ -16,9 +15,8 @@ async def legal_offer(request: Request):
             "request": request,
             "referral_bonus_days": settings.REFERRAL_BONUS_DAYS,
             # ✅ Лимиты из конфига (вместо хардкода)
-            "free_daily_limit": settings.FREE_LESSON_PER_DAY_LIMIT,
+            "max_lessons_per_day": settings.MAX_LESSONS_PER_DAY,
             "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
-            "daily_lesson_limit_max": settings.DAILY_LESSON_LIMIT_MAX,
             "words_per_lesson_max": settings.WORDS_PER_LESSON_MAX,
         },
     )

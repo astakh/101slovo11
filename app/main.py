@@ -6,7 +6,6 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
-
 from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal, partner
 from app.middleware import AppMiddleware
 from app.core.templates import templates
@@ -90,11 +89,13 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def root(request: Request):
     if request.state.user:
         return Response(status_code=303, headers={"Location": "/dashboard"})
+
     monthly_price = app_settings.SUBSCRIPTION_MONTHLY_PRICE_KOP / 100
     six_month_price = app_settings.SUBSCRIPTION_6M_PRICE_KOP / 100
     six_month_per_month = six_month_price / 6
     six_month_full = monthly_price * 6
     six_month_saving = six_month_full - six_month_price
+
     return templates.TemplateResponse(
         "landing.html",
         {
@@ -107,8 +108,7 @@ async def root(request: Request):
             "six_month_saving": six_month_saving,
             "discount_percent": app_settings.SUBSCRIPTION_6M_DISCOUNT_PERCENT,
             "free_lessons_total": app_settings.FREE_LESSONS_TOTAL_LIMIT,
-            "free_daily_limit": app_settings.FREE_LESSON_PER_DAY_LIMIT,
-            "daily_lesson_limit_max": app_settings.DAILY_LESSON_LIMIT_MAX,
+            "max_lessons_per_day": app_settings.MAX_LESSONS_PER_DAY,
             "words_per_lesson_max": app_settings.WORDS_PER_LESSON_MAX,
         },
     )

@@ -9465,7 +9465,7 @@ async function copyToClipboard(text) {
     <div class="card mb-3">
         <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
             <i data-lucide="gift" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
-            Пригласи друга — получи месяц бесплатно
+            Пригласи друга — получите по 15 дней доступа бесплатно
         </h3>
         <p style="color: var(--text-secondary); margin-bottom: 1rem;">
             Поделись промокодом с другом. Когда он купит подписку, ты получишь
@@ -9799,143 +9799,352 @@ async function handleCopyPromo(button, code) {
 
 ### app/templates/landing.html ########################################################################
 {% extends "base.html" %}
-{% block title %}101slovo — Учи английский в контексте{% endblock %}
+{% block title %}101slovo — Английские слова в контексте{% endblock %}
+
 {% block content %}
-<div class="container--medium" style="margin: 0 auto; text-align: center; padding-top: 1rem;">
-
-  <!-- Hero -->
-  <div style="padding: 2rem 0.5rem;">
-    
-    <h1 style="font-size: 2.25rem; line-height: 1.15; margin-bottom: 1rem; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-      Забудь зубрёжку.<br>Изучай слова в контексте.
-    </h1>
-    <p style="font-size: 1.0625rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto 1.75rem auto; line-height: 1.5;">
-      101slovo генерирует упражнения для интервального повторения слов в контексте, чтобы слова запоминались навсегда.
-    </p>
-    <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
-      <a href="/register" role="button" class="btn-lg" style="padding: 0.75rem 1.75rem; font-size: 1rem;">
-        Начать бесплатно
-      </a>
-      <a href="/login" role="button" class="secondary btn-lg" style="padding: 0.75rem 1.75rem; font-size: 1rem;">
-        У меня есть аккаунт
-      </a>
-    </div>
-  </div>
-
-  <!-- Features -->
-  <div class="grid grid-3" style="margin-top: 2.5rem; text-align: left;">
-    <div class="card">
-      <div class="stat-card__icon" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">
-        <i data-lucide="brain" style="width: 22px; height: 22px;"></i>
-      </div>
-      <h3>Интервальное повторение</h3>
-      <p style="color: var(--text-secondary);">Научно доказанный алгоритм SRS покажет слово именно тогда, когда ты почти его забыл.</p>
-    </div>
-    <div class="card">
-      <div class="stat-card__icon" style="background: rgba(236, 72, 153, 0.1); color: var(--brand-secondary);">
-        <i data-lucide="sparkles" style="width: 22px; height: 22px;"></i>
-      </div>
-      <h3>Контекст от ИИ</h3>
-      <p style="color: var(--text-secondary);">ИИ создаёт уникальные, естественные предложения со словами твоего урока специально для твоего уровня (A1–C2).</p>
-    </div>
-    <div class="card">
-      <div class="stat-card__icon" style="background: rgba(16, 185, 129, 0.1); color: #10b981;">
-        <i data-lucide="target" style="width: 22px; height: 22px;"></i>
-      </div>
-      <h3>Тематические словари</h3>
-      <p style="color: var(--text-secondary);">Выбирай общий, IT или travel словарь. Изучай то, что реально нужно тебе.</p>
-    </div>
-  </div>
-
-  <!-- Pricing -->
-  <div style="margin-top: 3rem;">
-    <h2 style="margin-bottom: 0.375rem;">Тарифы</h2>
-    <p style="color: var(--text-muted); margin-bottom: 1.5rem;">
-      Начни бесплатно — {{ free_lessons_total }} уроков без оплаты
-    </p>
-    <div class="grid grid-3" style="text-align: left; align-items: stretch;">
-      <!-- Free -->
-      <div class="card" style="display: flex; flex-direction: column; padding: 1.5rem;">
-        <h3 style="margin-top: 0;">Free</h3>
-        <div style="font-size: 1.875rem; font-weight: 800; margin-bottom: 0.75rem;">0 ₽</div>
-        <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
-          <li style="padding: 0.375rem 0; border-bottom: 1px solid var(--border-light);">
-            ✅ {{ free_daily_limit }} урок{% if free_daily_limit != 1 %}а{% endif %} в день
-          </li>
-          <li style="padding: 0.375rem 0; border-bottom: 1px solid var(--border-light);">
-            ✅ {{ free_lessons_total }} уроков всего
-          </li>
-          <li style="padding: 0.375rem 0;">✅ До {{ words_per_lesson_max }} слов в уроке</li>
-        </ul>
-        <a href="/register" role="button" class="secondary" style="margin-top: 1.25rem; width: 100%; text-align: center;">Начать бесплатно</a>
-      </div>
-      <!-- Monthly -->
-      <div class="card" style="display: flex; flex-direction: column; padding: 1.5rem; border-color: var(--brand-primary); box-shadow: var(--shadow-glow);">
-        <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 0.75rem;">Популярный</div>
-        <h3 style="margin-top: 0;">Месячная</h3>
-        <div style="font-size: 1.875rem; font-weight: 800; margin-bottom: 0.75rem;">
-          {{ "%.0f" | format(monthly_price) }} ₽<span style="font-size: 0.9375rem; font-weight: 400; color: var(--text-muted);">/мес</span>
+{# =====================================================================
+   БЛОК 1. HERO + ЖИВОЕ ДЕМО
+===================================================================== #}
+<section class="container" style="padding: 2.5rem 0 1rem;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; align-items: center;" class="hero-grid">
+        <div style="text-align: left;">
+            <h1 style="font-size: 2.5rem; line-height: 1.15; margin-bottom: 1rem; background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; letter-spacing: -0.03em;">
+                Не зубри слова.<br>Живи ими.
+            </h1>
+            <p style="font-size: 1.0625rem; color: var(--text-secondary); margin-bottom: 1.75rem; line-height: 1.6; max-width: 480px;">
+                ИИ создаёт предложения с вашими словами, а интервальное повторение закрепляет их навсегда. 5 минут в день.
+            </p>
+            <div class="hero-actions" style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                <a href="/register" role="button" class="btn-lg">Начать бесплатно</a>
+                <a href="/login" role="button" class="secondary btn-lg">У меня есть аккаунт</a>
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.8125rem; margin-top: 1rem;">
+                {{ free_lessons_total }} бесплатных уроков · Без карты
+            </p>
         </div>
-        <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
-          <li style="padding: 0.375rem 0; border-bottom: 1px solid var(--border-light);">✅ До {{ daily_lesson_limit_max }} уроков в день</li>
-          <li style="padding: 0.375rem 0;">✅ До {{ words_per_lesson_max }} слов в уроке</li>
-        </ul>
-        <a href="/register" role="button" style="margin-top: 1.25rem; width: 100%; text-align: center;">
-          Подключить за {{ "%.0f" | format(monthly_price) }} ₽
-        </a>
-      </div>
-      <!-- 6 Months -->
-      <div class="card" style="display: flex; flex-direction: column; padding: 1.5rem; border-color: #10b981;">
-        <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 0.75rem;">−{{ discount_percent }}%</div>
-        <h3 style="margin-top: 0;">6 месяцев</h3>
-        <div style="font-size: 1.875rem; font-weight: 800; margin-bottom: 0.25rem;">
-          {{ "{:,.0f}".format(six_month_price) | replace(",", " ") }} ₽
+
+        {# Мокап упражнения #}
+        <div class="card exercise-card" style="margin-bottom: 0; box-shadow: var(--shadow-xl);" aria-hidden="true">
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                <span class="badge badge-active"><i data-lucide="message-circle" class="icon-xs"></i> Предложение</span>
+                <span class="badge badge-review">B1</span>
+            </div>
+            <p class="exercise-sentence" lang="en">The developer fixed the <strong>bug</strong> before the release.</p>
+            <div class="exercise-words">
+                <span class="badge badge-active">developer</span>
+                <span class="badge badge-active">bug</span>
+            </div>
+            <div style="padding: 0.625rem 0.875rem; background: var(--surface-50); border-radius: var(--radius-md); border: 1.5px solid var(--border-light); color: var(--text-secondary); font-size: 0.9375rem;">
+                Разработчик исправил ошбку до релиза.
+            </div>
+            <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.375rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-success-strong); font-size: 0.875rem;">
+                    <i data-lucide="check-circle" class="icon-md"></i> <strong>developer</strong> — усвоено
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--text-warning-strong); font-size: 0.875rem;">
+                    <i data-lucide="alert-triangle" class="icon-md"></i> <strong>bug</strong> — опечатка
+                </div>
+            </div>
         </div>
-        <div style="font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 0.75rem;">
-          {{ "%.0f" | format(six_month_per_month) }} ₽/мес · экономия {{ "%.0f" | format(six_month_saving) }} ₽
+    </div>
+</section>
+
+{# =====================================================================
+   БЛОК 2. ПРОБЛЕМА → РЕШЕНИЕ
+===================================================================== #}
+<section class="container" style="padding: 3rem 0;">
+    <div class="container--medium" style="text-align: center; margin: 0 auto 2rem;">
+        <h2 style="margin-bottom: 1rem;">Знакомо?</h2>
+        <div class="grid grid-3" style="text-align: left; margin-bottom: 1.5rem;">
+            <div class="card card--compact" style="display: flex; gap: 0.75rem; align-items: flex-start;">
+                <span style="font-size: 1.5rem;" aria-hidden="true">📋</span>
+                <span style="color: var(--text-secondary); font-size: 0.9375rem;">Учишь слова по списку — через неделю всё забываешь</span>
+            </div>
+            <div class="card card--compact" style="display: flex; gap: 0.75rem; align-items: flex-start;">
+                <span style="font-size: 1.5rem;" aria-hidden="true">🗣️</span>
+                <span style="color: var(--text-secondary); font-size: 0.9375rem;">Знаешь слово, но не можешь использовать его в разговоре</span>
+            </div>
+            <div class="card card--compact" style="display: flex; gap: 0.75rem; align-items: flex-start;">
+                <span style="font-size: 1.5rem;" aria-hidden="true">😴</span>
+                <span style="color: var(--text-secondary); font-size: 0.9375rem;">Карточки надоедают на третий день</span>
+            </div>
         </div>
-        <ul style="list-style: none; padding: 0; margin: 0; flex: 1;">
-          <li style="padding: 0.375rem 0; border-bottom: 1px solid var(--border-light);">✅ До {{ daily_lesson_limit_max }} уроков в день</li>
-          <li style="padding: 0.375rem 0;">✅ До {{ words_per_lesson_max }} слов в уроке</li>
-        </ul>
-        <a href="/register" role="button" style="margin-top: 1.25rem; width: 100%; text-align: center; background: #10b981;">
-          Подключить за {{ "{:,.0f}".format(six_month_price) | replace(",", " ") }} ₽
-        </a>
-      </div>
+        <p style="font-size: 1.125rem; font-weight: 700; color: var(--text-primary);">
+            Проблема не в памяти. Проблема в том, как учить.
+        </p>
     </div>
-  </div>
 
-  <!-- Referral -->
-  <div class="card" style="margin-top: 2.5rem; background: var(--surface-50); border: 1px dashed var(--border-medium); text-align: center; padding: 1.75rem;">
-    <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎁</div>
-    <h3 style="margin-bottom: 0.375rem;">Пригласи друга — получи бонус</h3>
-    <p style="color: var(--text-secondary); max-width: 500px; margin: 0 auto;">
-      Поделись своим промокодом. Когда друг купит подписку, ты получишь
-      +{{ referral_bonus_days }} дней Premium. Твой друг тоже получит
-      +{{ referral_bonus_days }} дней к своей подписке.
-      Без ограничений по количеству друзей.
-    </p>
-  </div>
-
-  <!-- Social Proof / Stats -->
-  <div class="card" style="margin-top: 2.5rem; background: var(--surface-50); border: 1px dashed var(--border-medium);">
-    <div class="grid grid-3" style="text-align: center;">
-      <div>
-        <div style="font-size: 1.875rem; font-weight: 800; color: var(--brand-primary);">6</div>
-        <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em;">Стадий SRS</div>
-      </div>
-      <div>
-        <div style="font-size: 1.875rem; font-weight: 800; color: var(--brand-secondary);">15с</div>
-        <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em;">Среднее время оценки</div>
-      </div>
-      <div>
-        <div style="font-size: 1.875rem; font-weight: 800; color: #10b981;">100%</div>
-        <div style="color: var(--text-muted); font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.05em;">Серверный рендеринг</div>
-      </div>
+    <div class="container--medium" style="margin: 0 auto;">
+        <h3 style="text-align: center; margin-bottom: 1.5rem;">Как работает метод</h3>
+        <div class="grid grid-4" style="text-align: left;">
+            <div class="card" style="text-align: center;">
+                <div class="stat-card__icon" style="margin: 0 auto 0.75rem; background: rgba(99,102,241,0.1); color: var(--brand-primary);">
+                    <i data-lucide="filter" style="width: 20px; height: 20px;"></i>
+                </div>
+                <h4 style="margin-bottom: 0.375rem;">Подбор слов</h4>
+                <p style="color: var(--text-muted); font-size: 0.8125rem;">Алгоритм выбирает слова, которые нужно повторить</p>
+            </div>
+            <div class="card" style="text-align: center;">
+                <div class="stat-card__icon" style="margin: 0 auto 0.75rem; background: rgba(236,72,153,0.1); color: var(--brand-secondary);">
+                    <i data-lucide="sparkles" style="width: 20px; height: 20px;"></i>
+                </div>
+                <h4 style="margin-bottom: 0.375rem;">ИИ пишет контекст</h4>
+                <p style="color: var(--text-muted); font-size: 0.8125rem;">Нейросеть создаёт предложение с вашими словами</p>
+            </div>
+            <div class="card" style="text-align: center;">
+                <div class="stat-card__icon" style="margin: 0 auto 0.75rem; background: rgba(16,185,129,0.1); color: #10b981;">
+                    <i data-lucide="pen-line" style="width: 20px; height: 20px;"></i>
+                </div>
+                <h4 style="margin-bottom: 0.375rem;">Вы переводите</h4>
+                <p style="color: var(--text-muted); font-size: 0.8125rem;">Переводите предложение на русский</p>
+            </div>
+            <div class="card" style="text-align: center;">
+                <div class="stat-card__icon" style="margin: 0 auto 0.75rem; background: rgba(245,158,11,0.1); color: var(--text-warning-strong);">
+                    <i data-lucide="scan-eye" style="width: 20px; height: 20px;"></i>
+                </div>
+                <h4 style="margin-bottom: 0.375rem;">ИИ проверяет</h4>
+                <p style="color: var(--text-muted); font-size: 0.8125rem;">Разбирает каждое слово: усвоено, опечатка, ошибка</p>
+            </div>
+        </div>
+        <p style="text-align: center; color: var(--text-secondary); margin-top: 1.5rem; font-size: 1rem;">
+            Вы не зубрите — вы читаете и запоминаете, потому что слово встроено в живой текст.
+        </p>
     </div>
-  </div>
+</section>
 
-</div>
+{# =====================================================================
+   БЛОК 3. КЛЮЧЕВЫЕ ВЫГОДЫ (6 карточек)
+===================================================================== #}
+<section class="container" style="padding: 3rem 0;">
+    <div class="page-header">
+        <h2 class="page-header__title text-gradient">Почему это работает</h2>
+        <p class="page-header__subtitle">Шесть причин, по которым слова остаются в памяти</p>
+    </div>
+
+    <div class="container--medium" style="margin: 0 auto;">
+        <div class="grid grid-3">
+            <div class="card">
+                <div class="stat-card__icon" style="background: rgba(236,72,153,0.1); color: var(--brand-secondary);">
+                    <i data-lucide="sparkles" style="width: 20px; height: 20px;"></i>
+                </div>
+                <h3>Контекст от ИИ</h3>
+                <p style="color: var(--text-secondary);">Уникальные предложения под ваш уровень — от A1 до C2. Каждый раз новый текст.</p>
+            </div>
+            <div class="card">
+                <div class="stat-card__icon" style="background: rgba(99,102,241,0.1); color: var(--brand-primary);">
+                    <i data-lucide="brain" style="width: 20px; height: 20px;"></i>
+                </div>
+                <h3>Интервальное повторение</h3>
+                <p style="color: var(--text-secondary);">6 стадий: повтор через 1, 2, 3, 7, 11 и 30 уроков. Ровно тогда, когда начинаете забывать.</p>
+            </div>
+            <div class="card">
+                <div class="stat-card__icon" style="background: rgba(16,185,129,0.1); color: #10b981;">
+                    <i data-lucide="scan-eye" style="width: 20px; height: 20px;"></i>
+                </div>
+                <h3>Умная проверка</h3>
+                <p style="color: var(--text-secondary);">Разбор каждого слова + подсказки новых слов из вашего перевода.</p>
+            </div>
+            <div class="card">
+                <div class="stat-card__icon" style="background: rgba(245,158,11,0.1); color: var(--text-warning-strong);">
+                    <i data-lucide="target" style="width: 20px; height: 20px;"></i>
+                </div>
+                <h3>Учите то, что нужно</h3>
+                <p style="color: var(--text-secondary);">Словари: общий, IT, путешествия. Плюс свои слова через ИИ.</p>
+            </div>
+            <div class="card">
+                <div class="stat-card__icon" style="background: rgba(6,182,212,0.1); color: var(--text-accent);">
+                    <i data-lucide="trending-up" style="width: 20px; height: 20px;"></i>
+                </div>
+                <h3>Авто-рост уровня</h3>
+                <p style="color: var(--text-secondary);">Когда слова текущего уровня выучены, система автоматически повышает уровень. Приложение растёт вместе с вами.</p>
+            </div>
+            <div class="card">
+                <div class="stat-card__icon" style="background: rgba(239,68,68,0.1); color: var(--text-error-strong);">
+                    <i data-lucide="flame" style="width: 20px; height: 20px;"></i>
+                </div>
+                <h3>Мотивация</h3>
+                <p style="color: var(--text-secondary);">Серии дней подряд и наглядный прогресс: сколько слов в активе, сколько изучено. Не даёт забросить.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+{# =====================================================================
+   БЛОК 4. ДЛЯ КОГО
+===================================================================== #}
+<section class="container" style="padding: 3rem 0;">
+    <div class="page-header">
+        <h2 class="page-header__title text-gradient">Для кого это</h2>
+        <p class="page-header__subtitle">Три сценария использования</p>
+    </div>
+    <div class="container--medium" style="margin: 0 auto;">
+        <div class="grid grid-3">
+            <div class="card">
+                <div style="font-size: 2rem; margin-bottom: 0.75rem;" aria-hidden="true">💻</div>
+                <h3>Айтишникам</h3>
+                <p style="color: var(--text-secondary);">Словарь IT: термины, код, архитектура, собеседования на английском. Готовьтесь к международным проектам.</p>
+            </div>
+            <div class="card">
+                <div style="font-size: 2rem; margin-bottom: 0.75rem;" aria-hidden="true">✈️</div>
+                <h3>Путешественникам</h3>
+                <p style="color: var(--text-secondary);">Словарь Travel: аэропорт, отель, ресторан, навигация. Уверенность в любой стране.</p>
+            </div>
+            <div class="card">
+                <div style="font-size: 2rem; margin-bottom: 0.75rem;" aria-hidden="true">📚</div>
+                <h3>Тем, кто бросал</h3>
+                <p style="color: var(--text-secondary);">Общий словарь + алгоритм, который не даёт забросить. Серии дней подряд и наглядный прогресс.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+{# =====================================================================
+   БЛОК 5. КАК ЭТО ВЫГЛЯДИТ (скриншоты)
+   ЗАМЕНИТЕ мокапы на реальные скриншоты: /static/img/screens/*.png
+===================================================================== #}
+<section class="container" style="padding: 3rem 0;">
+    <div class="page-header">
+        <h2 class="page-header__title text-gradient">Как это выглядит</h2>
+        <p class="page-header__subtitle">Чистый интерфейс без рекламы и отвлекающих факторов</p>
+    </div>
+    <div class="container--medium" style="margin: 0 auto;">
+        <div class="grid grid-3">
+            <div class="card" style="padding: 1rem; text-align: center;">
+                <img src="/static/img/screens/dashboard.png" alt="Дашборд" loading="lazy" style="width:100%; border-radius:var(--radius-md);">
+                <p style="color: var(--text-secondary); font-size: 0.875rem;">Дашборд со статистикой и стриком</p>
+            </div>
+            <div class="card" style="padding: 1rem; text-align: center;">
+                <img src="/static/img/screens/exercise.png" alt="Упражнение" loading="lazy" style="width:100%; border-radius:var(--radius-md);">
+                <p style="color: var(--text-secondary); font-size: 0.875rem;">Упражнение с переводом предложения</p>
+            </div>
+            <div class="card" style="padding: 1rem; text-align: center;">
+                <img src="/static/img/screens/summary.png" alt="Разбор" loading="lazy" style="width:100%; border-radius:var(--radius-md);">
+                <p style="color: var(--text-secondary); font-size: 0.875rem;">Разбор результата после проверки</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+{# =====================================================================
+   БЛОК 6. ТАРИФЫ + РЕФЕРАЛЬНАЯ ПРОГРАММА
+===================================================================== #}
+<section class="container" style="padding: 3rem 0;">
+    <div class="page-header">
+        <h2 class="page-header__title text-gradient">Тарифы</h2>
+        <p class="page-header__subtitle">Начните бесплатно — {{ free_lessons_total }} уроков без оплаты</p>
+    </div>
+
+    <div class="container--medium" style="margin: 0 auto;">
+        <div class="grid grid-3" style="align-items: stretch;">
+            {# Free #}
+            <div class="card pricing-card">
+                <h3 style="margin-top: 0;">Free</h3>
+                <div class="pricing-card__price">0 ₽</div>
+                <ul class="pricing-card__features">
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> {{ free_daily_limit }} урок в день</li>
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> {{ free_lessons_total }} уроков всего</li>
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ words_per_lesson_max }} слов в уроке</li>
+                </ul>
+                <a href="/register" role="button" class="secondary" style="width: 100%;">Начать бесплатно</a>
+            </div>
+
+            {# Monthly #}
+            <div class="card pricing-card pricing-card--popular">
+                <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 0.75rem;">Популярный</div>
+                <h3 style="margin-top: 0;">Месячная</h3>
+                <div class="pricing-card__price">{{ "%.0f" | format(monthly_price) }} ₽ <span class="pricing-card__period">/мес</span></div>
+                <ul class="pricing-card__features">
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ daily_lesson_limit_max }} уроков в день</li>
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ words_per_lesson_max }} слов в уроке</li>
+                </ul>
+                <a href="/register" role="button" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</a>
+            </div>
+
+            {# 6 Months #}
+            <div class="card pricing-card pricing-card--best">
+                <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 0.75rem;">−{{ discount_percent }}%</div>
+                <h3 style="margin-top: 0;">6 месяцев</h3>
+                <div class="pricing-card__price">{{ "%.0f" | format(six_month_price) }} ₽</div>
+                <div class="pricing-card__note">
+                    {{ "%.0f" | format(six_month_per_month) }} ₽/мес · <s>{{ "%.0f" | format(six_month_full) }} ₽</s> · экономия {{ "%.0f" | format(six_month_saving) }} ₽
+                </div>
+                <ul class="pricing-card__features">
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ daily_lesson_limit_max }} уроков в день</li>
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ words_per_lesson_max }} слов в уроке</li>
+                </ul>
+                <a href="/register" role="button" class="btn--success" style="width: 100%;">Подключить за {{ "%.0f" | format(six_month_price) }} ₽</a>
+            </div>
+        </div>
+
+        {# Реферальная программа #}
+        <div class="card" style="margin-top: 1.5rem; background: var(--surface-50); border: 1px dashed var(--brand-primary); text-align: center; padding: 1.5rem;">
+            <div style="font-size: 1.75rem; margin-bottom: 0.375rem;" aria-hidden="true">🎁</div>
+            <h3 style="margin-bottom: 0.375rem;">Пригласи друга — получи +{{ referral_bonus_days }} дней</h3>
+            <p style="color: var(--text-secondary); max-width: 540px; margin: 0 auto;">
+                Когда друг купит подписку, вы оба получите <strong>+{{ referral_bonus_days }} дней Premium</strong>. Без ограничений по количеству друзей.
+            </p>
+        </div>
+    </div>
+</section>
+
+{# =====================================================================
+   БЛОК 7. ЧАСТЫЕ ВОПРОСЫ (аккордеон на Alpine)
+===================================================================== #}
+<section class="container" style="padding: 3rem 0;">
+    <div class="page-header">
+        <h2 class="page-header__title text-gradient">Частые вопросы</h2>
+    </div>
+    <div class="container--narrow" style="margin: 0 auto;" x-data="{ open: null }">
+        {% set faqs = [
+            ("Нужен ли начальный уровень английского?", "Нет. Начните с A1 — приложение подстроится под ваш уровень и будет расти вместе с вами."),
+            ("Чем это отличается от Anki или Quizlet?", "Здесь не карточки, а предложения. ИИ генерирует уникальный контекст для ваших слов, проверяет перевод и предлагает новые слова."),
+            ("Можно учить свои слова?", "Да. Введите любое слово — если его нет в базе, ИИ сам определит перевод, уровень и часть речи."),
+            ("Сколько времени нужно в день?", "Один урок — это несколько слов и предложений. Занимает 3–5 минут."),
+            ("Что после бесплатных уроков?", "Можно продолжить на Premium (до " ~ daily_lesson_limit_max ~ " уроков в день, безлимит) или повторять выученные слова в словаре."),
+            ("Как отменить подписку?", "В один клик в личном кабинете. Доступ сохранится до конца оплаченного периода.")
+        ] %}
+        {% for q, a in faqs %}
+        <div class="card" style="margin-bottom: 0.75rem; padding: 1rem 1.25rem;">
+            <button @click="open = open === {{ loop.index }} ? null : {{ loop.index }}"
+                    :aria-expanded="(open === {{ loop.index }}).toString()"
+                    style="width: 100%; background: transparent; color: inherit; justify-content: space-between; padding: 0; box-shadow: none;">
+                <span style="font-weight: 600; text-align: left;">{{ q }}</span>
+                <i data-lucide="chevron-down" x-show="open !== {{ loop.index }}" class="icon-lg" style="color: var(--text-muted); flex-shrink: 0;" aria-hidden="true"></i>
+                <i data-lucide="chevron-up" x-show="open === {{ loop.index }}" x-cloak class="icon-lg" style="color: var(--brand-primary); flex-shrink: 0;" aria-hidden="true"></i>
+            </button>
+            <div x-show="open === {{ loop.index }}" x-transition style="margin-top: 0.75rem; color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.6;">
+                {{ a }}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+
+{# =====================================================================
+   БЛОК 8. ФИНАЛЬНЫЙ CTA
+===================================================================== #}
+<section class="container" style="padding: 3rem 0 2rem;">
+    <div class="container--medium" style="margin: 0 auto;">
+        <div class="cta-section">
+            <h3>Готовы запоминать слова навсегда?</h3>
+            <p>{{ free_lessons_total }} бесплатных уроков. Без карты, без обязательств.</p>
+            <a href="/register" role="button">Начать бесплатно</a>
+            <p style="margin-top: 0.75rem; font-size: 0.8125rem; opacity: 0.8;">
+                Уже есть аккаунт? <a href="/login" style="color: inherit; font-weight: 600;">Войти</a>
+            </p>
+        </div>
+    </div>
+</section>
+
+{# Адаптивность #}
+<style>
+@media (max-width: 1024px) {
+    .hero-grid { grid-template-columns: 1fr !important; text-align: center !important; }
+    .hero-grid > div:first-child { text-align: center !important; }
+    .hero-grid .exercise-card { max-width: 480px; margin: 0 auto !important; }
+    .hero-actions { justify-content: center !important; }
+}
+</style>
 {% endblock %}
 ### end of app/templates/landing.html ########################################################################
 

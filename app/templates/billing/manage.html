@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block title %}Подписка — 101slovo{% endblock %}
-
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
     <div class="section-header">
@@ -57,7 +56,7 @@
             <span class="badge badge-active badge--md">Free</span>
         </div>
         <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-            У вас бесплатный план: 1 урок в день, 5 уроков всего.
+            У вас бесплатный план: до {{ max_lessons_per_day }} уроков в день, {{ free_lessons_total }} уроков всего.
         </p>
         <a href="/billing/plans" role="button" style="background: var(--gradient-primary);">
             <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
@@ -71,7 +70,7 @@
     <div class="card mb-3">
         <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
             <i data-lucide="gift" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
-            Пригласи друга — получи месяц бесплатно
+            Пригласи друга — получите по 15 дней доступа бесплатно
         </h3>
         <p style="color: var(--text-secondary); margin-bottom: 1rem;">
             Поделись промокодом с другом. Когда он купит подписку, ты получишь

@@ -2,110 +2,110 @@
 {% block title %}Тарифы — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-  <div class="page-header">
-    <div class="page-header__emoji">👑</div>
-    <h1 class="page-header__title text-gradient">Premium подписка</h1>
-    <p class="page-header__subtitle">Безлимитные уроки без ограничений</p>
-  </div>
-
-  {% if subscription.is_premium %}
-  <div class="flash-info mb-3">
-    <i data-lucide="check-circle" class="icon-md" aria-hidden="true"></i>
-    У вас уже активна подписка <strong>{{ subscription.plan }}</strong>
-    до {{ subscription.expires_at.strftime('%d.%m.%Y') }}.
-    При покупке нового тарифа оставшиеся дни будут добавлены.
-  </div>
-  {% endif %}
-
-  <div class="grid grid-3" style="align-items: stretch;">
-    <!-- Free -->
-    <div class="card pricing-card">
-      <h3 style="margin-top: 0;">Free</h3>
-      <div class="pricing-card__price">0 ₽</div>
-      <ul class="pricing-card__features">
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          {{ free_daily_limit }} урок{% if free_daily_limit != 1 %}а{% endif %} в день
-        </li>
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          {{ free_lessons_total }} уроков всего
-        </li>
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          До {{ words_per_lesson_max }} слов в уроке
-        </li>
-      </ul>
-      <button disabled class="secondary" style="width: 100%;">Текущий план</button>
+    <div class="page-header">
+        <div class="page-header__emoji">👑</div>
+        <h1 class="page-header__title text-gradient">Premium подписка</h1>
+        <p class="page-header__subtitle">Безлимитные уроки без ограничений</p>
     </div>
 
-    <!-- Monthly -->
-    <div class="card pricing-card pricing-card--popular">
-      <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 0.75rem;">Популярный</div>
-      <h3 style="margin-top: 0;">Месячная</h3>
-      <div class="pricing-card__price">
-        {{ "%.0f" | format(monthly_price) }} ₽
-        <span class="pricing-card__period">/мес</span>
-      </div>
-      <ul class="pricing-card__features">
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          До {{ daily_lesson_limit_max }} уроков в день
-        </li>
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          До {{ words_per_lesson_max }} слов в уроке
-        </li>
-      </ul>
-      <form method="POST" action="/billing/subscribe">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-        <input type="hidden" name="plan" value="monthly">
-        <label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.875rem; font-size: 0.75rem; color: var(--text-muted); cursor: pointer; line-height: 1.5;">
-          <input type="checkbox" required style="width: auto; margin-top: 2px; flex-shrink: 0;">
-          <span>
-            Согласен с <a href="/legal/offer" target="_blank">публичной офертой</a>,
-            <a href="/legal/privacy" target="_blank">политикой конфиденциальности</a>
-            и даю согласие на
-            <a href="/legal/consent" target="_blank">обработку персональных данных</a>
-            и автоматическое списание средств
-          </span>
-        </label>
-        <button type="submit" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</button>
-      </form>
+    {% if subscription.is_premium %}
+    <div class="flash-info mb-3">
+        <i data-lucide="check-circle" class="icon-md" aria-hidden="true"></i>
+        У вас уже активна подписка <strong>{{ subscription.plan }}</strong>
+        до {{ subscription.expires_at.strftime('%d.%m.%Y') }}.
+        При покупке нового тарифа оставшиеся дни будут добавлены.
     </div>
+    {% endif %}
 
-    <!-- 6 Months -->
-    <div class="card pricing-card pricing-card--best">
-      <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 0.75rem;">−{{ discount_percent }}%</div>
-      <h3 style="margin-top: 0;">6 месяцев</h3>
-      <div class="pricing-card__price">{{ "%.0f" | format(six_month_price) }} ₽</div>
-      <div class="pricing-card__note">
-        {{ "%.0f" | format(six_month_per_month) }} ₽/мес ·
-        <s>{{ "%.0f" | format(six_month_full) }} ₽</s> ·
-        экономия {{ "%.0f" | format(six_month_saving) }} ₽
-      </div>
-      <ul class="pricing-card__features">
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          До {{ daily_lesson_limit_max }} уроков в день
-        </li>
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          До {{ words_per_lesson_max }} слов в уроке
-        </li>
-      </ul>
-      <form method="POST" action="/billing/subscribe">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-        <input type="hidden" name="plan" value="six_months">
-        <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.875rem; font-size: 0.75rem; color: var(--text-muted); cursor: pointer;">
-          <input type="checkbox" required style="width: auto;">
-          Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
-        </label>
-        <button type="submit" class="btn--success" style="width: 100%;">
-          Подключить за {{ "%.0f" | format(six_month_price) }} ₽
-        </button>
-      </form>
+    <div class="grid grid-3" style="align-items: stretch;">
+        <!-- Free -->
+        <div class="card pricing-card">
+            <h3 style="margin-top: 0;">Free</h3>
+            <div class="pricing-card__price">0 ₽</div>
+            <ul class="pricing-card__features">
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    До {{ max_lessons_per_day }} уроков в день
+                </li>
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    {{ free_lessons_total }} уроков всего
+                </li>
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    До {{ words_per_lesson_max }} слов в уроке
+                </li>
+            </ul>
+            <button disabled class="secondary" style="width: 100%;">Текущий план</button>
+        </div>
+
+        <!-- Monthly -->
+        <div class="card pricing-card pricing-card--popular">
+            <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 0.75rem;">Популярный</div>
+            <h3 style="margin-top: 0;">Месячная</h3>
+            <div class="pricing-card__price">
+                {{ "%.0f" | format(monthly_price) }} ₽
+                <span class="pricing-card__period">/мес</span>
+            </div>
+            <ul class="pricing-card__features">
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    До {{ max_lessons_per_day }} уроков в день
+                </li>
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    До {{ words_per_lesson_max }} слов в уроке
+                </li>
+            </ul>
+            <form method="POST" action="/billing/subscribe">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <input type="hidden" name="plan" value="monthly">
+                <label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.875rem; font-size: 0.75rem; color: var(--text-muted); cursor: pointer; line-height: 1.5;">
+                    <input type="checkbox" required style="width: auto; margin-top: 2px; flex-shrink: 0;">
+                    <span>
+                        Согласен с <a href="/legal/offer" target="_blank">публичной офертой</a>,
+                        <a href="/legal/privacy" target="_blank">политикой конфиденциальности</a>
+                        и даю согласие на
+                        <a href="/legal/consent" target="_blank">обработку персональных данных</a>
+                        и автоматическое списание средств
+                    </span>
+                </label>
+                <button type="submit" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</button>
+            </form>
+        </div>
+
+        <!-- 6 Months -->
+        <div class="card pricing-card pricing-card--best">
+            <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 0.75rem;">−{{ discount_percent }}%</div>
+            <h3 style="margin-top: 0;">6 месяцев</h3>
+            <div class="pricing-card__price">{{ "%.0f" | format(six_month_price) }} ₽</div>
+            <div class="pricing-card__note">
+                {{ "%.0f" | format(six_month_per_month) }} ₽/мес ·
+                <s>{{ "%.0f" | format(six_month_full) }} ₽</s> ·
+                экономия {{ "%.0f" | format(six_month_saving) }} ₽
+            </div>
+            <ul class="pricing-card__features">
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    До {{ max_lessons_per_day }} уроков в день
+                </li>
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    До {{ words_per_lesson_max }} слов в уроке
+                </li>
+            </ul>
+            <form method="POST" action="/billing/subscribe">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <input type="hidden" name="plan" value="six_months">
+                <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.875rem; font-size: 0.75rem; color: var(--text-muted); cursor: pointer;">
+                    <input type="checkbox" required style="width: auto;">
+                    Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
+                </label>
+                <button type="submit" class="btn--success" style="width: 100%;">
+                    Подключить за {{ "%.0f" | format(six_month_price) }} ₽
+                </button>
+            </form>
+        </div>
     </div>
-  </div>
 </div>
 {% endblock %}

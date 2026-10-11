@@ -3,10 +3,8 @@ import logging
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
-
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.config import settings
 from app.models.user import User
 from app.models.partner import Partner
@@ -21,10 +19,8 @@ logger = logging.getLogger(__name__)
 _CODE_ALPHABET = string.ascii_uppercase.replace("O", "").replace("I", "").replace("L", "")
 _CODE_ALPHABET += string.digits.replace("0", "").replace("1", "")
 
-
 def _generate_invite_token() -> str:
     return secrets.token_urlsafe(32)
-
 
 def _mask_email(email: str) -> str:
     if "@" not in email:
@@ -44,7 +40,6 @@ def _mask_email(email: str) -> str:
 async def create_partner_invite(db: AsyncSession, admin: User) -> PartnerInvite:
     token = _generate_invite_token()
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.PARTNER_INVITE_TTL_DAYS)
-
     invite = PartnerInvite(
         token=token,
         created_by=admin.id,
@@ -61,7 +56,6 @@ async def create_partner_invite(db: AsyncSession, admin: User) -> PartnerInvite:
     )
     db.add(event)
     await db.flush()
-
     logger.info(f"[PARTNER] Invite created by admin {admin.id}, token={token[:8]}...")
     return invite
 
@@ -109,20 +103,23 @@ async def register_partner_full(
     else:
         if not email or not password:
             raise ValueError("Укажите email и пароль")
+
         # Проверяем уникальность email
         stmt = select(User).where(User.email == email.lower())
         result = await db.execute(stmt)
         if result.scalar_one_or_none():
             raise ValueError("Пользователь с таким email уже существует")
+
         from app.security import hash_password
         user = User(
             email=email.lower(),
             password_hash=hash_password(password),
             words_per_lesson=settings.WORDS_PER_LESSON_DEFAULT,
-            daily_lesson_limit=settings.DAILY_LESSON_LIMIT_DEFAULT,
+            daily_lesson_limit=settings.MAX_LESSONS_PER_DAY,
         )
         db.add(user)
         await db.flush()
+
         event = Event(user_id=user.id, type="signup")
         db.add(event)
 
@@ -234,8 +231,10 @@ async def approve_promo_code(db: AsyncSession, promo_id: int, admin: User) -> No
         raise ValueError("Промокод не найден")
     if promo.status != "pending":
         raise ValueError(f"Промокод уже в статусе '{promo.status}'")
+
     promo.status = "approved"
     promo.is_active = True
+
     event = Event(user_id=admin.id, type="partner_promo_approved", payload={"promo_id": promo.id, "code": promo.code})
     db.add(event)
     await db.flush()
@@ -248,8 +247,10 @@ async def decline_promo_code(db: AsyncSession, promo_id: int, admin: User) -> No
     promo = result.scalar_one_or_none()
     if not promo:
         raise ValueError("Промокод не найден")
+
     promo.status = "disabled"
     promo.is_active = False
+
     event = Event(user_id=admin.id, type="partner_promo_declined", payload={"promo_id": promo.id, "code": promo.code})
     db.add(event)
     await db.flush()
@@ -300,7 +301,6 @@ async def get_partner_stats(db: AsyncSession, partner_user_id: int) -> dict:
             paid_earnings_kop += earning.earning_amount_kop
         elif earning.status == "pending":
             pending_earnings_kop += earning.earning_amount_kop
-
         if len(recent_earnings) < 10:
             recent_earnings.append({
                 "id": earning.id,
@@ -416,6 +416,7 @@ async def deactivate_partner(db: AsyncSession, partner_id: int, admin: User) -> 
     )
     db.add(event)
     await db.flush()
+
     logger.info(f"[PARTNER] Partner {partner.id} deactivated by admin {admin.id}")
 
 
@@ -436,7 +437,6 @@ async def get_partner_earnings(
     )
     if status_filter:
         stmt = stmt.where(PartnerEarning.status == status_filter)
-
     result = await db.execute(stmt)
     rows = result.all()
 
@@ -446,6 +446,7 @@ async def get_partner_earnings(
             "earning": earning,
             "user_email_masked": _mask_email(email),
         })
+
     return earnings
 
 
@@ -468,6 +469,7 @@ async def mark_earning_as_paid(db: AsyncSession, earning_id: int, admin: User) -
     )
     db.add(event)
     await db.flush()
+
     logger.info(f"[PARTNER] Earning {earning.id} marked as paid by admin {admin.id}")
 
 
@@ -486,7 +488,6 @@ async def reward_partner_on_purchase(
     buyer_stmt = select(User.referred_by_user_id).where(User.id == buyer_user_id)
     buyer_result = await db.execute(buyer_stmt)
     referrer_user_id = buyer_result.scalar_one_or_none()
-
     if not referrer_user_id:
         return None
 
@@ -506,7 +507,6 @@ async def reward_partner_on_purchase(
     )
     payments_result = await db.execute(payments_stmt)
     total_payments = payments_result.scalar_one_or_none() or 0
-
     if total_payments > 1:
         logger.info(f"[PARTNER] Buyer {buyer_user_id} has {total_payments} payments, skipping partner reward")
         return None

@@ -4,28 +4,24 @@
 {% set selected_level = form.get('level', user.level) if form else user.level %}
 {% set selected_dictionary = form.get('dictionary_code', user.dictionary_code) if form else user.dictionary_code %}
 {% set words_value = form.get('words_per_lesson', user.words_per_lesson or 5) if form else (user.words_per_lesson or 5) %}
-{% set limit_value = form.get('daily_lesson_limit', user.daily_lesson_limit or 1) if form else (user.daily_lesson_limit or 1) %}
 {% set words_min = settings.WORDS_PER_LESSON_MIN if settings else 1 %}
 {% set words_max = settings.WORDS_PER_LESSON_MAX if settings else 10 %}
-{% set limit_max = settings.DAILY_LESSON_LIMIT_MAX if settings else 5 %}
-{% set free_daily_limit = settings.FREE_LESSON_PER_DAY_LIMIT if settings else 1 %}
-
 <div class="container--narrow" style="margin: 0 auto;">
-  <div class="page-header">
-    <div class="page-header__emoji">🎯</div>
-    <h1 class="page-header__title text-gradient">Настройка профиля</h1>
-    <p class="page-header__subtitle">
-      Это займёт всего минуту, чтобы мы подобрали идеальные слова для вас.
-    </p>
-  </div>
+    <div class="page-header">
+        <div class="page-header__emoji">🎯</div>
+        <h1 class="page-header__title text-gradient">Настройка профиля</h1>
+        <p class="page-header__subtitle">
+            Это займёт всего минуту, чтобы мы подобрали идеальные слова для вас.
+        </p>
+    </div>
 
-  {% if error %}
-  <div class="flash-error">
-    <i data-lucide="alert-circle" class="icon-md" style="flex-shrink: 0;" aria-hidden="true"></i>
-    <span>{{ error }}</span>
-  </div>
-  {% endif %}
+    {% if error %}
+    <div class="flash-error">
+        <i data-lucide="alert-circle" class="icon-md" style="flex-shrink: 0;" aria-hidden="true"></i>
+        <span>{{ error }}</span>
+    </div>
+    {% endif %}
 
-  {% include "partials/settings_form.html" with context %}
+    {% include "partials/settings_form.html" with context %}
 </div>
 {% endblock %}

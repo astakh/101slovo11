@@ -1,9 +1,8 @@
 {% extends "base.html" %}
 {% block title %}101slovo — Английские слова в контексте{% endblock %}
-
 {% block content %}
 {# =====================================================================
-   БЛОК 1. HERO + ЖИВОЕ ДЕМО
+БЛОК 1. HERO + ЖИВОЕ ДЕМО
 ===================================================================== #}
 <section class="container" style="padding: 2.5rem 0 1rem;">
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; align-items: center;" class="hero-grid">
@@ -50,7 +49,7 @@
 </section>
 
 {# =====================================================================
-   БЛОК 2. ПРОБЛЕМА → РЕШЕНИЕ
+БЛОК 2. ПРОБЛЕМА → РЕШЕНИЕ
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0;">
     <div class="container--medium" style="text-align: center; margin: 0 auto 2rem;">
@@ -113,14 +112,13 @@
 </section>
 
 {# =====================================================================
-   БЛОК 3. КЛЮЧЕВЫЕ ВЫГОДЫ (6 карточек)
+БЛОК 3. КЛЮЧЕВЫЕ ВЫГОДЫ (6 карточек)
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0;">
     <div class="page-header">
         <h2 class="page-header__title text-gradient">Почему это работает</h2>
         <p class="page-header__subtitle">Шесть причин, по которым слова остаются в памяти</p>
     </div>
-
     <div class="container--medium" style="margin: 0 auto;">
         <div class="grid grid-3">
             <div class="card">
@@ -170,7 +168,7 @@
 </section>
 
 {# =====================================================================
-   БЛОК 4. ДЛЯ КОГО
+БЛОК 4. ДЛЯ КОГО
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0;">
     <div class="page-header">
@@ -199,8 +197,8 @@
 </section>
 
 {# =====================================================================
-   БЛОК 5. КАК ЭТО ВЫГЛЯДИТ (скриншоты)
-   ЗАМЕНИТЕ мокапы на реальные скриншоты: /static/img/screens/*.png
+БЛОК 5. КАК ЭТО ВЫГЛЯДИТ (скриншоты)
+ЗАМЕНИТЕ мокапы на реальные скриншоты: /static/img/screens/*.png
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0;">
     <div class="page-header">
@@ -226,14 +224,13 @@
 </section>
 
 {# =====================================================================
-   БЛОК 6. ТАРИФЫ + РЕФЕРАЛЬНАЯ ПРОГРАММА
+БЛОК 6. ТАРИФЫ + РЕФЕРАЛЬНАЯ ПРОГРАММА
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0;">
     <div class="page-header">
         <h2 class="page-header__title text-gradient">Тарифы</h2>
         <p class="page-header__subtitle">Начните бесплатно — {{ free_lessons_total }} уроков без оплаты</p>
     </div>
-
     <div class="container--medium" style="margin: 0 auto;">
         <div class="grid grid-3" style="align-items: stretch;">
             {# Free #}
@@ -241,7 +238,7 @@
                 <h3 style="margin-top: 0;">Free</h3>
                 <div class="pricing-card__price">0 ₽</div>
                 <ul class="pricing-card__features">
-                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> {{ free_daily_limit }} урок в день</li>
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ max_lessons_per_day }} уроков в день</li>
                     <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> {{ free_lessons_total }} уроков всего</li>
                     <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ words_per_lesson_max }} слов в уроке</li>
                 </ul>
@@ -254,7 +251,7 @@
                 <h3 style="margin-top: 0;">Месячная</h3>
                 <div class="pricing-card__price">{{ "%.0f" | format(monthly_price) }} ₽ <span class="pricing-card__period">/мес</span></div>
                 <ul class="pricing-card__features">
-                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ daily_lesson_limit_max }} уроков в день</li>
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ max_lessons_per_day }} уроков в день</li>
                     <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ words_per_lesson_max }} слов в уроке</li>
                 </ul>
                 <a href="/register" role="button" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</a>
@@ -269,7 +266,7 @@
                     {{ "%.0f" | format(six_month_per_month) }} ₽/мес · <s>{{ "%.0f" | format(six_month_full) }} ₽</s> · экономия {{ "%.0f" | format(six_month_saving) }} ₽
                 </div>
                 <ul class="pricing-card__features">
-                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ daily_lesson_limit_max }} уроков в день</li>
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ max_lessons_per_day }} уроков в день</li>
                     <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ words_per_lesson_max }} слов в уроке</li>
                 </ul>
                 <a href="/register" role="button" class="btn--success" style="width: 100%;">Подключить за {{ "%.0f" | format(six_month_price) }} ₽</a>
@@ -288,7 +285,7 @@
 </section>
 
 {# =====================================================================
-   БЛОК 7. ЧАСТЫЕ ВОПРОСЫ (аккордеон на Alpine)
+БЛОК 7. ЧАСТЫЕ ВОПРОСЫ (аккордеон на Alpine)
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0;">
     <div class="page-header">
@@ -300,7 +297,7 @@
             ("Чем это отличается от Anki или Quizlet?", "Здесь не карточки, а предложения. ИИ генерирует уникальный контекст для ваших слов, проверяет перевод и предлагает новые слова."),
             ("Можно учить свои слова?", "Да. Введите любое слово — если его нет в базе, ИИ сам определит перевод, уровень и часть речи."),
             ("Сколько времени нужно в день?", "Один урок — это несколько слов и предложений. Занимает 3–5 минут."),
-            ("Что после бесплатных уроков?", "Можно продолжить на Premium (до " ~ daily_lesson_limit_max ~ " уроков в день, безлимит) или повторять выученные слова в словаре."),
+            ("Что после бесплатных уроков?", "Можно продолжить на Premium (до " ~ max_lessons_per_day ~ " уроков в день, безлимит по общему числу) или повторять выученные слова в словаре."),
             ("Как отменить подписку?", "В один клик в личном кабинете. Доступ сохранится до конца оплаченного периода.")
         ] %}
         {% for q, a in faqs %}
@@ -321,7 +318,7 @@
 </section>
 
 {# =====================================================================
-   БЛОК 8. ФИНАЛЬНЫЙ CTA
+БЛОК 8. ФИНАЛЬНЫЙ CTA
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0 2rem;">
     <div class="container--medium" style="margin: 0 auto;">

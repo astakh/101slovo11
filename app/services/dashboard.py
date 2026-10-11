@@ -6,7 +6,6 @@ from app.models.user_word import UserWord
 from app.utils.datetime_utils import get_user_today
 from app.utils.streak import calculate_streak
 
-
 async def get_dashboard_data(
     db: AsyncSession,
     user: User,
@@ -52,10 +51,10 @@ async def get_dashboard_data(
     completed_dates = [row[0] for row in result_dates]
     streak = calculate_streak(completed_dates, today)
 
-    # ✅ ФИКС: Используем эффективный дневной лимит для определения CTA.
-    # Для freemium это FREE_LESSON_PER_DAY_LIMIT (1),
-    # для premium — user.daily_lesson_limit (до DAILY_LESSON_LIMIT_MAX).
-    # Если эффективный лимит не передан, используем настройку пользователя
+    # Дневной лимит: единый для всех тарифов.
+    # Берётся из user.daily_lesson_limit (может быть переопределён
+    # администратором для отдельных пользователей).
+    # Если эффективный лимит не передан, используем значение пользователя
     # (обратная совместимость).
     daily_limit = (
         effective_daily_limit

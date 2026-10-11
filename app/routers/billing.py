@@ -79,6 +79,8 @@ async def billing_page(
             "referral": referral_stats,
             "referral_bonus_days": settings.REFERRAL_BONUS_DAYS,
             "is_partner": partner is not None,
+            "max_lessons_per_day": settings.MAX_LESSONS_PER_DAY,
+            "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
         },
     )
 
@@ -113,9 +115,8 @@ async def plans_page(
             "six_month_full": six_month_full,
             "six_month_saving": six_month_saving,
             "discount_percent": settings.SUBSCRIPTION_6M_DISCOUNT_PERCENT,
-            "free_daily_limit": settings.FREE_LESSON_PER_DAY_LIMIT,
+            "max_lessons_per_day": settings.MAX_LESSONS_PER_DAY,
             "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
-            "daily_lesson_limit_max": settings.DAILY_LESSON_LIMIT_MAX,
             "words_per_lesson_max": settings.WORDS_PER_LESSON_MAX,
         },
     )
@@ -156,6 +157,7 @@ async def subscribe_post(
         logger.warning("[BILLING] ЮKassa не настроена — DEV-режим: активируем подписку")
         payment.status = "succeeded"
         payment.paid_at = datetime.now(timezone.utc)
+
         await activate_subscription(
             db,
             user_id=user.id,
@@ -170,6 +172,7 @@ async def subscribe_post(
             payment_amount_kop=payment.amount_kop,
             payment_id=payment.id,
         )
+
         response = RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
         add_flash(response, "success", "Подписка активирована (DEV-режим) 🎉")
         return response
@@ -178,6 +181,7 @@ async def subscribe_post(
     try:
         base_url = str(request.base_url).rstrip("/")
         return_url = f"{base_url}/billing/success?payment_id={payment.id}"
+
         result = await create_payment(payment, return_url, user_email=user.email)
         payment.yookassa_payment_id = result["yookassa_payment_id"]
         await db.flush()
@@ -186,14 +190,17 @@ async def subscribe_post(
             f"[BILLING] Redirecting to ЮKassa | user_id={user.id} | "
             f"payment_id={payment.id} | yookassa_id={result['yookassa_payment_id']}"
         )
+
         return RedirectResponse(
             url=result["confirmation_url"],
             status_code=status.HTTP_303_SEE_OTHER,
         )
+
     except YooKassaError as e:
         logger.error(f"[BILLING] YooKassa error: {e}")
         payment.status = "failed"
         await db.flush()
+
         response = RedirectResponse(url="/billing/plans", status_code=status.HTTP_303_SEE_OTHER)
         add_flash(response, "error", f"Ошибка создания платежа: {e}")
         return response
@@ -209,12 +216,14 @@ async def billing_success(
     """
     Страница успеха после оплаты (return_url от ЮKassa).
     Проверяет статус платежа и активирует подписку если нужно.
+
     ВАЖНО: Бонус рефереру НЕ начисляется здесь.
     Бонус начисляется ТОЛЬКО через webhook, чтобы избежать
     двойного начисления и проблемы с пропуском.
     """
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
     if not payment_id:
         return RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -225,6 +234,7 @@ async def billing_success(
     )
     result = await db.execute(stmt)
     payment = result.scalar_one_or_none()
+
     if not payment:
         return RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -237,10 +247,12 @@ async def billing_success(
         try:
             info = await get_payment_info(payment.yookassa_payment_id)
             yookassa_status = info.get("status", "")
+
             if yookassa_status == "succeeded":
                 payment.status = "succeeded"
                 paid_at_raw = info.get("captured_at") or info.get("created_at")
                 payment.paid_at = _parse_yookassa_datetime(paid_at_raw)
+
                 await activate_subscription(
                     db,
                     user_id=user.id,
@@ -253,19 +265,23 @@ async def billing_success(
                     f"payment_id={payment.id} | user_id={user.id} | "
                     f"referral bonus will be granted by webhook"
                 )
+
             elif yookassa_status == "canceled":
                 payment.status = "failed"
                 logger.info(f"[BILLING] Payment canceled | payment_id={payment.id}")
+
         except YooKassaError as e:
             logger.warning(f"[BILLING] Could not check payment status: {e}")
 
     response = RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
+
     if payment.status == "succeeded":
         add_flash(response, "success", "Оплата прошла успешно! Подписка активирована 🎉")
     elif payment.status == "failed":
         add_flash(response, "error", "Оплата не прошла. Попробуйте ещё раз.")
     else:
         add_flash(response, "info", "Оплата обрабатывается. Подписка активируется автоматически.")
+
     return response
 
 
@@ -277,11 +293,14 @@ async def cancel_post(
 ):
     """Отмена подписки."""
     success = await cancel_subscription(db, user.id)
+
     response = RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
+
     if success:
         add_flash(response, "info", "Подписка отменена. Доступ сохранится до конца оплаченного периода.")
     else:
         add_flash(response, "error", "Активная подписка не найдена.")
+
     return response
 
 
@@ -305,6 +324,7 @@ async def billing_webhook(
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
         client_ip = forwarded.split(",")[0].strip()
+
     if not is_webhook_ip_allowed(client_ip):
         logger.warning(f"[WEBHOOK] Rejected: IP {client_ip} not in ЮKassa whitelist")
         return JSONResponse(
@@ -322,6 +342,7 @@ async def billing_webhook(
     event = body.get("event", "")
     obj = body.get("object", {})
     yookassa_payment_id = obj.get("id", "")
+
     logger.info(f"[WEBHOOK] Received event: {event} | yookassa_id={yookassa_payment_id}")
 
     # 3. Находим платёж в БД
@@ -332,6 +353,7 @@ async def billing_webhook(
     stmt = select(Payment).where(Payment.yookassa_payment_id == yookassa_payment_id)
     result = await db.execute(stmt)
     payment = result.scalar_one_or_none()
+
     if not payment:
         logger.warning(
             f"[WEBHOOK] Payment not found in DB | yookassa_id={yookassa_payment_id}"
@@ -344,6 +366,7 @@ async def billing_webhook(
             payment.status = "succeeded"
             paid_at_raw = obj.get("captured_at") or obj.get("created_at")
             payment.paid_at = _parse_yookassa_datetime(paid_at_raw)
+
             await activate_subscription(
                 db,
                 user_id=payment.user_id,
@@ -355,6 +378,7 @@ async def billing_webhook(
                 f"[WEBHOOK] Payment succeeded | payment_id={payment.id} | "
                 f"user_id={payment.user_id} | plan={payment.plan}"
             )
+
             event_record = Event(
                 user_id=payment.user_id,
                 type="payment_succeeded",
@@ -383,6 +407,7 @@ async def billing_webhook(
                 f"[WEBHOOK] Payment canceled | payment_id={payment.id} | "
                 f"user_id={payment.user_id}"
             )
+
             event_record = Event(
                 user_id=payment.user_id,
                 type="payment_canceled",
@@ -393,6 +418,7 @@ async def billing_webhook(
                 },
             )
             db.add(event_record)
+
     else:
         logger.info(f"[WEBHOOK] Unhandled event: {event}")
 
