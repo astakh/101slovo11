@@ -12,12 +12,13 @@ from app.models.event import Event
 logger = logging.getLogger(__name__)
 
 # Длительность подписок в днях
-# ВАЖНО: для "referral_bonus" базовых дней = 0,
+# ВАЖНО: для "referral_bonus" и "admin_bonus" базовых дней = 0,
 # добавляются только extra_days. Иначе бонус будет 30 + extra.
 PLAN_DAYS = {
     "monthly": 30,
     "six_months": 180,
     "referral_bonus": 0,
+    "admin_bonus": 0,
 }
 
 
@@ -47,7 +48,6 @@ async def is_premium(db: AsyncSession, user_id: int) -> bool:
 async def get_subscription_status(db: AsyncSession, user_id: int) -> dict:
     """
     Возвращает полную информацию о подписке для шаблонов.
-
     Returns:
         {
             "is_premium": bool,
@@ -66,10 +66,8 @@ async def get_subscription_status(db: AsyncSession, user_id: int) -> dict:
             "days_left": 0,
             "source": None,
         }
-
     now = datetime.now(timezone.utc)
     days_left = max((sub.expires_at - now).days, 0)
-
     return {
         "is_premium": True,
         "plan": sub.plan,
@@ -90,19 +88,19 @@ async def activate_subscription(
     """
     Активирует подписку.
     Если уже есть активная — продлевает её.
-
     Для реферальных бонусов (plan="referral_bonus", source="referral")
+    и админских бонусов (plan="admin_bonus", source="admin")
     базовых дней 0 — добавляются только extra_days.
 
     Args:
-        plan: "monthly" | "six_months" | "referral_bonus"
-        source: "payment" | "referral"
+        plan: "monthly" | "six_months" | "referral_bonus" | "admin_bonus"
+        source: "payment" | "referral" | "admin"
         payment_id: ID платежа (для оплаты)
-        extra_days: дополнительные дни (для рефералки)
+        extra_days: дополнительные дни (для рефералки / админа)
     """
     now = datetime.now(timezone.utc)
 
-    # Для referral_bonus базовых дней нет (0), только бонусные.
+    # Для referral_bonus и admin_bonus базовых дней нет (0), только бонусные.
     # Для остальных планов берём из PLAN_DAYS.
     base_days = PLAN_DAYS.get(plan, 0)
     total_days = base_days + extra_days
@@ -120,10 +118,12 @@ async def activate_subscription(
     if existing:
         # Продлеваем: добавляем дни к текущему expires_at
         existing.expires_at = existing.expires_at + timedelta(days=total_days)
+
         # Обновляем план только если это НЕ реферальный бонус
-        # (чтобы не перезаписать "monthly" на "referral_bonus")
-        if source != "referral":
+        # и НЕ админский бонус (чтобы не перезаписать "monthly" на "referral_bonus" / "admin_bonus")
+        if source not in ("referral", "admin"):
             existing.plan = plan
+
         if payment_id:
             existing.payment_id = payment_id
 
@@ -151,7 +151,6 @@ async def activate_subscription(
 
     # Создаём новую подписку
     expires_at = now + timedelta(days=total_days)
-
     sub = Subscription(
         user_id=user_id,
         plan=plan,
@@ -214,7 +213,6 @@ async def expire_subscriptions(db: AsyncSession) -> int:
     """
     Фоновая задача: переводит истёкшие подписки в статус 'expired'.
     Вызывается периодически (например, каждый час).
-
     Returns:
         Количество переведённых подписок.
     """
@@ -229,11 +227,39 @@ async def expire_subscriptions(db: AsyncSession) -> int:
     )
     result = await db.execute(stmt)
     count = result.rowcount
-
     if count > 0:
         logger.info(f"[SUBSCRIPTION] Expired {count} subscriptions")
-
     return count
+
+
+async def get_admin_bonus_notification(db: AsyncSession, user_id: int) -> dict | None:
+    """
+    Проверяет, есть ли недавнее начисление дней от администратора.
+    Используется для показа баннера на дашборде.
+    Показывает уведомление в течение 30 дней после начисления.
+
+    Returns:
+        {"days": int, "granted_at": datetime} или None
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    stmt = (
+        select(Event)
+        .where(
+            Event.user_id == user_id,
+            Event.type == "admin_days_granted",
+            Event.created_at >= cutoff,
+        )
+        .order_by(Event.created_at.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    event = result.scalar_one_or_none()
+    if not event:
+        return None
+    return {
+        "days": event.payload.get("days", 0),
+        "granted_at": event.created_at,
+    }
 
 
 def get_plan_price_kop(plan: str) -> int:
@@ -251,5 +277,6 @@ def get_plan_label(plan: str) -> str:
         "monthly": "Месячная подписка",
         "six_months": "Подписка на 6 месяцев",
         "referral_bonus": "Бонус по реферальной программе",
+        "admin_bonus": "Бонус от администратора",
     }
     return labels.get(plan, plan)

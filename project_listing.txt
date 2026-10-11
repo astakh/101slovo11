@@ -31,6 +31,10 @@ DEFAULT_DICTIONARY_CODE=general
 # Level Up
 MAX_LEVEL=C2
 
+# Дневной лимит уроков (единый для всех, по умолчанию при регистрации)
+MAX_LESSONS_PER_DAY=3
+
+
 # ============================================
 # Monetization
 # ============================================
@@ -126,7 +130,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 from typing import List
 
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
 
@@ -152,8 +155,8 @@ class Settings(BaseSettings):
     WORDS_PER_LESSON_DEFAULT: int = 5
     WORDS_PER_LESSON_MIN: int = 1
     WORDS_PER_LESSON_MAX: int = 10
-    DAILY_LESSON_LIMIT_DEFAULT: int = 1
-    DAILY_LESSON_LIMIT_MAX: int = 5
+    # Единый дневной лимит уроков для всех пользователей
+    MAX_LESSONS_PER_DAY: int = 3
 
     # Dictionaries
     AVAILABLE_DICTIONARIES: List[str] = ["general", "it", "travel"]
@@ -166,18 +169,13 @@ class Settings(BaseSettings):
     # ============================================
     # Monetization (обязательные параметры)
     # ============================================
-    FREE_LESSON_PER_DAY_LIMIT: int
     FREE_LESSONS_TOTAL_LIMIT: int
-
     SUBSCRIPTION_MONTHLY_PRICE_KOP: int
     SUBSCRIPTION_6M_PRICE_KOP: int
     SUBSCRIPTION_6M_DISCOUNT_PERCENT: int
-
     GRACE_PERIOD_DAYS: int
-
     REFERRAL_BONUS_DAYS: int
     REFERRAL_PROMO_MAX_ATTEMPTS: int
-
     YOOKASSA_SHOP_ID: str = ""
     YOOKASSA_SECRET_KEY: str = ""
 
@@ -195,7 +193,6 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [d.strip() for d in v.split(",")]
         return v
-
 
 settings = Settings()
 ### end of app/config.py ########################################################################
@@ -1228,7 +1225,6 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
-
 from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal, partner
 from app.middleware import AppMiddleware
 from app.core.templates import templates
@@ -1312,11 +1308,13 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def root(request: Request):
     if request.state.user:
         return Response(status_code=303, headers={"Location": "/dashboard"})
+
     monthly_price = app_settings.SUBSCRIPTION_MONTHLY_PRICE_KOP / 100
     six_month_price = app_settings.SUBSCRIPTION_6M_PRICE_KOP / 100
     six_month_per_month = six_month_price / 6
     six_month_full = monthly_price * 6
     six_month_saving = six_month_full - six_month_price
+
     return templates.TemplateResponse(
         "landing.html",
         {
@@ -1329,8 +1327,7 @@ async def root(request: Request):
             "six_month_saving": six_month_saving,
             "discount_percent": app_settings.SUBSCRIPTION_6M_DISCOUNT_PERCENT,
             "free_lessons_total": app_settings.FREE_LESSONS_TOTAL_LIMIT,
-            "free_daily_limit": app_settings.FREE_LESSON_PER_DAY_LIMIT,
-            "daily_lesson_limit_max": app_settings.DAILY_LESSON_LIMIT_MAX,
+            "max_lessons_per_day": app_settings.MAX_LESSONS_PER_DAY,
             "words_per_lesson_max": app_settings.WORDS_PER_LESSON_MAX,
         },
     )
@@ -1843,7 +1840,6 @@ from sqlalchemy.sql import func
 from datetime import datetime
 from .base import Base
 
-
 class User(Base):
     __tablename__ = "users"
 
@@ -1857,7 +1853,9 @@ class User(Base):
     level: Mapped[str | None] = mapped_column(String(2), nullable=True)
     dictionary_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     words_per_lesson: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=5)
-    daily_lesson_limit: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    # Дневной лимит уроков. По умолчанию = MAX_LESSONS_PER_DAY из конфига.
+    # Может быть изменён администратором для отдельных пользователей.
+    daily_lesson_limit: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=3)
     last_lesson_number: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # === Monetization fields ===
@@ -2324,6 +2322,8 @@ async def billing_page(
             "referral": referral_stats,
             "referral_bonus_days": settings.REFERRAL_BONUS_DAYS,
             "is_partner": partner is not None,
+            "max_lessons_per_day": settings.MAX_LESSONS_PER_DAY,
+            "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
         },
     )
 
@@ -2358,9 +2358,8 @@ async def plans_page(
             "six_month_full": six_month_full,
             "six_month_saving": six_month_saving,
             "discount_percent": settings.SUBSCRIPTION_6M_DISCOUNT_PERCENT,
-            "free_daily_limit": settings.FREE_LESSON_PER_DAY_LIMIT,
+            "max_lessons_per_day": settings.MAX_LESSONS_PER_DAY,
             "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
-            "daily_lesson_limit_max": settings.DAILY_LESSON_LIMIT_MAX,
             "words_per_lesson_max": settings.WORDS_PER_LESSON_MAX,
         },
     )
@@ -2401,6 +2400,7 @@ async def subscribe_post(
         logger.warning("[BILLING] ЮKassa не настроена — DEV-режим: активируем подписку")
         payment.status = "succeeded"
         payment.paid_at = datetime.now(timezone.utc)
+
         await activate_subscription(
             db,
             user_id=user.id,
@@ -2415,6 +2415,7 @@ async def subscribe_post(
             payment_amount_kop=payment.amount_kop,
             payment_id=payment.id,
         )
+
         response = RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
         add_flash(response, "success", "Подписка активирована (DEV-режим) 🎉")
         return response
@@ -2423,6 +2424,7 @@ async def subscribe_post(
     try:
         base_url = str(request.base_url).rstrip("/")
         return_url = f"{base_url}/billing/success?payment_id={payment.id}"
+
         result = await create_payment(payment, return_url, user_email=user.email)
         payment.yookassa_payment_id = result["yookassa_payment_id"]
         await db.flush()
@@ -2431,14 +2433,17 @@ async def subscribe_post(
             f"[BILLING] Redirecting to ЮKassa | user_id={user.id} | "
             f"payment_id={payment.id} | yookassa_id={result['yookassa_payment_id']}"
         )
+
         return RedirectResponse(
             url=result["confirmation_url"],
             status_code=status.HTTP_303_SEE_OTHER,
         )
+
     except YooKassaError as e:
         logger.error(f"[BILLING] YooKassa error: {e}")
         payment.status = "failed"
         await db.flush()
+
         response = RedirectResponse(url="/billing/plans", status_code=status.HTTP_303_SEE_OTHER)
         add_flash(response, "error", f"Ошибка создания платежа: {e}")
         return response
@@ -2454,12 +2459,14 @@ async def billing_success(
     """
     Страница успеха после оплаты (return_url от ЮKassa).
     Проверяет статус платежа и активирует подписку если нужно.
+
     ВАЖНО: Бонус рефереру НЕ начисляется здесь.
     Бонус начисляется ТОЛЬКО через webhook, чтобы избежать
     двойного начисления и проблемы с пропуском.
     """
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
     if not payment_id:
         return RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -2470,6 +2477,7 @@ async def billing_success(
     )
     result = await db.execute(stmt)
     payment = result.scalar_one_or_none()
+
     if not payment:
         return RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -2482,10 +2490,12 @@ async def billing_success(
         try:
             info = await get_payment_info(payment.yookassa_payment_id)
             yookassa_status = info.get("status", "")
+
             if yookassa_status == "succeeded":
                 payment.status = "succeeded"
                 paid_at_raw = info.get("captured_at") or info.get("created_at")
                 payment.paid_at = _parse_yookassa_datetime(paid_at_raw)
+
                 await activate_subscription(
                     db,
                     user_id=user.id,
@@ -2498,19 +2508,23 @@ async def billing_success(
                     f"payment_id={payment.id} | user_id={user.id} | "
                     f"referral bonus will be granted by webhook"
                 )
+
             elif yookassa_status == "canceled":
                 payment.status = "failed"
                 logger.info(f"[BILLING] Payment canceled | payment_id={payment.id}")
+
         except YooKassaError as e:
             logger.warning(f"[BILLING] Could not check payment status: {e}")
 
     response = RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
+
     if payment.status == "succeeded":
         add_flash(response, "success", "Оплата прошла успешно! Подписка активирована 🎉")
     elif payment.status == "failed":
         add_flash(response, "error", "Оплата не прошла. Попробуйте ещё раз.")
     else:
         add_flash(response, "info", "Оплата обрабатывается. Подписка активируется автоматически.")
+
     return response
 
 
@@ -2522,11 +2536,14 @@ async def cancel_post(
 ):
     """Отмена подписки."""
     success = await cancel_subscription(db, user.id)
+
     response = RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
+
     if success:
         add_flash(response, "info", "Подписка отменена. Доступ сохранится до конца оплаченного периода.")
     else:
         add_flash(response, "error", "Активная подписка не найдена.")
+
     return response
 
 
@@ -2550,6 +2567,7 @@ async def billing_webhook(
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
         client_ip = forwarded.split(",")[0].strip()
+
     if not is_webhook_ip_allowed(client_ip):
         logger.warning(f"[WEBHOOK] Rejected: IP {client_ip} not in ЮKassa whitelist")
         return JSONResponse(
@@ -2567,6 +2585,7 @@ async def billing_webhook(
     event = body.get("event", "")
     obj = body.get("object", {})
     yookassa_payment_id = obj.get("id", "")
+
     logger.info(f"[WEBHOOK] Received event: {event} | yookassa_id={yookassa_payment_id}")
 
     # 3. Находим платёж в БД
@@ -2577,6 +2596,7 @@ async def billing_webhook(
     stmt = select(Payment).where(Payment.yookassa_payment_id == yookassa_payment_id)
     result = await db.execute(stmt)
     payment = result.scalar_one_or_none()
+
     if not payment:
         logger.warning(
             f"[WEBHOOK] Payment not found in DB | yookassa_id={yookassa_payment_id}"
@@ -2589,6 +2609,7 @@ async def billing_webhook(
             payment.status = "succeeded"
             paid_at_raw = obj.get("captured_at") or obj.get("created_at")
             payment.paid_at = _parse_yookassa_datetime(paid_at_raw)
+
             await activate_subscription(
                 db,
                 user_id=payment.user_id,
@@ -2600,6 +2621,7 @@ async def billing_webhook(
                 f"[WEBHOOK] Payment succeeded | payment_id={payment.id} | "
                 f"user_id={payment.user_id} | plan={payment.plan}"
             )
+
             event_record = Event(
                 user_id=payment.user_id,
                 type="payment_succeeded",
@@ -2628,6 +2650,7 @@ async def billing_webhook(
                 f"[WEBHOOK] Payment canceled | payment_id={payment.id} | "
                 f"user_id={payment.user_id}"
             )
+
             event_record = Event(
                 user_id=payment.user_id,
                 type="payment_canceled",
@@ -2638,6 +2661,7 @@ async def billing_webhook(
                 },
             )
             db.add(event_record)
+
     else:
         logger.info(f"[WEBHOOK] Unhandled event: {event}")
 
@@ -2647,7 +2671,6 @@ async def billing_webhook(
 ### app/routers/legal.py ########################################################################
 """Роуты для юридических страниц."""
 from fastapi import APIRouter, Request
-
 from app.core.templates import templates
 from app.config import settings
 
@@ -2663,9 +2686,8 @@ async def legal_offer(request: Request):
             "request": request,
             "referral_bonus_days": settings.REFERRAL_BONUS_DAYS,
             # ✅ Лимиты из конфига (вместо хардкода)
-            "free_daily_limit": settings.FREE_LESSON_PER_DAY_LIMIT,
+            "max_lessons_per_day": settings.MAX_LESSONS_PER_DAY,
             "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
-            "daily_lesson_limit_max": settings.DAILY_LESSON_LIMIT_MAX,
             "words_per_lesson_max": settings.WORDS_PER_LESSON_MAX,
         },
     )
@@ -2701,13 +2723,11 @@ async def legal_terms(request: Request):
 ### app/routers/lesson.py ########################################################################
 """Роуты для уроков."""
 import logging
-
 from fastapi import APIRouter, Request, Depends, Form, status, HTTPException
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
-
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.core.templates import templates
@@ -2801,7 +2821,6 @@ async def lesson_preview_page(
     )
     result_ip = await db.execute(stmt_ip)
     in_progress = result_ip.scalar_one_or_none()
-
     if in_progress:
         return RedirectResponse(
             url=f"/lesson/{in_progress.id}",
@@ -2810,7 +2829,6 @@ async def lesson_preview_page(
 
     # === ПРОВЕРКА ПЕЙВОЛЛА (общий лимит для freemium) ===
     access = await check_lesson_access(db, user)
-
     if not access["allowed"]:
         return templates.TemplateResponse(
             "lesson/preview.html",
@@ -2826,11 +2844,10 @@ async def lesson_preview_page(
             },
         )
 
-    # === ПРОВЕРКА ДНЕВНОГО ЛИМИТА ===
+    # === ПРОВЕРКА ДНЕВНОГО ЛИМИТА (единый для всех) ===
     premium = access["is_premium"]
-    effective_daily_limit = get_effective_daily_limit(user, premium)
+    effective_daily_limit = get_effective_daily_limit(user)
     today = get_user_today(user.timezone)
-
     stmt_today = select(func.count(Lesson.id)).where(
         Lesson.user_id == user.id,
         Lesson.started_local_date == today,
@@ -2850,6 +2867,8 @@ async def lesson_preview_page(
                 "lessons_today": lessons_today,
                 "daily_lesson_limit": effective_daily_limit,
                 "free_lessons_remaining": access.get("free_lessons_remaining"),
+                "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
+                "max_lessons_per_day": settings.MAX_LESSONS_PER_DAY,
             },
         )
 
@@ -3074,14 +3093,12 @@ async def lesson_suggestion_action(
     stmt = select(LessonExercise).where(LessonExercise.id == exercise_id)
     result = await db.execute(stmt)
     exercise = result.scalar_one_or_none()
-
     if not exercise:
         raise HTTPException(status_code=404, detail="Упражнение не найдено")
 
     stmt_lesson = select(Lesson).where(Lesson.id == exercise.lesson_id)
     result_lesson = await db.execute(stmt_lesson)
     lesson = result_lesson.scalar_one_or_none()
-
     if not lesson or lesson.user_id != user.id:
         raise HTTPException(status_code=403, detail="Доступ запрещён")
 
@@ -3127,7 +3144,6 @@ async def lesson_suggestion_action(
                 f"[SUGGESTION] word_id missing for suggestion "
                 f"exercise_id={exercise_id}, word_index={word_index}"
             )
-
         word_data["state"] = "added"
 
     elif action == "ignore":
@@ -3216,7 +3232,6 @@ DICT_LABELS = {
     "travel": "Путешествия",
 }
 
-
 def get_dictionaries() -> list[dict]:
     return [
         {
@@ -3225,7 +3240,6 @@ def get_dictionaries() -> list[dict]:
         }
         for code in settings.AVAILABLE_DICTIONARIES
     ]
-
 
 def render_onboarding(
     request: Request,
@@ -3251,7 +3265,6 @@ def render_onboarding(
         },
     )
 
-
 @router.get("/onboarding")
 async def onboarding_page(
     request: Request,
@@ -3260,7 +3273,6 @@ async def onboarding_page(
     if user.is_onboarded:
         return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
     return render_onboarding(request, user)
-
 
 @router.post(
     "/onboarding/complete",
@@ -3271,7 +3283,6 @@ async def onboarding_complete(
     level: str = Form(...),
     dictionary_code: str = Form(...),
     words_per_lesson: int = Form(...),
-    daily_lesson_limit: int = Form(...),
     user: User = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3282,7 +3293,6 @@ async def onboarding_complete(
         "level": level,
         "dictionary_code": dictionary_code,
         "words_per_lesson": words_per_lesson,
-        "daily_lesson_limit": daily_lesson_limit,
     }
 
     if level not in LEVELS:
@@ -3317,17 +3327,6 @@ async def onboarding_complete(
             form=form,
         )
 
-    if not (1 <= daily_lesson_limit <= settings.DAILY_LESSON_LIMIT_MAX):
-        return render_onboarding(
-            request,
-            user,
-            error=(
-                f"Лимит уроков в день должен быть "
-                f"от 1 до {settings.DAILY_LESSON_LIMIT_MAX}."
-            ),
-            form=form,
-        )
-
     try:
         await complete_onboarding(
             db=db,
@@ -3335,7 +3334,6 @@ async def onboarding_complete(
             level=level,
             dictionary_code=dictionary_code,
             words_per_lesson=words_per_lesson,
-            daily_lesson_limit=daily_lesson_limit,
         )
     except ValueError as e:
         return render_onboarding(
@@ -3352,7 +3350,6 @@ async def onboarding_complete(
 from fastapi import APIRouter, Request, Depends, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.db import get_db
 from app.deps import require_auth
 from app.services.dashboard import get_dashboard_data
@@ -3363,7 +3360,6 @@ from app.models.user import User
 
 router = APIRouter(tags=["pages"])
 
-
 @router.get("/dashboard")
 async def dashboard_page(
     request: Request,
@@ -3373,8 +3369,8 @@ async def dashboard_page(
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
 
-    # ✅ ФИКС: Сначала получаем контекст пейволла, чтобы узнать
-    # эффективный дневной лимит (для freemium = 1, для premium = настройка).
+    # Получаем контекст пейволла: эффективный дневной лимит
+    # (единый для всех тарифов, из user.daily_lesson_limit).
     paywall = await get_paywall_context(db, user)
 
     # Передаём эффективный лимит в дашборд для корректного CTA.
@@ -3642,7 +3638,6 @@ async def partner_update_profile(
 from fastapi import APIRouter, Request, Depends, Form, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.services.settings import update_user_settings
@@ -3654,12 +3649,12 @@ from app.utils.flash import add_flash
 router = APIRouter(tags=["settings"])
 
 LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
+
 DICT_LABELS = {
     "general": "Общий",
     "it": "IT",
     "travel": "Путешествия",
 }
-
 
 def get_dictionaries() -> list[dict]:
     return [
@@ -3669,7 +3664,6 @@ def get_dictionaries() -> list[dict]:
         }
         for code in settings.AVAILABLE_DICTIONARIES
     ]
-
 
 def render_settings(
     request: Request,
@@ -3703,9 +3697,7 @@ async def settings_page(
     """Страница настроек."""
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
-
     return render_settings(request, user)
-
 
 @router.post("/settings", dependencies=[Depends(require_csrf)])
 async def settings_post(
@@ -3713,7 +3705,6 @@ async def settings_post(
     level: str = Form(...),
     dictionary_code: str = Form(...),
     words_per_lesson: int = Form(...),
-    daily_lesson_limit: int = Form(...),
     user: User = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -3725,7 +3716,6 @@ async def settings_post(
         "level": level,
         "dictionary_code": dictionary_code,
         "words_per_lesson": words_per_lesson,
-        "daily_lesson_limit": daily_lesson_limit,
     }
 
     # Валидация уровня
@@ -3763,18 +3753,6 @@ async def settings_post(
             form=form,
         )
 
-    # Валидация лимита уроков
-    if not (1 <= daily_lesson_limit <= settings.DAILY_LESSON_LIMIT_MAX):
-        return render_settings(
-            request,
-            user,
-            error=(
-                f"Лимит уроков в день должен быть "
-                f"от 1 до {settings.DAILY_LESSON_LIMIT_MAX}."
-            ),
-            form=form,
-        )
-
     # Обновление настроек
     try:
         await update_user_settings(
@@ -3783,7 +3761,6 @@ async def settings_post(
             level=level,
             dictionary_code=dictionary_code,
             words_per_lesson=words_per_lesson,
-            daily_lesson_limit=daily_lesson_limit,
         )
     except ValueError as e:
         return render_settings(
@@ -3988,7 +3965,6 @@ class OnboardingForm(BaseModel):
     level: str = Field(..., pattern="^(A1|A2|B1|B2|C1|C2)$")
     dictionary_code: str
     words_per_lesson: int = Field(..., ge=1, le=10)
-    daily_lesson_limit: int = Field(..., ge=1, le=5)
 ### end of app/schemas/onboarding.py ########################################################################
 
 ### app/schemas/settings.py ########################################################################
@@ -3999,7 +3975,6 @@ class SettingsForm(BaseModel):
     level: str = Field(..., pattern="^(A1|A2|B1|B2|C1|C2)$")
     dictionary_code: str
     words_per_lesson: int = Field(..., ge=1, le=10)
-    daily_lesson_limit: int = Field(..., ge=1, le=5)
 ### end of app/schemas/settings.py ########################################################################
 
 ### app/security.py ########################################################################
@@ -4301,7 +4276,6 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Response
-
 from app.models.user import User
 from app.models.auth_session import AuthSession
 from app.models.event import Event
@@ -4312,22 +4286,20 @@ async def register_user(db: AsyncSession, email: str, password: str) -> User:
     stmt = select(User).where(User.email == email.lower())
     result = await db.execute(stmt)
     existing_user = result.scalar_one_or_none()
-    
     if existing_user:
         raise ValueError("Пользователь с таким email уже существует")
-        
+
     user = User(
         email=email.lower(),
         password_hash=hash_password(password),
         words_per_lesson=settings.WORDS_PER_LESSON_DEFAULT,
-        daily_lesson_limit=settings.DAILY_LESSON_LIMIT_DEFAULT
+        daily_lesson_limit=settings.MAX_LESSONS_PER_DAY
     )
     db.add(user)
     await db.flush() # Получаем user.id
-    
+
     event = Event(user_id=user.id, type="signup")
     db.add(event)
-    
     await db.commit()
     await db.refresh(user)
     return user
@@ -4336,7 +4308,6 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> User
     stmt = select(User).where(User.email == email.lower())
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
-    
     if not user or not verify_password(password, user.password_hash):
         return None
     return user
@@ -4344,9 +4315,8 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> User
 async def create_session(db: AsyncSession, user_id: int, response: Response):
     session_token = generate_session_token()
     csrf_token = generate_csrf_token()
-    
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.SESSION_TTL_DAYS)
-    
+
     session = AuthSession(
         user_id=user_id,
         token_hash=hash_token(session_token),
@@ -4355,9 +4325,8 @@ async def create_session(db: AsyncSession, user_id: int, response: Response):
     )
     db.add(session)
     await db.commit()
-    
+
     is_secure = settings.ENV == "production"
-    
     response.set_cookie(
         "session", session_token, httponly=True, secure=is_secure, samesite="lax", path="/",
         max_age=settings.SESSION_TTL_DAYS * 24 * 60 * 60
@@ -4372,7 +4341,6 @@ async def delete_session(db: AsyncSession, session_token: str | None, response: 
         token_hash = hash_token(session_token)
         await db.execute(delete(AuthSession).where(AuthSession.token_hash == token_hash))
         await db.commit()
-        
     response.delete_cookie("session", path="/")
     response.delete_cookie("csrf", path="/")
 ### end of app/services/auth.py ########################################################################
@@ -4407,7 +4375,6 @@ from app.models.lesson import Lesson
 from app.models.user_word import UserWord
 from app.utils.datetime_utils import get_user_today
 from app.utils.streak import calculate_streak
-
 
 async def get_dashboard_data(
     db: AsyncSession,
@@ -4454,10 +4421,10 @@ async def get_dashboard_data(
     completed_dates = [row[0] for row in result_dates]
     streak = calculate_streak(completed_dates, today)
 
-    # ✅ ФИКС: Используем эффективный дневной лимит для определения CTA.
-    # Для freemium это FREE_LESSON_PER_DAY_LIMIT (1),
-    # для premium — user.daily_lesson_limit (до DAILY_LESSON_LIMIT_MAX).
-    # Если эффективный лимит не передан, используем настройку пользователя
+    # Дневной лимит: единый для всех тарифов.
+    # Берётся из user.daily_lesson_limit (может быть переопределён
+    # администратором для отдельных пользователей).
+    # Если эффективный лимит не передан, используем значение пользователя
     # (обратная совместимость).
     daily_limit = (
         effective_daily_limit
@@ -5117,10 +5084,8 @@ async def get_resume_info(
 """Идемпотентный старт урока с вызовом LLM."""
 import logging
 from datetime import datetime, timezone
-
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.models.user import User
 from app.models.lesson import Lesson
 from app.models.lesson_exercise import LessonExercise
@@ -5151,7 +5116,6 @@ def _level_index(level: str) -> int:
 
 class LessonStartError(Exception):
     """Ошибка при старте урока."""
-
     def __init__(self, message: str, code: str = "lesson_start_error"):
         super().__init__(message)
         self.code = code
@@ -5205,7 +5169,7 @@ async def start_lesson(
     1. Проверка идемпотентности.
     2. Проверка незавершённого урока.
     3. Проверка пейволла (общий лимит для freemium).
-    4. Проверка дневного лимита.
+    4. Проверка дневного лимита (единый для всех).
     5. 🔒 Проверка количества слов (<= words_per_lesson).
     6. Загрузка слов и определение эффективного уровня (level-up).
     7. Кластеризация слов.
@@ -5226,7 +5190,6 @@ async def start_lesson(
     )
     result_idem = await db.execute(stmt_idem)
     existing_lesson = result_idem.scalar_one_or_none()
-
     if existing_lesson:
         if existing_lesson.status == "in_progress":
             return existing_lesson
@@ -5238,7 +5201,6 @@ async def start_lesson(
     )
     result_ip = await db.execute(stmt_in_progress)
     in_progress = result_ip.scalar_one_or_none()
-
     if in_progress:
         raise LessonStartError(
             "У вас есть незавершённый урок. Завершите его или продолжите.",
@@ -5253,11 +5215,9 @@ async def start_lesson(
             code="free_limit_reached",
         )
 
-    # 4. Проверка дневного лимита
-    premium = access["is_premium"]
-    effective_daily_limit = get_effective_daily_limit(user, premium)
+    # 4. Проверка дневного лимита (единый для всех тарифов)
+    effective_daily_limit = get_effective_daily_limit(user)
     today = get_user_today(user.timezone)
-
     stmt_today = select(func.count(Lesson.id)).where(
         Lesson.user_id == user.id,
         Lesson.started_local_date == today,
@@ -5309,7 +5269,6 @@ async def start_lesson(
     # Если среди выбранных слов есть слова более высокого уровня,
     # используем этот уровень для генерации и обновляем пользователя.
     effective_level, level_up = _determine_effective_level(user, list(words))
-
     if level_up:
         logger.info(
             f"[START] Level-up detected: user_id={user.id}, "
@@ -5335,7 +5294,6 @@ async def start_lesson(
     # Повторная проверка дневного лимита (под блокировкой)
     result_today2 = await db.execute(stmt_today)
     lessons_today2 = result_today2.scalar_one_or_none() or 0
-
     if lessons_today2 >= effective_daily_limit:
         raise LessonStartError(
             "Дневной лимит уроков исчерпан",
@@ -5367,7 +5325,6 @@ async def start_lesson(
             },
         )
         db.add(event_level)
-
         logger.info(
             f"[START] Level persisted: user_id={user.id}, "
             f"{old_level} → {effective_level}"
@@ -5406,7 +5363,6 @@ async def start_lesson(
         )
         result_uw = await db.execute(stmt_uw)
         existing_uw = result_uw.scalar_one_or_none()
-
         if not existing_uw:
             uw = UserWord(
                 user_id=locked_user.id,
@@ -5429,14 +5385,12 @@ async def start_lesson(
         },
     )
     db.add(event)
-
     await db.flush()
 
     logger.info(
         f"[START] Lesson #{next_lesson_number} created for user_id={user.id} "
         f"with {len(word_dicts)} words (level={effective_level}, level_up={level_up})"
     )
-
     return lesson
 ### end of app/services/lesson_start.py ########################################################################
 
@@ -5529,12 +5483,10 @@ async def get_lesson_summary(
 ### app/services/onboarding.py ########################################################################
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-
 from app.models.user import User
 from app.models.event import Event
 
 APP_TIMEZONE = "Europe/Moscow"
-
 
 async def complete_onboarding(
     db: AsyncSession,
@@ -5542,7 +5494,6 @@ async def complete_onboarding(
     level: str,
     dictionary_code: str,
     words_per_lesson: int,
-    daily_lesson_limit: int
 ) -> None:
     # Перезагружаем пользователя в текущей сессии
     stmt = select(User).where(User.id == user.id)
@@ -5556,12 +5507,11 @@ async def complete_onboarding(
     db_user.dictionary_code = dictionary_code
     db_user.timezone = APP_TIMEZONE
     db_user.words_per_lesson = words_per_lesson
-    db_user.daily_lesson_limit = daily_lesson_limit
+    # daily_lesson_limit не меняется — уже установлен при регистрации
     db_user.is_onboarded = True
 
     event = Event(user_id=db_user.id, type="onboarding_completed")
     db.add(event)
-
     await db.commit()
     await db.refresh(db_user)
 ### end of app/services/onboarding.py ########################################################################
@@ -5572,10 +5522,8 @@ import logging
 import secrets
 import string
 from datetime import datetime, timedelta, timezone
-
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.config import settings
 from app.models.user import User
 from app.models.partner import Partner
@@ -5590,10 +5538,8 @@ logger = logging.getLogger(__name__)
 _CODE_ALPHABET = string.ascii_uppercase.replace("O", "").replace("I", "").replace("L", "")
 _CODE_ALPHABET += string.digits.replace("0", "").replace("1", "")
 
-
 def _generate_invite_token() -> str:
     return secrets.token_urlsafe(32)
-
 
 def _mask_email(email: str) -> str:
     if "@" not in email:
@@ -5613,7 +5559,6 @@ def _mask_email(email: str) -> str:
 async def create_partner_invite(db: AsyncSession, admin: User) -> PartnerInvite:
     token = _generate_invite_token()
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.PARTNER_INVITE_TTL_DAYS)
-
     invite = PartnerInvite(
         token=token,
         created_by=admin.id,
@@ -5630,7 +5575,6 @@ async def create_partner_invite(db: AsyncSession, admin: User) -> PartnerInvite:
     )
     db.add(event)
     await db.flush()
-
     logger.info(f"[PARTNER] Invite created by admin {admin.id}, token={token[:8]}...")
     return invite
 
@@ -5678,20 +5622,23 @@ async def register_partner_full(
     else:
         if not email or not password:
             raise ValueError("Укажите email и пароль")
+
         # Проверяем уникальность email
         stmt = select(User).where(User.email == email.lower())
         result = await db.execute(stmt)
         if result.scalar_one_or_none():
             raise ValueError("Пользователь с таким email уже существует")
+
         from app.security import hash_password
         user = User(
             email=email.lower(),
             password_hash=hash_password(password),
             words_per_lesson=settings.WORDS_PER_LESSON_DEFAULT,
-            daily_lesson_limit=settings.DAILY_LESSON_LIMIT_DEFAULT,
+            daily_lesson_limit=settings.MAX_LESSONS_PER_DAY,
         )
         db.add(user)
         await db.flush()
+
         event = Event(user_id=user.id, type="signup")
         db.add(event)
 
@@ -5803,8 +5750,10 @@ async def approve_promo_code(db: AsyncSession, promo_id: int, admin: User) -> No
         raise ValueError("Промокод не найден")
     if promo.status != "pending":
         raise ValueError(f"Промокод уже в статусе '{promo.status}'")
+
     promo.status = "approved"
     promo.is_active = True
+
     event = Event(user_id=admin.id, type="partner_promo_approved", payload={"promo_id": promo.id, "code": promo.code})
     db.add(event)
     await db.flush()
@@ -5817,8 +5766,10 @@ async def decline_promo_code(db: AsyncSession, promo_id: int, admin: User) -> No
     promo = result.scalar_one_or_none()
     if not promo:
         raise ValueError("Промокод не найден")
+
     promo.status = "disabled"
     promo.is_active = False
+
     event = Event(user_id=admin.id, type="partner_promo_declined", payload={"promo_id": promo.id, "code": promo.code})
     db.add(event)
     await db.flush()
@@ -5869,7 +5820,6 @@ async def get_partner_stats(db: AsyncSession, partner_user_id: int) -> dict:
             paid_earnings_kop += earning.earning_amount_kop
         elif earning.status == "pending":
             pending_earnings_kop += earning.earning_amount_kop
-
         if len(recent_earnings) < 10:
             recent_earnings.append({
                 "id": earning.id,
@@ -5985,6 +5935,7 @@ async def deactivate_partner(db: AsyncSession, partner_id: int, admin: User) -> 
     )
     db.add(event)
     await db.flush()
+
     logger.info(f"[PARTNER] Partner {partner.id} deactivated by admin {admin.id}")
 
 
@@ -6005,7 +5956,6 @@ async def get_partner_earnings(
     )
     if status_filter:
         stmt = stmt.where(PartnerEarning.status == status_filter)
-
     result = await db.execute(stmt)
     rows = result.all()
 
@@ -6015,6 +5965,7 @@ async def get_partner_earnings(
             "earning": earning,
             "user_email_masked": _mask_email(email),
         })
+
     return earnings
 
 
@@ -6037,6 +5988,7 @@ async def mark_earning_as_paid(db: AsyncSession, earning_id: int, admin: User) -
     )
     db.add(event)
     await db.flush()
+
     logger.info(f"[PARTNER] Earning {earning.id} marked as paid by admin {admin.id}")
 
 
@@ -6055,7 +6007,6 @@ async def reward_partner_on_purchase(
     buyer_stmt = select(User.referred_by_user_id).where(User.id == buyer_user_id)
     buyer_result = await db.execute(buyer_stmt)
     referrer_user_id = buyer_result.scalar_one_or_none()
-
     if not referrer_user_id:
         return None
 
@@ -6075,7 +6026,6 @@ async def reward_partner_on_purchase(
     )
     payments_result = await db.execute(payments_stmt)
     total_payments = payments_result.scalar_one_or_none() or 0
-
     if total_payments > 1:
         logger.info(f"[PARTNER] Buyer {buyer_user_id} has {total_payments} payments, skipping partner reward")
         return None
@@ -6159,17 +6109,17 @@ async def check_lesson_access(db: AsyncSession, user: User) -> dict:
     Проверяет, может ли пользователь начать новый урок.
 
     Возвращает:
-        {
-            "allowed": bool,
-            "reason": str | None,  # причина запрета
-            "is_premium": bool,
-            "total_lessons": int,
-            "free_lessons_remaining": int | None,  # только для freemium
-        }
+    {
+        "allowed": bool,
+        "reason": str | None,  # причина запрета
+        "is_premium": bool,
+        "total_lessons": int,
+        "free_lessons_remaining": int | None,  # только для freemium
+    }
     """
     premium = await is_premium(db, user.id)
 
-    # Для Premium — проверяем только дневной лимит
+    # Для Premium — общий лимит не применяется
     if premium:
         return {
             "allowed": True,
@@ -6201,33 +6151,30 @@ async def check_lesson_access(db: AsyncSession, user: User) -> dict:
     }
 
 
-def get_effective_daily_limit(user: User, is_premium: bool) -> int:
+def get_effective_daily_limit(user: User) -> int:
     """
-    Возвращает эффективный дневной лимит уроков.
+    Возвращает дневной лимит уроков пользователя.
 
-    - Freemium: FREE_LESSON_PER_DAY_LIMIT (1)
-    - Premium: user.daily_lesson_limit (из настроек, до DAILY_LESSON_LIMIT_MAX)
+    Единый для всех тарифов. Берётся из user.daily_lesson_limit,
+    что позволяет администратору назначать особые условия
+    отдельным пользователям.
     """
-    if is_premium:
-        return min(user.daily_lesson_limit, settings.DAILY_LESSON_LIMIT_MAX)
-    return settings.FREE_LESSON_PER_DAY_LIMIT
+    return user.daily_lesson_limit
 
 
 async def get_paywall_context(db: AsyncSession, user: User) -> dict:
     """
     Контекст для отображения пейволла / информации о подписке в шаблонах.
-
     Используется в дашборде, превью урока, настройках.
     """
     access = await check_lesson_access(db, user)
-    premium = access["is_premium"]
 
     return {
-        "is_premium": premium,
+        "is_premium": access["is_premium"],
         "free_lessons_remaining": access.get("free_lessons_remaining"),
         "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
-        "free_daily_limit": settings.FREE_LESSON_PER_DAY_LIMIT,
-        "effective_daily_limit": get_effective_daily_limit(user, premium),
+        "max_lessons_per_day": settings.MAX_LESSONS_PER_DAY,
+        "effective_daily_limit": get_effective_daily_limit(user),
         "paywall_triggered": not access["allowed"],
         "paywall_reason": access.get("reason"),
     }
@@ -6448,10 +6395,8 @@ async def get_referral_stats(db: AsyncSession, user_id: int) -> dict:
 """Сервис для обновления настроек пользователя."""
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-
 from app.models.user import User
 from app.models.event import Event
-
 
 async def update_user_settings(
     db: AsyncSession,
@@ -6459,27 +6404,25 @@ async def update_user_settings(
     level: str,
     dictionary_code: str,
     words_per_lesson: int,
-    daily_lesson_limit: int,
 ) -> None:
     """
     Обновляет настройки пользователя.
     Часовой пояс больше не изменяется (всегда Europe/Moscow).
+    daily_lesson_limit не изменяется через настройки пользователя.
     """
     # Перезагружаем пользователя в текущей сессии
     stmt = select(User).where(User.id == user.id)
     result = await db.execute(stmt)
     db_user = result.scalar_one()
 
-    # Обновляем поля (кроме timezone — он фиксированный)
+    # Обновляем поля (кроме timezone и daily_lesson_limit)
     db_user.level = level
     db_user.dictionary_code = dictionary_code
     db_user.words_per_lesson = words_per_lesson
-    db_user.daily_lesson_limit = daily_lesson_limit
 
     # Событие
     event = Event(user_id=db_user.id, type="settings_updated")
     db.add(event)
-
     await db.commit()
     await db.refresh(db_user)
 ### end of app/services/settings.py ########################################################################
@@ -9394,7 +9337,6 @@ async function copyToClipboard(text) {
 ### app/templates/billing/manage.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Подписка — 101slovo{% endblock %}
-
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
     <div class="section-header">
@@ -9451,7 +9393,7 @@ async function copyToClipboard(text) {
             <span class="badge badge-active badge--md">Free</span>
         </div>
         <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-            У вас бесплатный план: 1 урок в день, 5 уроков всего.
+            У вас бесплатный план: до {{ max_lessons_per_day }} уроков в день, {{ free_lessons_total }} уроков всего.
         </p>
         <a href="/billing/plans" role="button" style="background: var(--gradient-primary);">
             <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
@@ -9522,111 +9464,111 @@ async function handleCopyPromo(button, code) {
 {% block title %}Тарифы — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-  <div class="page-header">
-    <div class="page-header__emoji">👑</div>
-    <h1 class="page-header__title text-gradient">Premium подписка</h1>
-    <p class="page-header__subtitle">Безлимитные уроки без ограничений</p>
-  </div>
-
-  {% if subscription.is_premium %}
-  <div class="flash-info mb-3">
-    <i data-lucide="check-circle" class="icon-md" aria-hidden="true"></i>
-    У вас уже активна подписка <strong>{{ subscription.plan }}</strong>
-    до {{ subscription.expires_at.strftime('%d.%m.%Y') }}.
-    При покупке нового тарифа оставшиеся дни будут добавлены.
-  </div>
-  {% endif %}
-
-  <div class="grid grid-3" style="align-items: stretch;">
-    <!-- Free -->
-    <div class="card pricing-card">
-      <h3 style="margin-top: 0;">Free</h3>
-      <div class="pricing-card__price">0 ₽</div>
-      <ul class="pricing-card__features">
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          {{ free_daily_limit }} урок{% if free_daily_limit != 1 %}а{% endif %} в день
-        </li>
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          {{ free_lessons_total }} уроков всего
-        </li>
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          До {{ words_per_lesson_max }} слов в уроке
-        </li>
-      </ul>
-      <button disabled class="secondary" style="width: 100%;">Текущий план</button>
+    <div class="page-header">
+        <div class="page-header__emoji">👑</div>
+        <h1 class="page-header__title text-gradient">Premium подписка</h1>
+        <p class="page-header__subtitle">Безлимитные уроки без ограничений</p>
     </div>
 
-    <!-- Monthly -->
-    <div class="card pricing-card pricing-card--popular">
-      <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 0.75rem;">Популярный</div>
-      <h3 style="margin-top: 0;">Месячная</h3>
-      <div class="pricing-card__price">
-        {{ "%.0f" | format(monthly_price) }} ₽
-        <span class="pricing-card__period">/мес</span>
-      </div>
-      <ul class="pricing-card__features">
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          До {{ daily_lesson_limit_max }} уроков в день
-        </li>
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          До {{ words_per_lesson_max }} слов в уроке
-        </li>
-      </ul>
-      <form method="POST" action="/billing/subscribe">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-        <input type="hidden" name="plan" value="monthly">
-        <label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.875rem; font-size: 0.75rem; color: var(--text-muted); cursor: pointer; line-height: 1.5;">
-          <input type="checkbox" required style="width: auto; margin-top: 2px; flex-shrink: 0;">
-          <span>
-            Согласен с <a href="/legal/offer" target="_blank">публичной офертой</a>,
-            <a href="/legal/privacy" target="_blank">политикой конфиденциальности</a>
-            и даю согласие на
-            <a href="/legal/consent" target="_blank">обработку персональных данных</a>
-            и автоматическое списание средств
-          </span>
-        </label>
-        <button type="submit" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</button>
-      </form>
+    {% if subscription.is_premium %}
+    <div class="flash-info mb-3">
+        <i data-lucide="check-circle" class="icon-md" aria-hidden="true"></i>
+        У вас уже активна подписка <strong>{{ subscription.plan }}</strong>
+        до {{ subscription.expires_at.strftime('%d.%m.%Y') }}.
+        При покупке нового тарифа оставшиеся дни будут добавлены.
     </div>
+    {% endif %}
 
-    <!-- 6 Months -->
-    <div class="card pricing-card pricing-card--best">
-      <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 0.75rem;">−{{ discount_percent }}%</div>
-      <h3 style="margin-top: 0;">6 месяцев</h3>
-      <div class="pricing-card__price">{{ "%.0f" | format(six_month_price) }} ₽</div>
-      <div class="pricing-card__note">
-        {{ "%.0f" | format(six_month_per_month) }} ₽/мес ·
-        <s>{{ "%.0f" | format(six_month_full) }} ₽</s> ·
-        экономия {{ "%.0f" | format(six_month_saving) }} ₽
-      </div>
-      <ul class="pricing-card__features">
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          До {{ daily_lesson_limit_max }} уроков в день
-        </li>
-        <li>
-          <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
-          До {{ words_per_lesson_max }} слов в уроке
-        </li>
-      </ul>
-      <form method="POST" action="/billing/subscribe">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-        <input type="hidden" name="plan" value="six_months">
-        <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.875rem; font-size: 0.75rem; color: var(--text-muted); cursor: pointer;">
-          <input type="checkbox" required style="width: auto;">
-          Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
-        </label>
-        <button type="submit" class="btn--success" style="width: 100%;">
-          Подключить за {{ "%.0f" | format(six_month_price) }} ₽
-        </button>
-      </form>
+    <div class="grid grid-3" style="align-items: stretch;">
+        <!-- Free -->
+        <div class="card pricing-card">
+            <h3 style="margin-top: 0;">Free</h3>
+            <div class="pricing-card__price">0 ₽</div>
+            <ul class="pricing-card__features">
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    До {{ max_lessons_per_day }} уроков в день
+                </li>
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    {{ free_lessons_total }} уроков всего
+                </li>
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    До {{ words_per_lesson_max }} слов в уроке
+                </li>
+            </ul>
+            <button disabled class="secondary" style="width: 100%;">Текущий план</button>
+        </div>
+
+        <!-- Monthly -->
+        <div class="card pricing-card pricing-card--popular">
+            <div class="badge badge-active" style="align-self: flex-start; margin-bottom: 0.75rem;">Популярный</div>
+            <h3 style="margin-top: 0;">Месячная</h3>
+            <div class="pricing-card__price">
+                {{ "%.0f" | format(monthly_price) }} ₽
+                <span class="pricing-card__period">/мес</span>
+            </div>
+            <ul class="pricing-card__features">
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    До {{ max_lessons_per_day }} уроков в день
+                </li>
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    До {{ words_per_lesson_max }} слов в уроке
+                </li>
+            </ul>
+            <form method="POST" action="/billing/subscribe">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <input type="hidden" name="plan" value="monthly">
+                <label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-bottom: 0.875rem; font-size: 0.75rem; color: var(--text-muted); cursor: pointer; line-height: 1.5;">
+                    <input type="checkbox" required style="width: auto; margin-top: 2px; flex-shrink: 0;">
+                    <span>
+                        Согласен с <a href="/legal/offer" target="_blank">публичной офертой</a>,
+                        <a href="/legal/privacy" target="_blank">политикой конфиденциальности</a>
+                        и даю согласие на
+                        <a href="/legal/consent" target="_blank">обработку персональных данных</a>
+                        и автоматическое списание средств
+                    </span>
+                </label>
+                <button type="submit" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</button>
+            </form>
+        </div>
+
+        <!-- 6 Months -->
+        <div class="card pricing-card pricing-card--best">
+            <div class="badge badge-mastered" style="align-self: flex-start; margin-bottom: 0.75rem;">−{{ discount_percent }}%</div>
+            <h3 style="margin-top: 0;">6 месяцев</h3>
+            <div class="pricing-card__price">{{ "%.0f" | format(six_month_price) }} ₽</div>
+            <div class="pricing-card__note">
+                {{ "%.0f" | format(six_month_per_month) }} ₽/мес ·
+                <s>{{ "%.0f" | format(six_month_full) }} ₽</s> ·
+                экономия {{ "%.0f" | format(six_month_saving) }} ₽
+            </div>
+            <ul class="pricing-card__features">
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    До {{ max_lessons_per_day }} уроков в день
+                </li>
+                <li>
+                    <i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i>
+                    До {{ words_per_lesson_max }} слов в уроке
+                </li>
+            </ul>
+            <form method="POST" action="/billing/subscribe">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <input type="hidden" name="plan" value="six_months">
+                <label style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.875rem; font-size: 0.75rem; color: var(--text-muted); cursor: pointer;">
+                    <input type="checkbox" required style="width: auto;">
+                    Согласен с <a href="/legal/offer" target="_blank">офертой</a> и даю согласие на списание средств
+                </label>
+                <button type="submit" class="btn--success" style="width: 100%;">
+                    Подключить за {{ "%.0f" | format(six_month_price) }} ₽
+                </button>
+            </form>
+        </div>
     </div>
-  </div>
 </div>
 {% endblock %}
 ### end of app/templates/billing/plans.html ########################################################################
@@ -9636,109 +9578,107 @@ async function handleCopyPromo(button, code) {
 {% block title %}Дашборд — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-
-  <!-- Hero -->
-  <div class="hero">
-    <p class="hero__greeting">Привет! 👋</p>
-    <h1 class="hero__title">Готов к уроку?</h1>
-  </div>
-
-  <!-- Subscription banner -->
-  {% if subscription.is_premium %}
-  <div class="flash-info mb-3" role="status">
-    <i data-lucide="crown" class="icon-md" style="color: var(--brand-primary);" aria-hidden="true"></i>
-    <span>
-      <strong>Premium</strong> активна до {{ subscription.expires_at.strftime('%d.%m.%Y') }}
-      ({{ subscription.days_left }} дн.)
-    </span>
-    <a href="/billing" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Управление →</a>
-  </div>
-  {% elif paywall.paywall_triggered %}
-  <div class="flash-warning mb-3" role="alert">
-    <i data-lucide="alert-triangle" class="icon-md" aria-hidden="true"></i>
-    <span>Бесплатные уроки исчерпаны.</span>
-    <a href="/billing/plans" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Подключить Premium →</a>
-  </div>
-  {% elif paywall.free_lessons_remaining is not none %}
-  <div class="flash-info mb-3" role="status">
-    <i data-lucide="info" class="icon-md" aria-hidden="true"></i>
-    <span>Осталось бесплатных уроков: <strong>{{ paywall.free_lessons_remaining }}</strong> из {{ paywall.free_lessons_total }}</span>
-  </div>
-  {% endif %}
-
-  <!-- Stats Grid -->
-  <div class="grid grid-3 grid-3--stats mb-3">
-    <div class="stat-card stat-card--compact">
-      <div class="stat-card__icon stat-card__icon--fire" aria-hidden="true">🔥</div>
-      <div class="stat-card__body">
-        <div class="stat-card__value">{{ streak.current }}</div>
-        <div class="stat-card__label">Дней подряд</div>
-        <div class="stat-card__sublabel">Рекорд: {{ streak.longest }} дн.</div>
-      </div>
+    <!-- Hero -->
+    <div class="hero">
+        <p class="hero__greeting">Привет! 👋</p>
+        <h1 class="hero__title">Готов к уроку?</h1>
     </div>
-    <div class="stat-card stat-card--compact">
-      <div class="stat-card__icon stat-card__icon--book" aria-hidden="true">📚</div>
-      <div class="stat-card__body">
-        <div class="stat-card__value">{{ word_summary.active }}</div>
-        <div class="stat-card__label">Активных слов</div>
-        <div class="stat-card__sublabel">
-          Изучено: {{ word_summary.mastered }} • Игнор: {{ word_summary.ignored }}
+
+    <!-- Subscription banner -->
+    {% if subscription.is_premium %}
+    <div class="flash-info mb-3" role="status">
+        <i data-lucide="crown" class="icon-md" style="color: var(--brand-primary);" aria-hidden="true"></i>
+        <span>
+            <strong>Premium</strong> активна до {{ subscription.expires_at.strftime('%d.%m.%Y') }}
+            ({{ subscription.days_left }} дн.)
+        </span>
+        <a href="/billing" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Управление →</a>
+    </div>
+    {% elif paywall.paywall_triggered %}
+    <div class="flash-warning mb-3" role="alert">
+        <i data-lucide="alert-triangle" class="icon-md" aria-hidden="true"></i>
+        <span>Бесплатные уроки исчерпаны.</span>
+        <a href="/billing/plans" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Подключить Premium →</a>
+    </div>
+    {% elif paywall.free_lessons_remaining is not none %}
+    <div class="flash-info mb-3" role="status">
+        <i data-lucide="info" class="icon-md" aria-hidden="true"></i>
+        <span>Осталось бесплатных уроков: <strong>{{ paywall.free_lessons_remaining }}</strong> из {{ paywall.free_lessons_total }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Stats Grid -->
+    <div class="grid grid-3 grid-3--stats mb-3">
+        <div class="stat-card stat-card--compact">
+            <div class="stat-card__icon stat-card__icon--fire" aria-hidden="true">🔥</div>
+            <div class="stat-card__body">
+                <div class="stat-card__value">{{ streak.current }}</div>
+                <div class="stat-card__label">Дней подряд</div>
+                <div class="stat-card__sublabel">Рекорд: {{ streak.longest }} дн.</div>
+            </div>
         </div>
-      </div>
-    </div>
-    <div class="stat-card stat-card--compact">
-      <div class="stat-card__icon stat-card__icon--calendar" aria-hidden="true">📅</div>
-      <div class="stat-card__body">
-        <div class="stat-card__value">{{ lessons_today }}/{{ paywall.effective_daily_limit }}</div>
-        <div class="stat-card__label">Уроков сегодня</div>
-        <div class="stat-card__sublabel">
-          {% if lessons_today >= paywall.effective_daily_limit %}
-          Лимит достигнут ✓
-          {% else %}
-          Осталось: {{ paywall.effective_daily_limit - lessons_today }}
-          {% endif %}
+        <div class="stat-card stat-card--compact">
+            <div class="stat-card__icon stat-card__icon--book" aria-hidden="true">📚</div>
+            <div class="stat-card__body">
+                <div class="stat-card__value">{{ word_summary.active }}</div>
+                <div class="stat-card__label">Активных слов</div>
+                <div class="stat-card__sublabel">
+                    Изучено: {{ word_summary.mastered }} • Игнор: {{ word_summary.ignored }}
+                </div>
+            </div>
         </div>
-      </div>
+        <div class="stat-card stat-card--compact">
+            <div class="stat-card__icon stat-card__icon--calendar" aria-hidden="true">📅</div>
+            <div class="stat-card__body">
+                <div class="stat-card__value">{{ lessons_today }}/{{ paywall.effective_daily_limit }}</div>
+                <div class="stat-card__label">Уроков сегодня</div>
+                <div class="stat-card__sublabel">
+                    {% if lessons_today >= paywall.effective_daily_limit %}
+                    Лимит достигнут ✓
+                    {% else %}
+                    Осталось: {{ paywall.effective_daily_limit - lessons_today }}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
     </div>
-  </div>
 
-  <!-- CTA Section -->
-  {% if paywall.paywall_triggered %}
-    {% include "partials/paywall.html" %}
-  {% elif cta == 'resume' %}
-  <div class="cta-section" style="background: var(--gradient-warning);">
-    <h3>⏳ У вас есть незавершённый урок!</h3>
-    <p>Продолжайте с того места, где остановились</p>
-    <a href="/lesson/{{ cta_lesson_id }}" role="button">Продолжить урок →</a>
-  </div>
-  {% elif cta == 'limit_reached' %}
-  <div class="cta-section" style="background: var(--gradient-success);">
-    <h3>🎉 Отличная работа!</h3>
-    <p>Лимит уроков на сегодня исчерпан. Отдохните — завтра новые вызовы!</p>
-    <a href="/vocabulary" role="button">Повторить слова</a>
-  </div>
-  {% else %}
-  <div class="cta-section">
-    <h3>🚀 Начнём новый урок?</h3>
-    <p>Подберём слова специально для вашего уровня</p>
-    <a href="/lesson/preview" role="button">Подготовиться к уроку</a>
-  </div>
-  {% endif %}
-
-  {% if in_progress_lesson %}
-  <div class="card mt-3">
-    <div class="section-header" style="margin-bottom: 0;">
-      <div>
-        <h4 style="margin: 0 0 0.25rem 0;">📝 Незавершённый урок #{{ in_progress_lesson.lesson_number }}</h4>
-        <p style="margin: 0; color: var(--text-muted); font-size: 0.8125rem;">
-          Начат {{ in_progress_lesson.started_at.strftime('%d.%m.%Y в %H:%M') }}
-        </p>
-      </div>
-      <a href="/lesson/{{ in_progress_lesson.id }}" role="button" class="secondary">Продолжить</a>
+    <!-- CTA Section -->
+    {% if paywall.paywall_triggered %}
+        {% include "partials/paywall.html" %}
+    {% elif cta == 'resume' %}
+    <div class="cta-section" style="background: var(--gradient-warning);">
+        <h3>⏳ У вас есть незавершённый урок!</h3>
+        <p>Продолжайте с того места, где остановились</p>
+        <a href="/lesson/{{ cta_lesson_id }}" role="button">Продолжить урок →</a>
     </div>
-  </div>
-  {% endif %}
+    {% elif cta == 'limit_reached' %}
+    <div class="cta-section" style="background: var(--gradient-success);">
+        <h3>🎉 Отличная работа!</h3>
+        <p>Лимит уроков на сегодня исчерпан. Отдохните — завтра новые вызовы!</p>
+        <a href="/vocabulary" role="button">Повторить слова</a>
+    </div>
+    {% else %}
+    <div class="cta-section">
+        <h3>🚀 Начнём новый урок?</h3>
+        <p>Подберём слова специально для вашего уровня</p>
+        <a href="/lesson/preview" role="button">Подготовиться к уроку</a>
+    </div>
+    {% endif %}
 
+    {% if in_progress_lesson %}
+    <div class="card mt-3">
+        <div class="section-header" style="margin-bottom: 0;">
+            <div>
+                <h4 style="margin: 0 0 0.25rem 0;">📝 Незавершённый урок #{{ in_progress_lesson.lesson_number }}</h4>
+                <p style="margin: 0; color: var(--text-muted); font-size: 0.8125rem;">
+                    Начат {{ in_progress_lesson.started_at.strftime('%d.%m.%Y в %H:%M') }}
+                </p>
+            </div>
+            <a href="/lesson/{{ in_progress_lesson.id }}" role="button" class="secondary">Продолжить</a>
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}
 ### end of app/templates/dashboard.html ########################################################################
@@ -9800,10 +9740,9 @@ async function handleCopyPromo(button, code) {
 ### app/templates/landing.html ########################################################################
 {% extends "base.html" %}
 {% block title %}101slovo — Английские слова в контексте{% endblock %}
-
 {% block content %}
 {# =====================================================================
-   БЛОК 1. HERO + ЖИВОЕ ДЕМО
+БЛОК 1. HERO + ЖИВОЕ ДЕМО
 ===================================================================== #}
 <section class="container" style="padding: 2.5rem 0 1rem;">
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; align-items: center;" class="hero-grid">
@@ -9850,7 +9789,7 @@ async function handleCopyPromo(button, code) {
 </section>
 
 {# =====================================================================
-   БЛОК 2. ПРОБЛЕМА → РЕШЕНИЕ
+БЛОК 2. ПРОБЛЕМА → РЕШЕНИЕ
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0;">
     <div class="container--medium" style="text-align: center; margin: 0 auto 2rem;">
@@ -9913,14 +9852,13 @@ async function handleCopyPromo(button, code) {
 </section>
 
 {# =====================================================================
-   БЛОК 3. КЛЮЧЕВЫЕ ВЫГОДЫ (6 карточек)
+БЛОК 3. КЛЮЧЕВЫЕ ВЫГОДЫ (6 карточек)
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0;">
     <div class="page-header">
         <h2 class="page-header__title text-gradient">Почему это работает</h2>
         <p class="page-header__subtitle">Шесть причин, по которым слова остаются в памяти</p>
     </div>
-
     <div class="container--medium" style="margin: 0 auto;">
         <div class="grid grid-3">
             <div class="card">
@@ -9970,7 +9908,7 @@ async function handleCopyPromo(button, code) {
 </section>
 
 {# =====================================================================
-   БЛОК 4. ДЛЯ КОГО
+БЛОК 4. ДЛЯ КОГО
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0;">
     <div class="page-header">
@@ -9999,8 +9937,8 @@ async function handleCopyPromo(button, code) {
 </section>
 
 {# =====================================================================
-   БЛОК 5. КАК ЭТО ВЫГЛЯДИТ (скриншоты)
-   ЗАМЕНИТЕ мокапы на реальные скриншоты: /static/img/screens/*.png
+БЛОК 5. КАК ЭТО ВЫГЛЯДИТ (скриншоты)
+ЗАМЕНИТЕ мокапы на реальные скриншоты: /static/img/screens/*.png
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0;">
     <div class="page-header">
@@ -10026,14 +9964,13 @@ async function handleCopyPromo(button, code) {
 </section>
 
 {# =====================================================================
-   БЛОК 6. ТАРИФЫ + РЕФЕРАЛЬНАЯ ПРОГРАММА
+БЛОК 6. ТАРИФЫ + РЕФЕРАЛЬНАЯ ПРОГРАММА
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0;">
     <div class="page-header">
         <h2 class="page-header__title text-gradient">Тарифы</h2>
         <p class="page-header__subtitle">Начните бесплатно — {{ free_lessons_total }} уроков без оплаты</p>
     </div>
-
     <div class="container--medium" style="margin: 0 auto;">
         <div class="grid grid-3" style="align-items: stretch;">
             {# Free #}
@@ -10041,7 +9978,7 @@ async function handleCopyPromo(button, code) {
                 <h3 style="margin-top: 0;">Free</h3>
                 <div class="pricing-card__price">0 ₽</div>
                 <ul class="pricing-card__features">
-                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> {{ free_daily_limit }} урок в день</li>
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ max_lessons_per_day }} уроков в день</li>
                     <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> {{ free_lessons_total }} уроков всего</li>
                     <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ words_per_lesson_max }} слов в уроке</li>
                 </ul>
@@ -10054,7 +9991,7 @@ async function handleCopyPromo(button, code) {
                 <h3 style="margin-top: 0;">Месячная</h3>
                 <div class="pricing-card__price">{{ "%.0f" | format(monthly_price) }} ₽ <span class="pricing-card__period">/мес</span></div>
                 <ul class="pricing-card__features">
-                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ daily_lesson_limit_max }} уроков в день</li>
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ max_lessons_per_day }} уроков в день</li>
                     <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ words_per_lesson_max }} слов в уроке</li>
                 </ul>
                 <a href="/register" role="button" style="width: 100%;">Подключить за {{ "%.0f" | format(monthly_price) }} ₽</a>
@@ -10069,7 +10006,7 @@ async function handleCopyPromo(button, code) {
                     {{ "%.0f" | format(six_month_per_month) }} ₽/мес · <s>{{ "%.0f" | format(six_month_full) }} ₽</s> · экономия {{ "%.0f" | format(six_month_saving) }} ₽
                 </div>
                 <ul class="pricing-card__features">
-                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ daily_lesson_limit_max }} уроков в день</li>
+                    <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ max_lessons_per_day }} уроков в день</li>
                     <li><i data-lucide="check" class="icon-sm" style="color: var(--color-success);" aria-hidden="true"></i> До {{ words_per_lesson_max }} слов в уроке</li>
                 </ul>
                 <a href="/register" role="button" class="btn--success" style="width: 100%;">Подключить за {{ "%.0f" | format(six_month_price) }} ₽</a>
@@ -10088,7 +10025,7 @@ async function handleCopyPromo(button, code) {
 </section>
 
 {# =====================================================================
-   БЛОК 7. ЧАСТЫЕ ВОПРОСЫ (аккордеон на Alpine)
+БЛОК 7. ЧАСТЫЕ ВОПРОСЫ (аккордеон на Alpine)
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0;">
     <div class="page-header">
@@ -10100,7 +10037,7 @@ async function handleCopyPromo(button, code) {
             ("Чем это отличается от Anki или Quizlet?", "Здесь не карточки, а предложения. ИИ генерирует уникальный контекст для ваших слов, проверяет перевод и предлагает новые слова."),
             ("Можно учить свои слова?", "Да. Введите любое слово — если его нет в базе, ИИ сам определит перевод, уровень и часть речи."),
             ("Сколько времени нужно в день?", "Один урок — это несколько слов и предложений. Занимает 3–5 минут."),
-            ("Что после бесплатных уроков?", "Можно продолжить на Premium (до " ~ daily_lesson_limit_max ~ " уроков в день, безлимит) или повторять выученные слова в словаре."),
+            ("Что после бесплатных уроков?", "Можно продолжить на Premium (до " ~ max_lessons_per_day ~ " уроков в день, безлимит по общему числу) или повторять выученные слова в словаре."),
             ("Как отменить подписку?", "В один клик в личном кабинете. Доступ сохранится до конца оплаченного периода.")
         ] %}
         {% for q, a in faqs %}
@@ -10121,7 +10058,7 @@ async function handleCopyPromo(button, code) {
 </section>
 
 {# =====================================================================
-   БЛОК 8. ФИНАЛЬНЫЙ CTA
+БЛОК 8. ФИНАЛЬНЫЙ CTA
 ===================================================================== #}
 <section class="container" style="padding: 3rem 0 2rem;">
     <div class="container--medium" style="margin: 0 auto;">
@@ -10302,7 +10239,7 @@ async function handleCopyPromo(button, code) {
         <ul>
             <li><strong>Сервис</strong> — веб-приложение «101slovo» для изучения английских слов методом интервального повторения с использованием генеративного искусственного интеллекта.</li>
             <li><strong>Подписка</strong> — платный период доступа к расширенным функциям Сервиса.</li>
-            <li><strong>Freemium</strong> — бесплатный ограниченный доступ к Сервису ({{ free_lessons_total }} уроков всего, {{ free_daily_limit }} урок в день).</li>
+            <li><strong>Freemium</strong> — бесплатный ограниченный доступ к Сервису ({{ free_lessons_total }} уроков всего, до {{ max_lessons_per_day }} уроков в день).</li>
             <li><strong>Premium</strong> — платный доступ без ограничений по общему количеству уроков.</li>
             <li><strong>ЮKassa (НКО «ЮМани» ООО)</strong> — платёжная система, через которую осуществляется приём платежей.</li>
             <li><strong>Реферальная программа</strong> — программа, по которой Пользователи получают бонусные дни подписки за привлечение новых платящих пользователей.</li>
@@ -10320,7 +10257,7 @@ async function handleCopyPromo(button, code) {
             3.3. В рамках подписки Пользователю предоставляются:
         </p>
         <ul>
-            <li>Неограниченное количество уроков (до {{ daily_lesson_limit_max }} уроков в день);</li>
+            <li>Неограниченное количество уроков (до {{ max_lessons_per_day }} уроков в день);</li>
             <li>Генерация предложений с использованием ИИ (GigaChat);</li>
             <li>Оценка переводов с использованием ИИ;</li>
             <li>Алгоритм интервального повторения (SRS);</li>
@@ -11180,167 +11117,163 @@ button[type="submit"] {
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
 
-  <!-- Заголовок страницы -->
-  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
-    <div>
-      <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
-        <i data-lucide="sparkles" style="width: 24px; height: 24px; color: var(--brand-primary);"></i>
-        <span style="background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
-          Подготовка к уроку
-        </span>
-      </h1>
-      
-    </div>
-    
-  </div>
-
-  {% if error %}
-  <div class="flash-error" style="margin-bottom: 1rem;">
-    <i data-lucide="alert-circle" style="width: 16px; height: 16px; flex-shrink: 0;"></i>
-    <span>{{ error }}</span>
-  </div>
-  {% endif %}
-
-  {% if limit_reached and paywall_reason == 'free_limit_reached' %}
-    <!-- Полный пейволл: бесплатные уроки исчерпаны -->
-    {% include "partials/paywall.html" %}
-
-  {% elif limit_reached and paywall_reason == 'daily_limit' %}
-    <!-- Дневной лимит исчерпан -->
-    <div class="card text-center" style="padding: 2rem 1.5rem; border-color: rgba(16, 185, 129, 0.3);">
-      <div style="font-size: 2.25rem; margin-bottom: 0.75rem;">🎉</div>
-      <h3 style="margin-bottom: 0.375rem;">Лимит на сегодня исчерпан!</h3>
-      <p style="color: var(--text-muted); margin-bottom: 0.875rem;">
-        Вы прошли {{ lessons_today }} из {{ daily_lesson_limit }} уроков. Отдохните, мозг тоже нуждается в перезагрузке.
-      </p>
-      {% if not is_premium %}
-      <div style="padding: 1rem 1.25rem; background: rgba(99, 102, 241, 0.05); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: var(--radius-md); margin-bottom: 1.25rem; text-align: left; max-width: 480px; margin-left: auto; margin-right: auto;">
-        <p style="margin: 0 0 0.375rem 0; color: var(--text-secondary); font-size: 0.875rem; display: flex; align-items: flex-start; gap: 0.5rem;">
-          <span style="flex-shrink: 0;">💡</span>
-          <span>На <strong>бесплатном тарифе</strong> доступен <strong>1 урок в день</strong> и 5 уроков всего.</span>
-        </p>
-        <p style="margin: 0; color: var(--text-secondary); font-size: 0.875rem; display: flex; align-items: flex-start; gap: 0.5rem;">
-          <span style="flex-shrink: 0;">👑</span>
-          <span>С <strong>Premium</strong> — до <strong>5 уроков в день</strong> и без ограничений по общему числу.</span>
-        </p>
-      </div>
-      <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
-        <a href="/billing/plans" role="button" style="background: var(--gradient-primary); display: inline-flex; align-items: center; gap: 0.5rem;">
-          <i data-lucide="crown" style="width: 14px; height: 14px;"></i>
-          Подключить Premium
-        </a>
-        <a href="/dashboard" role="button" class="secondary">На дашборд</a>
-      </div>
-      {% else %}
-      <a href="/dashboard" role="button">На дашборд</a>
-      {% endif %}
+    <!-- Заголовок страницы -->
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+            <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="sparkles" style="width: 24px; height: 24px; color: var(--brand-primary);"></i>
+                <span style="background: var(--gradient-primary); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+                    Подготовка к уроку
+                </span>
+            </h1>
+        </div>
     </div>
 
-  {% elif state == 'dictionary_exhausted' %}
-    <div class="card text-center" style="padding: 2rem 1.5rem; border-color: rgba(245, 158, 11, 0.3);">
-      <div style="font-size: 2.25rem; margin-bottom: 0.75rem;">🏆</div>
-      <h3 style="margin-bottom: 0.375rem;">Словарь исчерпан!</h3>
-      <p style="color: var(--text-muted); margin-bottom: 1.25rem;">
-        Вы изучили все доступные слова для текущего уровня и словаря.
-      </p>
-      <a href="/settings" role="button" class="secondary">Сменить уровень или словарь</a>
-    </div>
-
-  {% else %}
-
-    {% if level_up %}
-    <div class="flash-success" style="justify-content: center; font-size: 0.9375rem; margin-bottom: 1.25rem;">
-      <i data-lucide="trending-up" style="width: 18px; height: 18px;"></i>
-      🎉 Уровень повышен до <strong>{{ new_level }}</strong>! Добавлены слова нового уровня.
+    {% if error %}
+    <div class="flash-error" style="margin-bottom: 1rem;">
+        <i data-lucide="alert-circle" style="width: 16px; height: 16px; flex-shrink: 0;"></i>
+        <span>{{ error }}</span>
     </div>
     {% endif %}
 
-    <form hx-post="/lesson/start"
-          hx-target="body"
-          hx-swap="innerHTML"
-          hx-indicator="#start-spinner"
-          x-data="{ idempotencyKey: generateUUID() }">
-      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-      <input type="hidden" name="idempotency_key" :value="idempotencyKey">
-      {% for w in all_words %}
-        <input type="hidden" name="word_ids" value="{{ w.word_id }}">
-      {% endfor %}
+    {% if limit_reached and paywall_reason == 'free_limit_reached' %}
+        <!-- Полный пейволл: бесплатные уроки исчерпаны -->
+        {% include "partials/paywall.html" %}
 
-      <!-- Блок: На повторение -->
-      {% if due_words %}
-      <div class="mb-3">
-        <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-          <i data-lucide="rotate-ccw" style="width: 18px; height: 18px; color: var(--brand-accent);"></i>
-          На повторение
-          <span class="badge badge-review" style="margin-left: 0.25rem;">{{ due_words | length }}</span>
-        </h3>
-        <div class="grid grid-3" style="gap: 0.75rem;">
-          {% for w in due_words %}
-          <div class="card fade-in-up" style="padding: 0.875rem 1rem; border-left: 4px solid var(--brand-accent); transition: all 0.2s ease; cursor: default;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
-              <div>
-                <div style="font-weight: 700; font-size: 1.0625rem; color: var(--text-primary);">{{ w.lemma }}</div>
-                <div style="color: var(--text-muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
-              </div>
-              <span class="badge badge-active" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">Stage {{ w.stage }}</span>
+    {% elif limit_reached and paywall_reason == 'daily_limit' %}
+        <!-- Дневной лимит исчерпан -->
+        <div class="card text-center" style="padding: 2rem 1.5rem; border-color: rgba(16, 185, 129, 0.3);">
+            <div style="font-size: 2.25rem; margin-bottom: 0.75rem;">🎉</div>
+            <h3 style="margin-bottom: 0.375rem;">Лимит на сегодня исчерпан!</h3>
+            <p style="color: var(--text-muted); margin-bottom: 0.875rem;">
+                Вы прошли {{ lessons_today }} из {{ daily_lesson_limit }} уроков. Отдохните, мозг тоже нуждается в перезагрузке.
+            </p>
+            {% if not is_premium %}
+            <div style="padding: 1rem 1.25rem; background: rgba(99, 102, 241, 0.05); border: 1px solid rgba(99, 102, 241, 0.2); border-radius: var(--radius-md); margin-bottom: 1.25rem; text-align: left; max-width: 480px; margin-left: auto; margin-right: auto;">
+                <p style="margin: 0 0 0.375rem 0; color: var(--text-secondary); font-size: 0.875rem; display: flex; align-items: flex-start; gap: 0.5rem;">
+                    <span style="flex-shrink: 0;">💡</span>
+                    <span>До <strong>{{ max_lessons_per_day }} уроков в день</strong> для всех. На бесплатном тарифе — {{ free_lessons_total }} уроков всего.</span>
+                </p>
+                <p style="margin: 0; color: var(--text-secondary); font-size: 0.875rem; display: flex; align-items: flex-start; gap: 0.5rem;">
+                    <span style="flex-shrink: 0;">👑</span>
+                    <span>С <strong>Premium</strong> — без ограничений по общему числу уроков.</span>
+                </p>
             </div>
-            <div style="padding-top: 0.5rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.875rem; line-height: 1.4;">
-              {{ w.translations | join(', ') }}
+            <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+                <a href="/billing/plans" role="button" style="background: var(--gradient-primary); display: inline-flex; align-items: center; gap: 0.5rem;">
+                    <i data-lucide="crown" style="width: 14px; height: 14px;"></i>
+                    Подключить Premium
+                </a>
+                <a href="/dashboard" role="button" class="secondary">На дашборд</a>
             </div>
-          </div>
-          {% endfor %}
+            {% else %}
+            <a href="/dashboard" role="button">На дашборд</a>
+            {% endif %}
         </div>
-      </div>
-      {% endif %}
 
-      <!-- Блок: Новые слова -->
-      {% if new_words %}
-      <div class="mb-3">
-        <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-          <i data-lucide="plus-circle" style="width: 18px; height: 18px; color: var(--brand-secondary);"></i>
-          Новые слова
-          <span class="badge badge-new" style="margin-left: 0.25rem;">{{ new_words | length }}</span>
-        </h3>
-        <div class="grid grid-3" style="gap: 0.75rem;">
-          {% for w in new_words %}
-          <div class="card fade-in-up" style="padding: 0.875rem 1rem; border-left: 4px solid var(--brand-secondary); transition: all 0.2s ease; cursor: default;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
-              <div>
-                <div style="font-weight: 700; font-size: 1.0625rem; color: var(--text-primary);">{{ w.lemma }}</div>
-                <div style="color: var(--text-muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
-              </div>
-              <span class="badge badge-new">Новое</span>
-            </div>
-            <div style="padding-top: 0.5rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.875rem; line-height: 1.4;">
-              {{ w.translations | join(', ') }}
-            </div>
-          </div>
-          {% endfor %}
+    {% elif state == 'dictionary_exhausted' %}
+        <div class="card text-center" style="padding: 2rem 1.5rem; border-color: rgba(245, 158, 11, 0.3);">
+            <div style="font-size: 2.25rem; margin-bottom: 0.75rem;">🏆</div>
+            <h3 style="margin-bottom: 0.375rem;">Словарь исчерпан!</h3>
+            <p style="color: var(--text-muted); margin-bottom: 1.25rem;">
+                Вы изучили все доступные слова для текущего уровня и словаря.
+            </p>
+            <a href="/settings" role="button" class="secondary">Сменить уровень или словарь</a>
         </div>
-      </div>
-      {% endif %}
 
-      <!-- CTA Section -->
-      <div class="cta-section" style="margin-top: 1.5rem; position: relative; overflow: hidden;">
-        <div style="position: absolute; top: -50%; right: -10%; width: 300px; height: 300px; background: rgba(255,255,255,0.1); border-radius: 50%; filter: blur(40px); pointer-events: none;"></div>
-        <h3 style="position: relative; z-index: 1;">Готовы начать?</h3>
-        <p style="position: relative; z-index: 1; opacity: 0.9; max-width: 500px; margin: 0.375rem auto 1rem auto;">
-          В этом уроке <strong>{{ all_words | length }}</strong> слов. ИИ сгенерирует для них уникальный контекст.
-        </p>
-        <div style="position: relative; z-index: 1; display: inline-block;">
-          <button type="submit" class="btn-lg" style="background: white; color: var(--brand-primary); border: none; box-shadow: 0 4px 14px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 0.625rem;">
-            <i data-lucide="play" style="width: 18px; height: 18px; fill: currentColor;"></i>
-            Начать урок
-          </button>
-          <span class="htmx-indicator" id="start-spinner" style="margin-left: 1rem; color: white; font-weight: 500; display: inline-flex; align-items: center; gap: 0.5rem;">
-            <span class="spinner" style="border-color: rgba(255,255,255,0.3); border-top-color: white;"></span>
-            Генерация контекста...
-          </span>
+    {% else %}
+        {% if level_up %}
+        <div class="flash-success" style="justify-content: center; font-size: 0.9375rem; margin-bottom: 1.25rem;">
+            <i data-lucide="trending-up" style="width: 18px; height: 18px;"></i>
+            🎉 Уровень повышен до <strong>{{ new_level }}</strong>! Добавлены слова нового уровня.
         </div>
-      </div>
-    </form>
-  {% endif %}
+        {% endif %}
 
+        <form hx-post="/lesson/start"
+              hx-target="body"
+              hx-swap="innerHTML"
+              hx-indicator="#start-spinner"
+              x-data="{ idempotencyKey: generateUUID() }">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <input type="hidden" name="idempotency_key" :value="idempotencyKey">
+            {% for w in all_words %}
+            <input type="hidden" name="word_ids" value="{{ w.word_id }}">
+            {% endfor %}
+
+            <!-- Блок: На повторение -->
+            {% if due_words %}
+            <div class="mb-3">
+                <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; color: var(--text-primary);">
+                    <i data-lucide="rotate-ccw" style="width: 18px; height: 18px; color: var(--brand-accent);"></i>
+                    На повторение
+                    <span class="badge badge-review" style="margin-left: 0.25rem;">{{ due_words | length }}</span>
+                </h3>
+                <div class="grid grid-3" style="gap: 0.75rem;">
+                    {% for w in due_words %}
+                    <div class="card fade-in-up" style="padding: 0.875rem 1rem; border-left: 4px solid var(--brand-accent); transition: all 0.2s ease; cursor: default;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                            <div>
+                                <div style="font-weight: 700; font-size: 1.0625rem; color: var(--text-primary);">{{ w.lemma }}</div>
+                                <div style="color: var(--text-muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
+                            </div>
+                            <span class="badge badge-active" style="background: rgba(99, 102, 241, 0.1); color: var(--brand-primary);">Stage {{ w.stage }}</span>
+                        </div>
+                        <div style="padding-top: 0.5rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.875rem; line-height: 1.4;">
+                            {{ w.translations | join(', ') }}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Блок: Новые слова -->
+            {% if new_words %}
+            <div class="mb-3">
+                <h3 style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; color: var(--text-primary);">
+                    <i data-lucide="plus-circle" style="width: 18px; height: 18px; color: var(--brand-secondary);"></i>
+                    Новые слова
+                    <span class="badge badge-new" style="margin-left: 0.25rem;">{{ new_words | length }}</span>
+                </h3>
+                <div class="grid grid-3" style="gap: 0.75rem;">
+                    {% for w in new_words %}
+                    <div class="card fade-in-up" style="padding: 0.875rem 1rem; border-left: 4px solid var(--brand-secondary); transition: all 0.2s ease; cursor: default;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem;">
+                            <div>
+                                <div style="font-weight: 700; font-size: 1.0625rem; color: var(--text-primary);">{{ w.lemma }}</div>
+                                <div style="color: var(--text-muted); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;">{{ w.pos }}</div>
+                            </div>
+                            <span class="badge badge-new">Новое</span>
+                        </div>
+                        <div style="padding-top: 0.5rem; border-top: 1px solid var(--border-light); color: var(--text-secondary); font-size: 0.875rem; line-height: 1.4;">
+                            {{ w.translations | join(', ') }}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- CTA Section -->
+            <div class="cta-section" style="margin-top: 1.5rem; position: relative; overflow: hidden;">
+                <div style="position: absolute; top: -50%; right: -10%; width: 300px; height: 300px; background: rgba(255,255,255,0.1); border-radius: 50%; filter: blur(40px); pointer-events: none;"></div>
+                <h3 style="position: relative; z-index: 1;">Готовы начать?</h3>
+                <p style="position: relative; z-index: 1; opacity: 0.9; max-width: 500px; margin: 0.375rem auto 1rem auto;">
+                    В этом уроке <strong>{{ all_words | length }}</strong> слов. ИИ сгенерирует для них уникальный контекст.
+                </p>
+                <div style="position: relative; z-index: 1; display: inline-block;">
+                    <button type="submit" class="btn-lg" style="background: white; color: var(--brand-primary); border: none; box-shadow: 0 4px 14px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 0.625rem;">
+                        <i data-lucide="play" style="width: 18px; height: 18px; fill: currentColor;"></i>
+                        Начать урок
+                    </button>
+                    <span class="htmx-indicator" id="start-spinner" style="margin-left: 1rem; color: white; font-weight: 500; display: inline-flex; align-items: center; gap: 0.5rem;">
+                        <span class="spinner" style="border-color: rgba(255,255,255,0.3); border-top-color: white;"></span>
+                        Генерация контекста...
+                    </span>
+                </div>
+            </div>
+        </form>
+    {% endif %}
 </div>
 {% endblock %}
 ### end of app/templates/lesson/preview.html ########################################################################
@@ -11413,29 +11346,25 @@ button[type="submit"] {
 {% set selected_level = form.get('level', user.level) if form else user.level %}
 {% set selected_dictionary = form.get('dictionary_code', user.dictionary_code) if form else user.dictionary_code %}
 {% set words_value = form.get('words_per_lesson', user.words_per_lesson or 5) if form else (user.words_per_lesson or 5) %}
-{% set limit_value = form.get('daily_lesson_limit', user.daily_lesson_limit or 1) if form else (user.daily_lesson_limit or 1) %}
 {% set words_min = settings.WORDS_PER_LESSON_MIN if settings else 1 %}
 {% set words_max = settings.WORDS_PER_LESSON_MAX if settings else 10 %}
-{% set limit_max = settings.DAILY_LESSON_LIMIT_MAX if settings else 5 %}
-{% set free_daily_limit = settings.FREE_LESSON_PER_DAY_LIMIT if settings else 1 %}
-
 <div class="container--narrow" style="margin: 0 auto;">
-  <div class="page-header">
-    <div class="page-header__emoji">🎯</div>
-    <h1 class="page-header__title text-gradient">Настройка профиля</h1>
-    <p class="page-header__subtitle">
-      Это займёт всего минуту, чтобы мы подобрали идеальные слова для вас.
-    </p>
-  </div>
+    <div class="page-header">
+        <div class="page-header__emoji">🎯</div>
+        <h1 class="page-header__title text-gradient">Настройка профиля</h1>
+        <p class="page-header__subtitle">
+            Это займёт всего минуту, чтобы мы подобрали идеальные слова для вас.
+        </p>
+    </div>
 
-  {% if error %}
-  <div class="flash-error">
-    <i data-lucide="alert-circle" class="icon-md" style="flex-shrink: 0;" aria-hidden="true"></i>
-    <span>{{ error }}</span>
-  </div>
-  {% endif %}
+    {% if error %}
+    <div class="flash-error">
+        <i data-lucide="alert-circle" class="icon-md" style="flex-shrink: 0;" aria-hidden="true"></i>
+        <span>{{ error }}</span>
+    </div>
+    {% endif %}
 
-  {% include "partials/settings_form.html" with context %}
+    {% include "partials/settings_form.html" with context %}
 </div>
 {% endblock %}
 ### end of app/templates/onboarding.html ########################################################################
@@ -11643,128 +11572,108 @@ document.addEventListener('DOMContentLoaded', function() {
 ### app/templates/partials/paywall.html ########################################################################
 {# Пейволл — показывается когда бесплатные уроки исчерпаны #}
 <div class="card text-center card--spacious" style="border-color: rgba(99, 102, 241, 0.3);">
-  <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">🔒</div>
-  <h3 style="margin-bottom: 0.375rem;">Бесплатные уроки исчерпаны</h3>
-  <p style="color: var(--text-muted); margin-bottom: 0.375rem;">
-    Вы прошли {{ free_lessons_total }} из {{ free_lessons_total }} бесплатных уроков.
-  </p>
-  <p style="color: var(--text-secondary); margin-bottom: 1.25rem; font-size: 0.9375rem;">
-    Подключите <strong>Premium</strong>, чтобы продолжить обучение без ограничений.
-  </p>
-  <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
-    <a href="/billing/plans" role="button" class="btn-lg" style="background: var(--gradient-primary);">
-      <i data-lucide="crown" class="icon-md" aria-hidden="true"></i>
-      Подключить Premium
-    </a>
-    <a href="/vocabulary" role="button" class="secondary btn-lg">
-      <i data-lucide="book" class="icon-md" aria-hidden="true"></i>
-      Повторить слова
-    </a>
-  </div>
+    <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">🔒</div>
+    <h3 style="margin-bottom: 0.375rem;">Бесплатные уроки исчерпаны</h3>
+    <p style="color: var(--text-muted); margin-bottom: 0.375rem;">
+        Вы прошли {{ free_lessons_total }} из {{ free_lessons_total }} бесплатных уроков.
+    </p>
+    <p style="color: var(--text-secondary); margin-bottom: 1.25rem; font-size: 0.9375rem;">
+        Подключите <strong>Premium</strong>, чтобы продолжить обучение без ограничений.
+    </p>
+    <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+        <a href="/billing/plans" role="button" class="btn-lg" style="background: var(--gradient-primary);">
+            <i data-lucide="crown" class="icon-md" aria-hidden="true"></i>
+            Подключить Premium
+        </a>
+        <a href="/vocabulary" role="button" class="secondary btn-lg">
+            <i data-lucide="book" class="icon-md" aria-hidden="true"></i>
+            Повторить слова
+        </a>
+    </div>
 </div>
 ### end of app/templates/partials/paywall.html ########################################################################
 
 ### app/templates/partials/settings_form.html ########################################################################
 {#
-  Общая форма настроек (уровень, словарь, слова, лимит).
-  Параметры:
+Общая форма настроек (уровень, словарь, слова, лимит).
+Параметры:
     form_action  — URL для method="POST"
     submit_text  — текст кнопки
     submit_icon  — имя иконки Lucide для кнопки
 #}
 <form method="POST" action="{{ form_action }}">
-  <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
 
-  <!-- 1. Уровень -->
-  <div class="card card--settings mb-3">
-    <label class="section-header" style="margin-bottom: 0.75rem;">
-      <span style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; color: var(--text-primary);">
-        <i data-lucide="graduation-cap" class="icon-lg" style="color: var(--brand-primary);" aria-hidden="true"></i>
-        <strong>1. Ваш уровень английского</strong>
-      </span>
-    </label>
-    <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;">
-      {% for lvl in levels %}
-      <label class="option-card"
-             x-data="{ checked: '{{ selected_level }}' === '{{ lvl }}' }"
-             :class="{ 'option-card--active': checked }"
-             @click="checked = true; $el.querySelector('input').checked = true; $el.querySelectorAll('input').forEach(i => i.dispatchEvent(new Event('change', {bubbles: true})))">
-        <input type="radio" name="level" value="{{ lvl }}" required
-               {% if selected_level == lvl %}checked{% endif %}
-               style="position: absolute; opacity: 0; pointer-events: none;">
-        <span style="font-weight: 700; font-size: 1.0625rem;">{{ lvl }}</span>
-      </label>
-      {% endfor %}
+    <!-- 1. Уровень -->
+    <div class="card card--settings mb-3">
+        <label class="section-header" style="margin-bottom: 0.75rem;">
+            <span style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; color: var(--text-primary);">
+                <i data-lucide="graduation-cap" class="icon-lg" style="color: var(--brand-primary);" aria-hidden="true"></i>
+                <strong>Ваш уровень английского</strong>
+            </span>
+        </label>
+        <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;"
+             x-data="{ selected: '{{ selected_level or "" }}' }">
+            {% for lvl in levels %}
+            <label class="option-card"
+                   :class="{ 'option-card--active': selected === '{{ lvl }}' }"
+                   @click="selected = '{{ lvl }}'">
+                <input type="radio" name="level" value="{{ lvl }}" required
+                       :checked="selected === '{{ lvl }}'"
+                       style="position: absolute; opacity: 0; pointer-events: none;">
+                <span style="font-weight: 700; font-size: 1.0625rem;">{{ lvl }}</span>
+            </label>
+            {% endfor %}
+        </div>
     </div>
-  </div>
 
-  <!-- 2. Словарь -->
-  <div class="card card--settings mb-3">
-    <label class="section-header" style="margin-bottom: 0.75rem;">
-      <span style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; color: var(--text-primary);">
-        <i data-lucide="book" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
-        <strong>2. Тематический словарь</strong>
-      </span>
-    </label>
-    <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;">
-      {% for dict in dictionaries %}
-      <label class="option-card"
-             x-data="{ checked: '{{ selected_dictionary }}' === '{{ dict.code }}' }"
-             :class="{ 'option-card--active': checked }"
-             @click="checked = true; $el.querySelector('input').checked = true">
-        <input type="radio" name="dictionary_code" value="{{ dict.code }}" required
-               {% if selected_dictionary == dict.code %}checked{% endif %}
-               style="position: absolute; opacity: 0; pointer-events: none;">
-        <span style="font-weight: 600;">{{ dict.name }}</span>
-      </label>
-      {% endfor %}
+    <!-- 2. Словарь -->
+    <div class="card card--settings mb-3">
+        <label class="section-header" style="margin-bottom: 0.75rem;">
+            <span style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; color: var(--text-primary);">
+                <i data-lucide="book" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
+                <strong>Тематический словарь</strong>
+            </span>
+        </label>
+        <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;"
+             x-data="{ selected: '{{ selected_dictionary or "" }}' }">
+            {% for dict in dictionaries %}
+            <label class="option-card"
+                   :class="{ 'option-card--active': selected === '{{ dict.code }}' }"
+                   @click="selected = '{{ dict.code }}'">
+                <input type="radio" name="dictionary_code" value="{{ dict.code }}" required
+                       :checked="selected === '{{ dict.code }}'"
+                       style="position: absolute; opacity: 0; pointer-events: none;">
+                <span style="font-weight: 600;">{{ dict.name }}</span>
+            </label>
+            {% endfor %}
+        </div>
     </div>
-  </div>
 
-  <!-- 3. Слов в уроке -->
-  <div class="card card--settings mb-3" x-data="{ val: {{ words_value }} }">
-    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-      <i data-lucide="type" class="icon-lg" style="color: var(--color-success);" aria-hidden="true"></i>
-      <strong>3. Слов в одном уроке:</strong>
-      <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
-    </label>
-    <input type="range" name="words_per_lesson"
-           min="{{ words_min }}" max="{{ words_max }}"
-           value="{{ words_value }}" required
-           @input="val = $event.target.value"
-           style="width: 100%;">
-    <div style="display: flex; justify-content: space-between; font-size: 0.6875rem; color: var(--text-muted); margin-top: 0.25rem;">
-      <span>{{ words_min }}</span>
-      <span>{{ words_max }}</span>
+    <!-- 3. Слов в уроке -->
+    <div class="card card--settings mb-3" x-data="{ val: {{ words_value }} }">
+        <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
+            <i data-lucide="type" class="icon-lg" style="color: var(--color-success);" aria-hidden="true"></i>
+            <strong>Слов в одном уроке:</strong>
+            <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
+        </label>
+        <input type="range" name="words_per_lesson"
+               min="{{ words_min }}" max="{{ words_max }}"
+               value="{{ words_value }}" required
+               @input="val = $event.target.value"
+               style="width: 100%;">
+        <div style="display: flex; justify-content: space-between; font-size: 0.6875rem; color: var(--text-muted); margin-top: 0.25rem;">
+            <span>{{ words_min }}</span>
+            <span>{{ words_max }}</span>
+        </div>
     </div>
-  </div>
 
-  <!-- 4. Уроков в день -->
-  <div class="card card--settings mb-3" x-data="{ val: {{ limit_value }} }">
-    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-      <i data-lucide="calendar" class="icon-lg" style="color: var(--color-warning);" aria-hidden="true"></i>
-      <strong>4. Уроков в день:</strong>
-      <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
-    </label>
-    <input type="range" name="daily_lesson_limit"
-           min="1" max="{{ limit_max }}"
-           value="{{ limit_value }}" required
-           @input="val = $event.target.value"
-           style="width: 100%;">
-    <div class="info-box" style="margin-top: 0.625rem;">
-      <i data-lucide="info" class="icon-sm" style="flex-shrink: 0; margin-top: 1px; color: var(--color-info);" aria-hidden="true"></i>
-      <span>
-        На бесплатном тарифе доступен <strong>{{ free_daily_limit }} урок в день</strong>.
-        Выбранный лимит (<span x-text="val" style="font-weight: 600;"></span>) будет действовать при подключении <strong>Premium</strong>.
-      </span>
-    </div>
-  </div>
 
-  <!-- Кнопка отправки -->
-  <button type="submit" class="btn-lg" style="width: 100%; padding: 0.875rem;">
-    <i data-lucide="{{ submit_icon }}" class="icon-lg" aria-hidden="true"></i>
-    {{ submit_text }}
-  </button>
+    <!-- Кнопка отправки -->
+    <button type="submit" class="btn-lg" style="width: 100%; padding: 0.875rem;">
+        <i data-lucide="{{ submit_icon }}" class="icon-lg" aria-hidden="true"></i>
+        {{ submit_text }}
+    </button>
 </form>
 ### end of app/templates/partials/settings_form.html ########################################################################
 
@@ -12095,29 +12004,25 @@ async function handleCopy(button, text) {
 {% set selected_level = form.get('level', user.level) if form else user.level %}
 {% set selected_dictionary = form.get('dictionary_code', user.dictionary_code) if form else user.dictionary_code %}
 {% set words_value = form.get('words_per_lesson', user.words_per_lesson or 5) if form else (user.words_per_lesson or 5) %}
-{% set limit_value = form.get('daily_lesson_limit', user.daily_lesson_limit or 1) if form else (user.daily_lesson_limit or 1) %}
 {% set words_min = settings.WORDS_PER_LESSON_MIN if settings else 1 %}
 {% set words_max = settings.WORDS_PER_LESSON_MAX if settings else 10 %}
-{% set limit_max = settings.DAILY_LESSON_LIMIT_MAX if settings else 5 %}
-{% set free_daily_limit = settings.FREE_LESSON_PER_DAY_LIMIT if settings else 1 %}
-
 <div class="container--narrow" style="margin: 0 auto;">
-  <div class="page-header">
-    <div class="page-header__emoji">⚙️</div>
-    <h1 class="page-header__title text-gradient">Настройки</h1>
-    <p class="page-header__subtitle">
-      Настройте обучение под себя — изменения применятся к следующим урокам.
-    </p>
-  </div>
+    <div class="page-header">
+        <div class="page-header__emoji">⚙️</div>
+        <h1 class="page-header__title text-gradient">Настройки</h1>
+        <p class="page-header__subtitle">
+            Настройте обучение под себя — изменения применятся к следующим урокам.
+        </p>
+    </div>
 
-  {% if error %}
-  <div class="flash-error">
-    <i data-lucide="alert-circle" class="icon-md" style="flex-shrink: 0;" aria-hidden="true"></i>
-    <span>{{ error }}</span>
-  </div>
-  {% endif %}
+    {% if error %}
+    <div class="flash-error">
+        <i data-lucide="alert-circle" class="icon-md" style="flex-shrink: 0;" aria-hidden="true"></i>
+        <span>{{ error }}</span>
+    </div>
+    {% endif %}
 
-  {% include "partials/settings_form.html" with context %}
+    {% include "partials/settings_form.html" with context %}
 </div>
 {% endblock %}
 ### end of app/templates/settings.html ########################################################################
@@ -12834,7 +12739,10 @@ def validate_group_response(
 ### app/utils/srs.py ########################################################################
 """SRS (Spaced Repetition System) — чистая функция обновления стадии слова."""
 
-INTERVALS: list[int] = [1, 2, 3, 7, 11, 30]
+# Интервалы повторения в уроках.
+# Удвоены относительно исходных [1, 2, 3, 7, 11, 30],
+# т.к. пользователи теперь проходят до 3 уроков в день.
+INTERVALS: list[int] = [2, 4, 6, 14, 22, 60]
 MAX_STAGE: int = 6
 
 
@@ -12861,6 +12769,7 @@ def srs_update(stage: int, result: str, lesson_number: int) -> tuple[int, int | 
 
     interval = INTERVALS[max(new_stage - 1, 0)]
     due = lesson_number + interval
+
     return (new_stage, due, "active")
 ### end of app/utils/srs.py ########################################################################
 
@@ -14965,37 +14874,37 @@ class TestSrsUpdateCorrect:
     def test_stage0_to_stage1(self):
         stage, due, status = srs_update(0, "correct", lesson_number=1)
         assert stage == 1
-        assert due == 1 + INTERVALS[0]  # 1 + 1 = 2
+        assert due == 1 + INTERVALS[0]  # 1 + 2 = 3
         assert status == "active"
 
     def test_stage1_to_stage2(self):
         stage, due, status = srs_update(1, "correct", lesson_number=5)
         assert stage == 2
-        assert due == 5 + INTERVALS[1]  # 5 + 2 = 7
+        assert due == 5 + INTERVALS[1]  # 5 + 4 = 9
         assert status == "active"
 
     def test_stage2_to_stage3(self):
         stage, due, status = srs_update(2, "correct", lesson_number=10)
         assert stage == 3
-        assert due == 10 + INTERVALS[2]  # 10 + 3 = 13
+        assert due == 10 + INTERVALS[2]  # 10 + 6 = 16
         assert status == "active"
 
     def test_stage3_to_stage4(self):
         stage, due, status = srs_update(3, "correct", lesson_number=7)
         assert stage == 4
-        assert due == 7 + INTERVALS[3]  # 7 + 7 = 14
+        assert due == 7 + INTERVALS[3]  # 7 + 14 = 21
         assert status == "active"
 
     def test_stage4_to_stage5(self):
         stage, due, status = srs_update(4, "correct", lesson_number=3)
         assert stage == 5
-        assert due == 3 + INTERVALS[4]  # 3 + 11 = 14
+        assert due == 3 + INTERVALS[4]  # 3 + 22 = 25
         assert status == "active"
 
     def test_stage5_to_stage6(self):
         stage, due, status = srs_update(5, "correct", lesson_number=1)
         assert stage == 6
-        assert due == 1 + INTERVALS[5]  # 1 + 30 = 31
+        assert due == 1 + INTERVALS[5]  # 1 + 60 = 61
         assert status == "active"
 
     def test_stage6_mastered(self):
@@ -15022,32 +14931,32 @@ class TestSrsUpdateIncorrect:
     def test_stage0_stays_0(self):
         stage, due, status = srs_update(0, "incorrect", lesson_number=1)
         assert stage == 0
-        assert due == 1 + INTERVALS[0]  # 1 + 1 = 2
+        assert due == 1 + INTERVALS[0]  # 1 + 2 = 3
         assert status == "active"
 
     def test_stage1_drops_to_0(self):
         stage, due, status = srs_update(1, "incorrect", lesson_number=1)
         assert stage == 0
-        assert due == 1 + INTERVALS[0]
+        assert due == 1 + INTERVALS[0]  # 1 + 2 = 3
         assert status == "active"
 
     def test_stage3_drops_to_2(self):
         stage, due, status = srs_update(3, "incorrect", lesson_number=10)
         assert stage == 2
-        assert due == 10 + INTERVALS[1]  # 10 + 2 = 12
+        assert due == 10 + INTERVALS[1]  # 10 + 4 = 14
         assert status == "active"
 
     def test_stage5_drops_to_4(self):
         stage, due, status = srs_update(5, "incorrect", lesson_number=1)
         assert stage == 4
-        assert due == 1 + INTERVALS[3]  # 1 + 7 = 8
+        assert due == 1 + INTERVALS[3]  # 1 + 14 = 15
         assert status == "active"
 
     def test_mastered_drops_to_stage5(self):
         """mastered (stage 6) + incorrect → stage 5, active."""
         stage, due, status = srs_update(MAX_STAGE, "incorrect", lesson_number=1)
         assert stage == MAX_STAGE - 1  # 5
-        assert due == 1 + INTERVALS[4]  # 1 + 11 = 12
+        assert due == 1 + INTERVALS[4]  # 1 + 22 = 23
         assert status == "active"
 
 
@@ -15055,7 +14964,7 @@ class TestSrsIntervals:
     """Проверка самих интервалов."""
 
     def test_intervals_values(self):
-        assert INTERVALS == [1, 2, 3, 7, 11, 30]
+        assert INTERVALS == [2, 4, 6, 14, 22, 60]
 
     def test_intervals_length(self):
         assert len(INTERVALS) == MAX_STAGE  # 6 интервалов для стадий 1–6
@@ -15081,7 +14990,7 @@ class TestSrsEdgeCases:
     def test_large_lesson_number(self):
         stage, due, status = srs_update(0, "correct", lesson_number=10000)
         assert stage == 1
-        assert due == 10001
+        assert due == 10000 + INTERVALS[0]  # 10000 + 2 = 10002
 
     def test_due_always_positive(self):
         for stage in range(MAX_STAGE + 1):

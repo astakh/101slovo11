@@ -5,11 +5,12 @@ from app.db import get_db
 from app.deps import require_auth
 from app.services.dashboard import get_dashboard_data
 from app.services.paywall import get_paywall_context
-from app.services.subscription import get_subscription_status
+from app.services.subscription import get_subscription_status, get_admin_bonus_notification
 from app.core.templates import templates
 from app.models.user import User
 
 router = APIRouter(tags=["pages"])
+
 
 @router.get("/dashboard")
 async def dashboard_page(
@@ -33,6 +34,9 @@ async def dashboard_page(
 
     subscription = await get_subscription_status(db, user.id)
 
+    # Проверяем, есть ли недавний бонус от администратора
+    admin_bonus = await get_admin_bonus_notification(db, user.id)
+
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -40,6 +44,7 @@ async def dashboard_page(
             "user": user,
             "paywall": paywall,
             "subscription": subscription,
+            "admin_bonus": admin_bonus,
             # ✅ ФИКС: передаём явно для partials/paywall.html
             "free_lessons_total": paywall.get("free_lessons_total"),
             **data,

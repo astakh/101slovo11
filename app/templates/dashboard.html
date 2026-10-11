@@ -2,11 +2,23 @@
 {% block title %}Дашборд — 101slovo{% endblock %}
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
+
     <!-- Hero -->
     <div class="hero">
         <p class="hero__greeting">Привет! 👋</p>
         <h1 class="hero__title">Готов к уроку?</h1>
     </div>
+
+    <!-- Баннер: бонус от администратора -->
+    {% if admin_bonus %}
+    <div class="flash-success mb-3" role="status" style="border-left: 4px solid var(--color-success);">
+        <i data-lucide="gift" class="icon-md" style="color: var(--color-success); flex-shrink: 0;" aria-hidden="true"></i>
+        <span>
+            🎉 Вам начислено <strong>+{{ admin_bonus.days }} дн. Premium</strong>
+            ({{ admin_bonus.granted_at.strftime('%d.%m.%Y') }})
+        </span>
+    </div>
+    {% endif %}
 
     <!-- Subscription banner -->
     {% if subscription.is_premium %}
@@ -103,5 +115,6 @@
         </div>
     </div>
     {% endif %}
+
 </div>
 {% endblock %}

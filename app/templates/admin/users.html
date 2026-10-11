@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Админ — Пользователи{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+
+    <div class="section-header">
+        <h1 style="margin: 0;">👤 Пользователи</h1>
+        <a href="/admin/prompts" class="secondary">
+            <i data-lucide="shield" class="icon-md" aria-hidden="true"></i> Промпты
+        </a>
+    </div>
+
+    <!-- Поиск по email -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0;">Поиск пользователя</h3>
+        <form method="GET" action="/admin/users" style="display: flex; gap: 0.75rem;">
+            <input type="email"
+                   name="email"
+                   value="{{ search_email }}"
+                   placeholder="user@example.com"
+                   required
+                   style="flex: 1;">
+            <button type="submit">
+                <i data-lucide="search" class="icon-sm" aria-hidden="true"></i>
+                Найти
+            </button>
+        </form>
+    </div>
+
+    {% if search_error %}
+    <div class="flash-error">
+        <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
+        {{ search_error }}
+    </div>
+    {% endif %}
+
+    {% if found_user %}
+    <!-- Карточка найденного пользователя -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="user" class="icon-lg" style="color: var(--brand-primary);" aria-hidden="true"></i>
+            {{ found_user.email }}
+        </h3>
+
+        <div class="grid grid-3" style="margin-bottom: 1rem;">
+            <div>
+                <div class="stat-row">ID</div>
+                <div class="stat-row__value">{{ found_user.id }}</div>
+            </div>
+            <div>
+                <div class="stat-row">Регистрация</div>
+                <div class="stat-row__value">{{ found_user.created_at.strftime('%d.%m.%Y') }}</div>
+            </div>
+            <div>
+                <div class="stat-row">Онбординг</div>
+                <div class="stat-row__value">
+                    {% if found_user.is_onboarded %}
+                    <span class="badge badge-mastered">Пройден</span>
+                    {% else %}
+                    <span class="badge badge-ignored">Не пройден</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Подписка -->
+        <div style="padding: 1rem; background: var(--surface-50); border-radius: var(--radius-md); margin-bottom: 1rem;">
+            {% if sub_status.is_premium %}
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                <span class="badge badge-mastered badge--md">
+                    <i data-lucide="crown" class="icon-xs" aria-hidden="true"></i>
+                    Premium активна
+                </span>
+            </div>
+            <div class="grid grid-3">
+                <div>
+                    <div class="stat-row">План</div>
+                    <div class="stat-row__value">{{ sub_status.plan }}</div>
+                </div>
+                <div>
+                    <div class="stat-row">Действует до</div>
+                    <div class="stat-row__value">{{ sub_status.expires_at.strftime('%d.%m.%Y') }}</div>
+                </div>
+                <div>
+                    <div class="stat-row">Осталось дней</div>
+                    <div class="stat-row__value">{{ sub_status.days_left }}</div>
+                </div>
+            </div>
+            <p style="margin: 0.5rem 0 0 0; font-size: 0.75rem; color: var(--text-muted);">
+                Источник: {{ sub_status.source }}
+            </p>
+            {% else %}
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span class="badge badge-active badge--md">Free</span>
+                <span style="color: var(--text-muted); font-size: 0.875rem;">Подписка не активна</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Форма начисления дней -->
+        <div style="padding: 1rem; border: 2px dashed var(--brand-primary); border-radius: var(--radius-md);">
+            <h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="gift" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
+                Начислить дни Premium
+            </h4>
+            <form method="POST" action="/admin/users/grant-days"
+                  style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <input type="hidden" name="user_id" value="{{ found_user.id }}">
+                <div style="flex: 1; min-width: 120px;">
+                    <label for="days">Количество дней</label>
+                    <input type="number"
+                           id="days"
+                           name="days"
+                           min="1"
+                           required
+                           placeholder="30"
+                           style="width: 100%;">
+                </div>
+                <button type="submit"
+                        onclick="return confirm('Начислить ' + document.getElementById('days').value + ' дн. Premium пользователю {{ found_user.email }}?');">
+                    <i data-lucide="plus" class="icon-sm" aria-hidden="true"></i>
+                    Начислить
+                </button>
+            </form>
+            <p style="margin: 0.5rem 0 0 0; font-size: 0.75rem; color: var(--text-muted);">
+                Дни будут добавлены к текущей подписке или создана новая.
+                План пользователя не изменится.
+            </p>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}
