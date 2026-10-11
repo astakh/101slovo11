@@ -55,6 +55,22 @@ REFERRAL_PROMO_MAX_ATTEMPTS=3
 # Получите в личном кабинете: https://yookassa.ru/
 YOOKASSA_SHOP_ID=
 YOOKASSA_SECRET_KEY=
+
+# ============================================
+# Partner Program
+# ============================================
+# Процент вознаграждения партнёру от первой оплаты приглашённого
+PARTNER_COMMISSION_PERCENT=20
+
+# Бонусные дни приглашённому пользователю при первой оплате
+PARTNER_BONUS_DAYS=30
+
+# Минимальная сумма для вывода в админке (в копейках)
+PARTNER_MIN_PAYOUT_KOP=300000
+
+# Срок действия инвайт-ссылки для партнёра (в днях)
+PARTNER_INVITE_TTL_DAYS=30
+
 ### end of .env.example ########################################################################
 
 ### alembic.ini ########################################################################
@@ -145,34 +161,34 @@ class Settings(BaseSettings):
 
     # Level
     MAX_LEVEL: str = "C2"
-
-    ENV: str = "development"  # "production" или "development"
+    ENV: str = "development"
 
     # ============================================
     # Monetization (обязательные параметры)
     # ============================================
-
-    # Freemium limits
     FREE_LESSON_PER_DAY_LIMIT: int
     FREE_LESSONS_TOTAL_LIMIT: int
 
-    # Subscription pricing (в копейках)
     SUBSCRIPTION_MONTHLY_PRICE_KOP: int
     SUBSCRIPTION_6M_PRICE_KOP: int
     SUBSCRIPTION_6M_DISCOUNT_PERCENT: int
 
-    # Grace period (для будущих рекуррентов)
     GRACE_PERIOD_DAYS: int
 
-    # Referral
     REFERRAL_BONUS_DAYS: int
     REFERRAL_PROMO_MAX_ATTEMPTS: int
 
-    # YooKassa
     YOOKASSA_SHOP_ID: str = ""
     YOOKASSA_SECRET_KEY: str = ""
 
-    # Валидатор для парсинга строки через запятую в список
+    # ============================================
+    # Partner Program
+    # ============================================
+    PARTNER_COMMISSION_PERCENT: int = 20
+    PARTNER_BONUS_DAYS: int = 30
+    PARTNER_MIN_PAYOUT_KOP: int = 300000
+    PARTNER_INVITE_TTL_DAYS: int = 30
+
     @field_validator("AVAILABLE_DICTIONARIES", mode="before")
     @classmethod
     def parse_dictionaries(cls, v):
@@ -1208,13 +1224,12 @@ class EnrichWordResponse(BaseModel):
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal
+from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal, partner
 from app.middleware import AppMiddleware
 from app.core.templates import templates
 from app.db import AsyncSessionLocal
@@ -1227,7 +1242,6 @@ BG_TASK_INTERVAL = 3600
 
 
 async def _background_scheduler():
-    """Фоновый планировщик периодических задач."""
     while True:
         await asyncio.sleep(BG_TASK_INTERVAL)
         try:
@@ -1257,20 +1271,11 @@ app = FastAPI(title="101slovo", lifespan=lifespan)
 @app.middleware("http")
 async def bot_protection_middleware(request: Request, call_next):
     if request.method == "OPTIONS":
-        return Response(
-            status_code=204,
-            headers={
-                "Allow": "GET, POST, HEAD, OPTIONS",
-                "Cache-Control": "no-store",
-            },
-        )
+        return Response(status_code=204, headers={"Allow": "GET, POST, HEAD, OPTIONS", "Cache-Control": "no-store"})
     if request.method == "HEAD":
         if request.url.path == "/health":
             return await call_next(request)
-        return Response(
-            status_code=200,
-            headers={"Cache-Control": "no-store"},
-        )
+        return Response(status_code=200, headers={"Cache-Control": "no-store"})
     return await call_next(request)
 
 
@@ -1284,9 +1289,10 @@ app.include_router(pages.router)
 app.include_router(lesson.router)
 app.include_router(settings.router)
 app.include_router(vocabulary.router)
-app.include_router(admin.router)
 app.include_router(billing.router)
 app.include_router(legal.router)
+app.include_router(partner.router)
+app.include_router(admin.router)
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -1306,30 +1312,24 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def root(request: Request):
     if request.state.user:
         return Response(status_code=303, headers={"Location": "/dashboard"})
-
-    # ✅ ФИКС: вычисляем цены из settings вместо хардкода в шаблоне
     monthly_price = app_settings.SUBSCRIPTION_MONTHLY_PRICE_KOP / 100
     six_month_price = app_settings.SUBSCRIPTION_6M_PRICE_KOP / 100
     six_month_per_month = six_month_price / 6
     six_month_full = monthly_price * 6
     six_month_saving = six_month_full - six_month_price
-
     return templates.TemplateResponse(
         "landing.html",
         {
             "request": request,
             "referral_bonus_days": app_settings.REFERRAL_BONUS_DAYS,
-            # Цены
             "monthly_price": monthly_price,
             "six_month_price": six_month_price,
             "six_month_per_month": six_month_per_month,
             "six_month_full": six_month_full,
             "six_month_saving": six_month_saving,
             "discount_percent": app_settings.SUBSCRIPTION_6M_DISCOUNT_PERCENT,
-            # Freemium лимиты
             "free_lessons_total": app_settings.FREE_LESSONS_TOTAL_LIMIT,
             "free_daily_limit": app_settings.FREE_LESSON_PER_DAY_LIMIT,
-            # ✅ Лимиты Premium из конфига (вместо хардкода)
             "daily_lesson_limit_max": app_settings.DAILY_LESSON_LIMIT_MAX,
             "words_per_lesson_max": app_settings.WORDS_PER_LESSON_MAX,
         },
@@ -1346,28 +1346,27 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request, Response
 from sqlalchemy import select
 from datetime import datetime, timezone
-
-# Импортируем правильное имя фабрики сессий
 from app.db import AsyncSessionLocal
 from app.models.user import User
 from app.models.auth_session import AuthSession
 from app.security import hash_token
 from app.utils.flash import get_flashes, clear_flashes
 
+
 class AppMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # 1. CSRF Token для шаблонов
         request.state.csrf_token = request.cookies.get("csrf", "")
-        
+
         # 2. Flash сообщения
         request.state.flashes = get_flashes(request)
-        
-        # 3. Аутентификация (загрузка user в request.state)
+
+        # 3. Аутентификация
         request.state.user = None
+        request.state.is_partner = False
+
         session_token = request.cookies.get("session")
-        
         if session_token:
-            # Используем правильную фабрику сессий
             async with AsyncSessionLocal() as db:
                 token_hash = hash_token(session_token)
                 stmt = select(AuthSession).where(
@@ -1376,18 +1375,31 @@ class AppMiddleware(BaseHTTPMiddleware):
                 )
                 result = await db.execute(stmt)
                 auth_session = result.scalar_one_or_none()
-                
                 if auth_session:
                     user_stmt = select(User).where(User.id == auth_session.user_id)
                     user_result = await db.execute(user_stmt)
                     request.state.user = user_result.scalar_one_or_none()
-        
+
+                    # 4. Проверяем партнёрство (с защитой от ошибок)
+                    if request.state.user:
+                        try:
+                            from app.models.partner import Partner
+                            partner_stmt = select(Partner.id).where(
+                                Partner.user_id == request.state.user.id,
+                                Partner.is_active == True,  # noqa: E712
+                            )
+                            partner_result = await db.execute(partner_stmt)
+                            request.state.is_partner = partner_result.scalar_one_or_none() is not None
+                        except Exception:
+                            # Если таблица ещё не создана или другая ошибка — не падаем
+                            request.state.is_partner = False
+
         response = await call_next(request)
-        
-        # 4. Очистка flash после отдачи ответа
+
+        # 5. Очистка flash после отдачи ответа
         if request.state.flashes:
             clear_flashes(response)
-            
+
         return response
 ### end of app/middleware.py ########################################################################
 
@@ -1406,11 +1418,15 @@ from .subscription import Subscription
 from .payment import Payment
 from .promo_code import PromoCode
 from .referral import Referral
+from .partner import Partner
+from .partner_invite import PartnerInvite
+from .partner_earning import PartnerEarning
 
 __all__ = [
     "Base", "User", "AuthSession", "Word", "UserWord",
     "Lesson", "LessonExercise", "Prompt", "LlmCall", "Event",
     "Subscription", "Payment", "PromoCode", "Referral",
+    "Partner", "PartnerInvite", "PartnerEarning",
 ]
 ### end of app/models/__init__.py ########################################################################
 
@@ -1557,6 +1573,103 @@ class LlmCall(Base):
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
 ### end of app/models/llm_call.py ########################################################################
 
+### app/models/partner.py ########################################################################
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Identity, Index, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql import func
+from datetime import datetime
+from .base import Base
+
+
+class Partner(Base):
+    __tablename__ = "partners"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    # "self_employed" | "individual" | "company"
+    partner_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    inn: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    payout_details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_partners_user_id", "user_id"),
+    )
+### end of app/models/partner.py ########################################################################
+
+### app/models/partner_earning.py ########################################################################
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql import func
+from datetime import datetime
+from .base import Base
+
+
+class PartnerEarning(Base):
+    __tablename__ = "partner_earnings"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    partner_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    referred_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    payment_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("payments.id", ondelete="CASCADE"), nullable=False
+    )
+    payment_amount_kop: Mapped[int] = mapped_column(Integer, nullable=False)
+    commission_percent: Mapped[int] = mapped_column(Integer, nullable=False)
+    earning_amount_kop: Mapped[int] = mapped_column(Integer, nullable=False)
+    # "pending" | "paid" | "canceled"
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_partner_earnings_partner_user_id", "partner_user_id"),
+        Index("ix_partner_earnings_status", "status"),
+    )
+### end of app/models/partner_earning.py ########################################################################
+
+### app/models/partner_invite.py ########################################################################
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Identity, Index, String
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql import func
+from datetime import datetime
+from .base import Base
+
+
+class PartnerInvite(Base):
+    __tablename__ = "partner_invites"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    created_by: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    used_by_partner_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("partners.id", ondelete="SET NULL"), nullable=True
+    )
+    is_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_partner_invites_is_used", "is_used"),
+    )
+### end of app/models/partner_invite.py ########################################################################
+
 ### app/models/payment.py ########################################################################
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -1608,22 +1721,23 @@ class PromoCode(Base):
     __tablename__ = "promo_codes"
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    # Уникальный код, 6 символов (автогенерация)
-    code: Mapped[str] = mapped_column(String(6), unique=True, nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(9), unique=True, nullable=False, index=True)
     owner_user_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    # "user_referral" | "blogger" | "marketing"
+    # "user_referral" | "partner" | "marketing"
     type: Mapped[str] = mapped_column(String(20), nullable=False, default="user_referral")
+    # "pending" | "approved" | "disabled" (для partner-кодов)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="approved")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     used_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     __table_args__ = (
         Index("ix_promo_codes_owner", "owner_user_id"),
+        Index("ix_promo_codes_status", "status"),
     )
 ### end of app/models/promo_code.py ########################################################################
 
@@ -1818,7 +1932,6 @@ class Word(Base):
 
 ### app/routers/admin.py ########################################################################
 """Админские роуты."""
-
 from fastapi import APIRouter, Request, Depends, Form, HTTPException, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1826,12 +1939,20 @@ from app.db import get_db
 from app.deps import require_admin, require_csrf
 from app.core.templates import templates
 from app.models.user import User
-from app.services.admin_prompts import (
-    get_all_prompts,
-    update_prompt,
-    validate_prompt_template,
-)
+from app.services.admin_prompts import get_all_prompts, update_prompt, validate_prompt_template
 from app.services.admin_stats import get_token_stats
+from app.services.partner import (
+    create_partner_invite,
+    get_all_invites,
+    get_pending_promo_codes,
+    approve_promo_code,
+    decline_promo_code,
+    get_all_partners,
+    deactivate_partner,
+    get_partner_earnings,
+    mark_earning_as_paid,
+)
+from app.config import settings
 from app.utils.flash import add_flash
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -1843,18 +1964,10 @@ async def admin_prompts_page(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Список промптов с возможностью редактирования."""
     prompts = await get_all_prompts(db)
     return templates.TemplateResponse(
         "admin/prompts.html",
-        {
-            "request": request,
-            "user": admin,
-            "prompts": prompts,
-            "error": None,
-            "edit_key": None,
-            "edit_value": None,
-        },
+        {"request": request, "user": admin, "prompts": prompts, "error": None, "edit_key": None, "edit_value": None},
     )
 
 
@@ -1866,30 +1979,18 @@ async def admin_prompt_update(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Обновление промпта."""
-    # Валидация
     errors = validate_prompt_template(key, system_template)
     if errors:
         prompts = await get_all_prompts(db)
         return templates.TemplateResponse(
             "admin/prompts.html",
-            {
-                "request": request,
-                "user": admin,
-                "prompts": prompts,
-                "error": " ".join(errors),
-                "edit_key": key,
-                "edit_value": system_template,
-            },
+            {"request": request, "user": admin, "prompts": prompts, "error": " ".join(errors), "edit_key": key, "edit_value": system_template},
             status_code=422,
         )
-
-    # Обновление
     try:
         await update_prompt(db, key, system_template, admin)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-
     response = RedirectResponse(url="/admin/prompts", status_code=status.HTTP_303_SEE_OTHER)
     add_flash(response, "success", f"Промпт '{key}' обновлён")
     return response
@@ -1901,16 +2002,131 @@ async def admin_stats_page(
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Статистика расхода токенов."""
     stats = await get_token_stats(db)
+    return templates.TemplateResponse("admin/stats.html", {"request": request, "user": admin, "stats": stats})
+
+
+# ============================================================
+# PARTNERS MANAGEMENT
+# ============================================================
+
+@router.get("/partners")
+async def admin_partners_page(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    partners_data = await get_all_partners(db)
+    invites = await get_all_invites(db)
+    pending_promos = await get_pending_promo_codes(db)
+
+    base_url = str(request.base_url).rstrip("/")
+    invites_with_links = []
+    for inv in invites:
+        link = f"{base_url}/partner/register?invite={inv.token}" if not inv.is_used else None
+        invites_with_links.append({"invite": inv, "link": link})
+
     return templates.TemplateResponse(
-        "admin/stats.html",
+        "admin/partners.html",
         {
             "request": request,
             "user": admin,
-            "stats": stats,
+            "partners_data": partners_data,
+            "invites_with_links": invites_with_links,
+            "pending_promos": pending_promos,
+            "min_payout_rub": settings.PARTNER_MIN_PAYOUT_KOP / 100,
         },
     )
+
+
+@router.post("/partners/create-invite", dependencies=[Depends(require_csrf)])
+async def admin_create_invite(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    invite = await create_partner_invite(db, admin)
+    response = RedirectResponse(url="/admin/partners", status_code=status.HTTP_303_SEE_OTHER)
+    add_flash(response, "success", f"Инвайт создан: {invite.token[:16]}...")
+    return response
+
+
+@router.post("/partners/approve-promo/{promo_id}", dependencies=[Depends(require_csrf)])
+async def admin_approve_promo(
+    request: Request,
+    promo_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await approve_promo_code(db, promo_id, admin)
+        response = RedirectResponse(url="/admin/partners", status_code=status.HTTP_303_SEE_OTHER)
+        add_flash(response, "success", "Промокод подтверждён")
+        return response
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/partners/decline-promo/{promo_id}", dependencies=[Depends(require_csrf)])
+async def admin_decline_promo(
+    request: Request,
+    promo_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await decline_promo_code(db, promo_id, admin)
+        response = RedirectResponse(url="/admin/partners", status_code=status.HTTP_303_SEE_OTHER)
+        add_flash(response, "info", "Промокод отклонён")
+        return response
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/partners/deactivate/{partner_id}", dependencies=[Depends(require_csrf)])
+async def admin_deactivate_partner(
+    request: Request,
+    partner_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await deactivate_partner(db, partner_id, admin)
+        response = RedirectResponse(url="/admin/partners", status_code=status.HTTP_303_SEE_OTHER)
+        add_flash(response, "success", "Партнёр деактивирован")
+        return response
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/partners/{partner_user_id}/earnings")
+async def admin_partner_earnings_page(
+    request: Request,
+    partner_user_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    earnings = await get_partner_earnings(db, partner_user_id)
+    return templates.TemplateResponse(
+        "admin/partner_earnings.html",
+        {"request": request, "user": admin, "partner_user_id": partner_user_id, "earnings": earnings},
+    )
+
+
+@router.post("/partners/mark-paid/{earning_id}", dependencies=[Depends(require_csrf)])
+async def admin_mark_paid(
+    request: Request,
+    earning_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await mark_earning_as_paid(db, earning_id, admin)
+        response = RedirectResponse(url="/admin/partners", status_code=status.HTTP_303_SEE_OTHER)
+        add_flash(response, "success", "Отмечено как выплаченное")
+        return response
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 ### end of app/routers/admin.py ########################################################################
 
 ### app/routers/auth.py ########################################################################
@@ -2030,12 +2246,10 @@ async def logout_post(request: Request, db: AsyncSession = Depends(get_db)):
 """Роуты биллинга и управления подпиской."""
 import logging
 from datetime import datetime, timezone
-
 from fastapi import APIRouter, Request, Depends, Form, HTTPException, status
 from fastapi.responses import RedirectResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.core.templates import templates
@@ -2050,6 +2264,7 @@ from app.services.subscription import (
     get_plan_label,
 )
 from app.services.referral import get_referral_stats, reward_referrer_on_purchase
+from app.services.partner import get_partner_by_user_id
 from app.services.yookassa_client import (
     create_payment,
     get_payment_info,
@@ -2097,6 +2312,9 @@ async def billing_page(
     sub_status = await get_subscription_status(db, user.id)
     referral_stats = await get_referral_stats(db, user.id)
 
+    # Проверяем, является ли пользователь партнёром
+    partner = await get_partner_by_user_id(db, user.id)
+
     return templates.TemplateResponse(
         "billing/manage.html",
         {
@@ -2105,6 +2323,7 @@ async def billing_page(
             "subscription": sub_status,
             "referral": referral_stats,
             "referral_bonus_days": settings.REFERRAL_BONUS_DAYS,
+            "is_partner": partner is not None,
         },
     )
 
@@ -2139,7 +2358,6 @@ async def plans_page(
             "six_month_full": six_month_full,
             "six_month_saving": six_month_saving,
             "discount_percent": settings.SUBSCRIPTION_6M_DISCOUNT_PERCENT,
-            # ✅ Лимиты из конфига (вместо хардкода)
             "free_daily_limit": settings.FREE_LESSON_PER_DAY_LIMIT,
             "free_lessons_total": settings.FREE_LESSONS_TOTAL_LIMIT,
             "daily_lesson_limit_max": settings.DAILY_LESSON_LIMIT_MAX,
@@ -2191,26 +2409,24 @@ async def subscribe_post(
             payment_id=payment.id,
         )
         # В DEV-режиме начисляем бонус здесь (нет webhook)
-        await reward_referrer_on_purchase(db, user.id)
-
+        await reward_referrer_on_purchase(
+            db,
+            buyer_user_id=user.id,
+            payment_amount_kop=payment.amount_kop,
+            payment_id=payment.id,
+        )
         response = RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
         add_flash(response, "success", "Подписка активирована (DEV-режим) 🎉")
         return response
 
     # PROD-режим: создаём платёж в ЮKassa
     try:
-        # return_url — куда вернётся пользователь после оплаты
         base_url = str(request.base_url).rstrip("/")
         return_url = f"{base_url}/billing/success?payment_id={payment.id}"
-
-        # ✅ Передаём email пользователя для фискального чека (54-ФЗ)
         result = await create_payment(payment, return_url, user_email=user.email)
-
-        # Сохраняем yookassa_payment_id
         payment.yookassa_payment_id = result["yookassa_payment_id"]
         await db.flush()
 
-        # Редиректим на страницу оплаты
         logger.info(
             f"[BILLING] Redirecting to ЮKassa | user_id={user.id} | "
             f"payment_id={payment.id} | yookassa_id={result['yookassa_payment_id']}"
@@ -2219,13 +2435,10 @@ async def subscribe_post(
             url=result["confirmation_url"],
             status_code=status.HTTP_303_SEE_OTHER,
         )
-
     except YooKassaError as e:
         logger.error(f"[BILLING] YooKassa error: {e}")
-        # Помечаем платёж как failed
         payment.status = "failed"
         await db.flush()
-
         response = RedirectResponse(url="/billing/plans", status_code=status.HTTP_303_SEE_OTHER)
         add_flash(response, "error", f"Ошибка создания платежа: {e}")
         return response
@@ -2241,14 +2454,12 @@ async def billing_success(
     """
     Страница успеха после оплаты (return_url от ЮKassa).
     Проверяет статус платежа и активирует подписку если нужно.
-
     ВАЖНО: Бонус рефереру НЕ начисляется здесь.
     Бонус начисляется ТОЛЬКО через webhook, чтобы избежать
     двойного начисления и проблемы с пропуском.
     """
     if not user.is_onboarded:
         return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
-
     if not payment_id:
         return RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -2259,7 +2470,6 @@ async def billing_success(
     )
     result = await db.execute(stmt)
     payment = result.scalar_one_or_none()
-
     if not payment:
         return RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -2272,7 +2482,6 @@ async def billing_success(
         try:
             info = await get_payment_info(payment.yookassa_payment_id)
             yookassa_status = info.get("status", "")
-
             if yookassa_status == "succeeded":
                 payment.status = "succeeded"
                 paid_at_raw = info.get("captured_at") or info.get("created_at")
@@ -2284,20 +2493,14 @@ async def billing_success(
                     source="payment",
                     payment_id=payment.id,
                 )
-                # ❌ НЕ начисляем бонус здесь.
-                # Это сделает webhook.
                 logger.info(
                     f"[BILLING] Payment succeeded (via API check) | "
                     f"payment_id={payment.id} | user_id={user.id} | "
                     f"referral bonus will be granted by webhook"
                 )
-
             elif yookassa_status == "canceled":
                 payment.status = "failed"
                 logger.info(f"[BILLING] Payment canceled | payment_id={payment.id}")
-
-            # pending — ждём webhook
-
         except YooKassaError as e:
             logger.warning(f"[BILLING] Could not check payment status: {e}")
 
@@ -2308,7 +2511,6 @@ async def billing_success(
         add_flash(response, "error", "Оплата не прошла. Попробуйте ещё раз.")
     else:
         add_flash(response, "info", "Оплата обрабатывается. Подписка активируется автоматически.")
-
     return response
 
 
@@ -2320,19 +2522,18 @@ async def cancel_post(
 ):
     """Отмена подписки."""
     success = await cancel_subscription(db, user.id)
-
     response = RedirectResponse(url="/billing", status_code=status.HTTP_303_SEE_OTHER)
     if success:
         add_flash(response, "info", "Подписка отменена. Доступ сохранится до конца оплаченного периода.")
     else:
         add_flash(response, "error", "Активная подписка не найдена.")
-
     return response
 
 
 # ============================================================
 # WEBHOOK от ЮKassa
 # ============================================================
+
 @router.post("/webhook")
 async def billing_webhook(
     request: Request,
@@ -2343,20 +2544,12 @@ async def billing_webhook(
     Обрабатывает события:
     - payment.succeeded — платёж успешен
     - payment.canceled — платёж отменён
-
-    Защита: проверка IP-адреса отправителя.
-
-    ВАЖНО: Бонус рефереру и реферированному начисляется
-    ТОЛЬКО здесь. Функция reward_referrer_on_purchase сама
-    защищена от повторного начисления (ищет только рефералы
-    со статусом "pending").
     """
     # 1. Проверка IP
     client_ip = request.client.host if request.client else ""
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
         client_ip = forwarded.split(",")[0].strip()
-
     if not is_webhook_ip_allowed(client_ip):
         logger.warning(f"[WEBHOOK] Rejected: IP {client_ip} not in ЮKassa whitelist")
         return JSONResponse(
@@ -2384,7 +2577,6 @@ async def billing_webhook(
     stmt = select(Payment).where(Payment.yookassa_payment_id == yookassa_payment_id)
     result = await db.execute(stmt)
     payment = result.scalar_one_or_none()
-
     if not payment:
         logger.warning(
             f"[WEBHOOK] Payment not found in DB | yookassa_id={yookassa_payment_id}"
@@ -2393,7 +2585,6 @@ async def billing_webhook(
 
     # 4. Обрабатываем событие
     if event == "payment.succeeded":
-        # Активация подписки — только если платёж ещё не помечен
         if payment.status != "succeeded":
             payment.status = "succeeded"
             paid_at_raw = obj.get("captured_at") or obj.get("created_at")
@@ -2409,25 +2600,26 @@ async def billing_webhook(
                 f"[WEBHOOK] Payment succeeded | payment_id={payment.id} | "
                 f"user_id={payment.user_id} | plan={payment.plan}"
             )
+            event_record = Event(
+                user_id=payment.user_id,
+                type="payment_succeeded",
+                payload={
+                    "payment_id": payment.id,
+                    "yookassa_payment_id": yookassa_payment_id,
+                    "plan": payment.plan,
+                    "amount_kop": payment.amount_kop,
+                },
+            )
+            db.add(event_record)
 
-        event_record = Event(
-            user_id=payment.user_id,
-            type="payment_succeeded",
-            payload={
-                "payment_id": payment.id,
-                "yookassa_payment_id": yookassa_payment_id,
-                "plan": payment.plan,
-                "amount_kop": payment.amount_kop,
-            },
+        # Начисление бонуса рефереру/партнёру — ВНЕ блока проверки статуса.
+        # Функция сама защищена от повторного начисления.
+        await reward_referrer_on_purchase(
+            db,
+            buyer_user_id=payment.user_id,
+            payment_amount_kop=payment.amount_kop,
+            payment_id=payment.id,
         )
-        db.add(event_record)
-
-        # ✅ Начисление бонуса — ВНЕ блока проверки статуса платежа.
-        # Это решает проблему, когда /billing/success уже пометил
-        # платёж как "succeeded", но бонус ещё не начислен.
-        # Функция сама защищена от повторного начисления
-        # (ищет только рефералы со статусом "pending").
-        await reward_referrer_on_purchase(db, payment.user_id)
 
     elif event == "payment.canceled":
         if payment.status not in ("succeeded", "failed"):
@@ -2436,22 +2628,19 @@ async def billing_webhook(
                 f"[WEBHOOK] Payment canceled | payment_id={payment.id} | "
                 f"user_id={payment.user_id}"
             )
-
-        event_record = Event(
-            user_id=payment.user_id,
-            type="payment_canceled",
-            payload={
-                "payment_id": payment.id,
-                "yookassa_payment_id": yookassa_payment_id,
-                "reason": obj.get("cancellation_details", {}).get("reason", "unknown"),
-            },
-        )
-        db.add(event_record)
-
+            event_record = Event(
+                user_id=payment.user_id,
+                type="payment_canceled",
+                payload={
+                    "payment_id": payment.id,
+                    "yookassa_payment_id": yookassa_payment_id,
+                    "reason": obj.get("cancellation_details", {}).get("reason", "unknown"),
+                },
+            )
+            db.add(event_record)
     else:
         logger.info(f"[WEBHOOK] Unhandled event: {event}")
 
-    # 5. Всегда возвращаем 200
     return JSONResponse({"status": "ok"})
 ### end of app/routers/billing.py ########################################################################
 
@@ -3010,7 +3199,6 @@ async def lesson_summary_page(
 from fastapi import APIRouter, Request, Depends, Form, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.db import get_db
 from app.deps import require_auth, require_csrf
 from app.services.onboarding import complete_onboarding
@@ -3021,6 +3209,7 @@ from app.config import settings
 router = APIRouter(tags=["onboarding"])
 
 LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"]
+
 DICT_LABELS = {
     "general": "Общий",
     "it": "IT",
@@ -3055,6 +3244,10 @@ def render_onboarding(
             "error": error,
             "form": form,
             "settings": settings,
+            # ✅ Передаём параметры для settings_form.html
+            "form_action": "/onboarding/complete",
+            "submit_text": "Начать обучение",
+            "submit_icon": "rocket",
         },
     )
 
@@ -3066,7 +3259,6 @@ async def onboarding_page(
 ):
     if user.is_onboarded:
         return RedirectResponse(url="/dashboard", status_code=status.HTTP_303_SEE_OTHER)
-
     return render_onboarding(request, user)
 
 
@@ -3208,6 +3400,243 @@ async def dashboard_page(
     )
 ### end of app/routers/pages.py ########################################################################
 
+### app/routers/partner.py ########################################################################
+"""Роуты партнёрской программы."""
+import logging
+from fastapi import APIRouter, Request, Depends, Form, HTTPException, status
+from fastapi.responses import RedirectResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db import get_db
+from app.deps import require_auth, require_csrf
+from app.core.templates import templates
+from app.models.user import User
+from app.config import settings
+from app.utils.flash import add_flash
+from app.services.auth import create_session
+from app.services.partner import (
+    get_valid_invite,
+    register_partner_full,
+    get_partner_by_user_id,
+    get_partner_promo,
+    get_partner_stats,
+    propose_partner_promo_code,
+    update_partner_profile,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/partner", tags=["partner"])
+
+VALID_PARTNER_TYPES = ("self_employed", "individual", "company")
+
+
+@router.get("/register")
+async def partner_register_page(
+    request: Request,
+    invite: str = "",
+    db: AsyncSession = Depends(get_db),
+):
+    """Страница регистрации партнёра по инвайт-ссылке. Единая форма."""
+    # Если уже партнёр — редирект в кабинет
+    if request.state.user:
+        partner = await get_partner_by_user_id(db, request.state.user.id)
+        if partner:
+            return RedirectResponse(url="/partner/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+
+    # Проверяем инвайт
+    valid_invite = None
+    invite_error = None
+    if invite:
+        valid_invite = await get_valid_invite(db, invite)
+        if not valid_invite:
+            invite_error = "Ссылка недействительна или истекла"
+    else:
+        invite_error = "Отсутствует параметр приглашения"
+
+    return templates.TemplateResponse(
+        "partner/register.html",
+        {
+            "request": request,
+            "invite_token": invite,
+            "valid_invite": valid_invite,
+            "invite_error": invite_error,
+        },
+    )
+
+
+@router.post("/register")
+async def partner_register_post(
+    request: Request,
+    invite: str = Form(...),
+    # Данные аккаунта (если не залогинен)
+    email: str = Form(default=""),
+    password: str = Form(default=""),
+    password_confirm: str = Form(default=""),
+    # Данные партнёра
+    name: str = Form(...),
+    partner_type: str = Form(...),
+    inn: str = Form(default=""),
+    payout_details: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Обработка регистрации партнёра. Создаёт User + Partner за один шаг."""
+    # Валидация инвайта
+    valid_invite = await get_valid_invite(db, invite)
+    if not valid_invite:
+        return _render_register_error(request, invite, "Ссылка недействительна или истекла")
+
+    # Валидация типа партнёра
+    if partner_type not in VALID_PARTNER_TYPES:
+        return _render_register_error(request, invite, "Некорректный тип партнёра")
+
+    # Валидация имени
+    if not name.strip():
+        return _render_register_error(request, invite, "Укажите название или ФИО")
+
+    # Определяем: залогинен ли пользователь
+    existing_user = request.state.user
+
+    if not existing_user:
+        # Нужна регистрация нового пользователя
+        if not email.strip():
+            return _render_register_error(request, invite, "Укажите email")
+        if len(password) < 8:
+            return _render_register_error(request, invite, "Пароль должен быть не менее 8 символов")
+        if password != password_confirm:
+            return _render_register_error(request, invite, "Пароли не совпадают")
+
+    try:
+        user, partner = await register_partner_full(
+            db,
+            invite=valid_invite,
+            email=email.strip() if not existing_user else None,
+            password=password if not existing_user else None,
+            existing_user=existing_user,
+            name=name.strip(),
+            partner_type=partner_type,
+            inn=inn.strip() if inn.strip() else None,
+            payout_details=payout_details.strip() if payout_details.strip() else None,
+        )
+    except ValueError as e:
+        return _render_register_error(request, invite, str(e))
+
+    # Создаём сессию если пользователь новый
+    response = RedirectResponse(url="/partner/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+    if not existing_user:
+        await create_session(db, user.id, response)
+
+    add_flash(response, "success", "Регистрация успешна! Придумайте промокод для привлечения пользователей.")
+    return response
+
+
+def _render_register_error(request: Request, invite: str, error: str):
+    return templates.TemplateResponse(
+        "partner/register.html",
+        {
+            "request": request,
+            "invite_token": invite,
+            "valid_invite": None,
+            "invite_error": error,
+        },
+        status_code=422,
+    )
+
+
+@router.get("/dashboard")
+async def partner_dashboard_page(
+    request: Request,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Личный кабинет партнёра. НЕ требует is_onboarded."""
+    partner = await get_partner_by_user_id(db, user.id)
+    if not partner:
+        raise HTTPException(status_code=403, detail="Доступ запрещён. Вы не являетесь партнёром.")
+    if not partner.is_active:
+        raise HTTPException(status_code=403, detail="Ваша партнёрская учётная запись деактивирована.")
+
+    promo = await get_partner_promo(db, user.id)
+    stats = await get_partner_stats(db, user.id)
+
+    base_url = str(request.base_url).rstrip("/")
+    partner_link = f"{base_url}/register?ref={promo.code}" if promo and promo.status == "approved" else None
+
+    return templates.TemplateResponse(
+        "partner/dashboard.html",
+        {
+            "request": request,
+            "user": user,
+            "partner": partner,
+            "promo": promo,
+            "stats": stats,
+            "partner_link": partner_link,
+            "partner_bonus_days": settings.PARTNER_BONUS_DAYS,
+            "commission_percent": settings.PARTNER_COMMISSION_PERCENT,
+        },
+    )
+
+
+@router.post("/propose-promo", dependencies=[Depends(require_csrf)])
+async def partner_propose_promo(
+    request: Request,
+    code: str = Form(...),
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    partner = await get_partner_by_user_id(db, user.id)
+    if not partner:
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+
+    existing = await get_partner_promo(db, user.id)
+    if existing:
+        response = RedirectResponse(url="/partner/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+        add_flash(response, "warning", "У вас уже есть промокод. Создать новый нельзя.")
+        return response
+
+    try:
+        await propose_partner_promo_code(db, partner, code)
+        response = RedirectResponse(url="/partner/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+        add_flash(response, "success", "Промокод отправлен на модерацию")
+        return response
+    except ValueError as e:
+        response = RedirectResponse(url="/partner/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+        add_flash(response, "error", str(e))
+        return response
+
+
+@router.post("/update-profile", dependencies=[Depends(require_csrf)])
+async def partner_update_profile(
+    request: Request,
+    name: str = Form(...),
+    partner_type: str = Form(...),
+    inn: str = Form(default=""),
+    payout_details: str = Form(default=""),
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    partner = await get_partner_by_user_id(db, user.id)
+    if not partner:
+        raise HTTPException(status_code=403, detail="Доступ запрещён")
+
+    if partner_type not in VALID_PARTNER_TYPES:
+        response = RedirectResponse(url="/partner/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+        add_flash(response, "error", "Некорректный тип партнёра")
+        return response
+
+    await update_partner_profile(
+        db, partner,
+        name=name.strip(),
+        partner_type=partner_type,
+        inn=inn.strip() if inn.strip() else None,
+        payout_details=payout_details.strip() if payout_details.strip() else None,
+    )
+
+    response = RedirectResponse(url="/partner/dashboard", status_code=status.HTTP_303_SEE_OTHER)
+    add_flash(response, "success", "Профиль обновлён")
+    return response
+### end of app/routers/partner.py ########################################################################
+
 ### app/routers/settings.py ########################################################################
 """Роуты для настроек пользователя."""
 from fastapi import APIRouter, Request, Depends, Form, status
@@ -3259,9 +3688,12 @@ def render_settings(
             "error": error,
             "form": form,
             "settings": settings,
+            # ✅ Передаём параметры для settings_form.html
+            "form_action": "/settings",
+            "submit_text": "Сохранить настройки",
+            "submit_icon": "save",
         },
     )
-
 
 @router.get("/settings")
 async def settings_page(
@@ -5134,6 +5566,573 @@ async def complete_onboarding(
     await db.refresh(db_user)
 ### end of app/services/onboarding.py ########################################################################
 
+### app/services/partner.py ########################################################################
+"""Сервис партнёрской программы."""
+import logging
+import secrets
+import string
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.models.user import User
+from app.models.partner import Partner
+from app.models.partner_invite import PartnerInvite
+from app.models.partner_earning import PartnerEarning
+from app.models.promo_code import PromoCode
+from app.models.event import Event
+from app.services.subscription import activate_subscription
+
+logger = logging.getLogger(__name__)
+
+_CODE_ALPHABET = string.ascii_uppercase.replace("O", "").replace("I", "").replace("L", "")
+_CODE_ALPHABET += string.digits.replace("0", "").replace("1", "")
+
+
+def _generate_invite_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _mask_email(email: str) -> str:
+    if "@" not in email:
+        return email
+    local, domain = email.split("@", 1)
+    if len(local) <= 1:
+        masked_local = local + "***"
+    else:
+        masked_local = local[0] + "***"
+    return f"{masked_local}@{domain}"
+
+
+# ============================================================
+# INVITE MANAGEMENT (админ)
+# ============================================================
+
+async def create_partner_invite(db: AsyncSession, admin: User) -> PartnerInvite:
+    token = _generate_invite_token()
+    expires_at = datetime.now(timezone.utc) + timedelta(days=settings.PARTNER_INVITE_TTL_DAYS)
+
+    invite = PartnerInvite(
+        token=token,
+        created_by=admin.id,
+        is_used=False,
+        expires_at=expires_at,
+    )
+    db.add(invite)
+    await db.flush()
+
+    event = Event(
+        user_id=admin.id,
+        type="partner_invite_created",
+        payload={"token": token, "expires_at": expires_at.isoformat()},
+    )
+    db.add(event)
+    await db.flush()
+
+    logger.info(f"[PARTNER] Invite created by admin {admin.id}, token={token[:8]}...")
+    return invite
+
+
+async def get_valid_invite(db: AsyncSession, token: str) -> PartnerInvite | None:
+    now = datetime.now(timezone.utc)
+    stmt = select(PartnerInvite).where(
+        PartnerInvite.token == token,
+        PartnerInvite.is_used == False,  # noqa: E712
+        PartnerInvite.expires_at > now,
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def get_all_invites(db: AsyncSession) -> list[PartnerInvite]:
+    stmt = select(PartnerInvite).order_by(PartnerInvite.created_at.desc())
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+# ============================================================
+# PARTNER REGISTRATION (единая форма)
+# ============================================================
+
+async def register_partner_full(
+    db: AsyncSession,
+    *,
+    invite: PartnerInvite,
+    email: str | None,
+    password: str | None,
+    existing_user: User | None,
+    name: str,
+    partner_type: str,
+    inn: str | None = None,
+    payout_details: str | None = None,
+) -> tuple[User, Partner]:
+    """
+    Полная регистрация партнёра: создаёт User (если нужно) + Partner.
+    Возвращает (user, partner).
+    """
+    # Определяем пользователя
+    if existing_user:
+        user = existing_user
+    else:
+        if not email or not password:
+            raise ValueError("Укажите email и пароль")
+        # Проверяем уникальность email
+        stmt = select(User).where(User.email == email.lower())
+        result = await db.execute(stmt)
+        if result.scalar_one_or_none():
+            raise ValueError("Пользователь с таким email уже существует")
+        from app.security import hash_password
+        user = User(
+            email=email.lower(),
+            password_hash=hash_password(password),
+            words_per_lesson=settings.WORDS_PER_LESSON_DEFAULT,
+            daily_lesson_limit=settings.DAILY_LESSON_LIMIT_DEFAULT,
+        )
+        db.add(user)
+        await db.flush()
+        event = Event(user_id=user.id, type="signup")
+        db.add(event)
+
+    # Проверяем что пользователь ещё не партнёр
+    stmt = select(Partner).where(Partner.user_id == user.id)
+    result = await db.execute(stmt)
+    if result.scalar_one_or_none():
+        raise ValueError("Вы уже зарегистрированы как партнёр")
+
+    # Создаём партнёра
+    partner = Partner(
+        user_id=user.id,
+        name=name,
+        partner_type=partner_type,
+        inn=inn,
+        payout_details=payout_details,
+        is_active=True,
+    )
+    db.add(partner)
+    await db.flush()
+
+    # Помечаем инвайт как использованный
+    invite.is_used = True
+    invite.used_by_partner_id = partner.id
+
+    event = Event(
+        user_id=user.id,
+        type="partner_registered",
+        payload={"partner_id": partner.id, "name": name, "partner_type": partner_type},
+    )
+    db.add(event)
+    await db.flush()
+
+    logger.info(f"[PARTNER] User {user.id} registered as partner (id={partner.id})")
+    return user, partner
+
+
+# ============================================================
+# PARTNER LOOKUP
+# ============================================================
+
+async def get_partner_by_user_id(db: AsyncSession, user_id: int) -> Partner | None:
+    stmt = select(Partner).where(Partner.user_id == user_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+# ============================================================
+# PROMO CODE MANAGEMENT (партнёр)
+# ============================================================
+
+async def propose_partner_promo_code(
+    db: AsyncSession,
+    partner: Partner,
+    code: str,
+) -> PromoCode:
+    code = code.strip().upper()
+
+    if len(code) < 3 or len(code) > 9:
+        raise ValueError("Промокод должен быть от 3 до 9 символов")
+
+    allowed_chars = set(_CODE_ALPHABET)
+    if not all(c in allowed_chars for c in code):
+        raise ValueError("Промокод может содержать только латинские буквы и цифры (без 0, O, 1, I, L)")
+
+    stmt = select(PromoCode).where(PromoCode.code == code)
+    result = await db.execute(stmt)
+    if result.scalar_one_or_none():
+        raise ValueError("Такой промокод уже существует")
+
+    promo = PromoCode(
+        code=code,
+        owner_user_id=partner.user_id,
+        type="partner",
+        status="pending",
+        is_active=False,
+        used_count=0,
+    )
+    db.add(promo)
+    await db.flush()
+
+    event = Event(
+        user_id=partner.user_id,
+        type="partner_promo_proposed",
+        payload={"code": code, "promo_id": promo.id},
+    )
+    db.add(event)
+    await db.flush()
+
+    logger.info(f"[PARTNER] Promo '{code}' proposed by partner {partner.id}, status=pending")
+    return promo
+
+
+async def get_pending_promo_codes(db: AsyncSession) -> list[PromoCode]:
+    stmt = (
+        select(PromoCode)
+        .where(PromoCode.type == "partner", PromoCode.status == "pending")
+        .order_by(PromoCode.created_at.asc())
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def approve_promo_code(db: AsyncSession, promo_id: int, admin: User) -> None:
+    stmt = select(PromoCode).where(PromoCode.id == promo_id)
+    result = await db.execute(stmt)
+    promo = result.scalar_one_or_none()
+    if not promo:
+        raise ValueError("Промокод не найден")
+    if promo.status != "pending":
+        raise ValueError(f"Промокод уже в статусе '{promo.status}'")
+    promo.status = "approved"
+    promo.is_active = True
+    event = Event(user_id=admin.id, type="partner_promo_approved", payload={"promo_id": promo.id, "code": promo.code})
+    db.add(event)
+    await db.flush()
+    logger.info(f"[PARTNER] Promo '{promo.code}' approved by admin {admin.id}")
+
+
+async def decline_promo_code(db: AsyncSession, promo_id: int, admin: User) -> None:
+    stmt = select(PromoCode).where(PromoCode.id == promo_id)
+    result = await db.execute(stmt)
+    promo = result.scalar_one_or_none()
+    if not promo:
+        raise ValueError("Промокод не найден")
+    promo.status = "disabled"
+    promo.is_active = False
+    event = Event(user_id=admin.id, type="partner_promo_declined", payload={"promo_id": promo.id, "code": promo.code})
+    db.add(event)
+    await db.flush()
+    logger.info(f"[PARTNER] Promo '{promo.code}' declined by admin {admin.id}")
+
+
+# ============================================================
+# PARTNER DASHBOARD
+# ============================================================
+
+async def get_partner_promo(db: AsyncSession, partner_user_id: int) -> PromoCode | None:
+    stmt = select(PromoCode).where(
+        PromoCode.owner_user_id == partner_user_id,
+        PromoCode.type == "partner",
+    ).order_by(PromoCode.created_at.desc()).limit(1)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def get_partner_stats(db: AsyncSession, partner_user_id: int) -> dict:
+    """Статистика партнёра — один JOIN вместо N+1."""
+    stmt_reg = select(func.count(User.id)).where(User.referred_by_user_id == partner_user_id)
+    result_reg = await db.execute(stmt_reg)
+    total_registrations = result_reg.scalar_one_or_none() or 0
+
+    # Один JOIN-запрос
+    stmt_earnings = (
+        select(PartnerEarning, User.email)
+        .join(User, PartnerEarning.referred_user_id == User.id)
+        .where(PartnerEarning.partner_user_id == partner_user_id)
+        .order_by(PartnerEarning.created_at.desc())
+    )
+    result_earnings = await db.execute(stmt_earnings)
+    rows = result_earnings.all()
+
+    total_earnings_kop = 0
+    paid_earnings_kop = 0
+    pending_earnings_kop = 0
+    total_payments = 0
+    total_payment_amount_kop = 0
+    recent_earnings = []
+
+    for earning, email in rows:
+        total_earnings_kop += earning.earning_amount_kop
+        total_payments += 1
+        total_payment_amount_kop += earning.payment_amount_kop
+        if earning.status == "paid":
+            paid_earnings_kop += earning.earning_amount_kop
+        elif earning.status == "pending":
+            pending_earnings_kop += earning.earning_amount_kop
+
+        if len(recent_earnings) < 10:
+            recent_earnings.append({
+                "id": earning.id,
+                "created_at": earning.created_at,
+                "user_email_masked": _mask_email(email or ""),
+                "payment_amount_kop": earning.payment_amount_kop,
+                "commission_percent": earning.commission_percent,
+                "earning_amount_kop": earning.earning_amount_kop,
+                "status": earning.status,
+                "paid_at": earning.paid_at,
+            })
+
+    return {
+        "total_registrations": total_registrations,
+        "total_payments": total_payments,
+        "total_payment_amount_kop": total_payment_amount_kop,
+        "total_earnings_kop": total_earnings_kop,
+        "paid_earnings_kop": paid_earnings_kop,
+        "pending_earnings_kop": pending_earnings_kop,
+        "recent_earnings": recent_earnings,
+    }
+
+
+# ============================================================
+# PARTNER PROFILE
+# ============================================================
+
+async def update_partner_profile(
+    db: AsyncSession,
+    partner: Partner,
+    name: str,
+    partner_type: str,
+    inn: str | None,
+    payout_details: str | None,
+) -> Partner:
+    partner.name = name
+    partner.partner_type = partner_type
+    partner.inn = inn
+    partner.payout_details = payout_details
+    await db.flush()
+    return partner
+
+
+# ============================================================
+# ADMIN PARTNERS MANAGEMENT
+# ============================================================
+
+async def get_all_partners(db: AsyncSession) -> list[dict]:
+    stmt = (
+        select(Partner, User.email, User)
+        .join(User, Partner.user_id == User.id)
+        .order_by(Partner.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    partners_data = []
+    for partner, email, user in rows:
+        stmt_balance = select(func.coalesce(func.sum(PartnerEarning.earning_amount_kop), 0)).where(
+            PartnerEarning.partner_user_id == partner.user_id,
+            PartnerEarning.status == "pending",
+        )
+        result_balance = await db.execute(stmt_balance)
+        pending_balance = result_balance.scalar_one_or_none() or 0
+
+        stmt_reg = select(func.count(User.id)).where(User.referred_by_user_id == partner.user_id)
+        result_reg = await db.execute(stmt_reg)
+        total_registrations = result_reg.scalar_one_or_none() or 0
+
+        stmt_promo = select(PromoCode).where(
+            PromoCode.owner_user_id == partner.user_id,
+            PromoCode.type == "partner",
+        ).order_by(PromoCode.created_at.desc()).limit(1)
+        result_promo = await db.execute(stmt_promo)
+        promo = result_promo.scalar_one_or_none()
+
+        partners_data.append({
+            "partner": partner,
+            "user": user,
+            "email": email,
+            "pending_balance_kop": pending_balance,
+            "total_registrations": total_registrations,
+            "promo_code": promo.code if promo else None,
+            "promo_status": promo.status if promo else None,
+        })
+
+    return partners_data
+
+
+async def deactivate_partner(db: AsyncSession, partner_id: int, admin: User) -> None:
+    stmt = select(Partner).where(Partner.id == partner_id)
+    result = await db.execute(stmt)
+    partner = result.scalar_one_or_none()
+    if not partner:
+        raise ValueError("Партнёр не найден")
+
+    partner.is_active = False
+
+    stmt_promo = select(PromoCode).where(
+        PromoCode.owner_user_id == partner.user_id,
+        PromoCode.type == "partner",
+    )
+    result_promo = await db.execute(stmt_promo)
+    promo = result_promo.scalar_one_or_none()
+    if promo:
+        promo.is_active = False
+        promo.status = "disabled"
+
+    event = Event(
+        user_id=admin.id,
+        type="partner_deactivated",
+        payload={"partner_id": partner.id, "user_id": partner.user_id},
+    )
+    db.add(event)
+    await db.flush()
+    logger.info(f"[PARTNER] Partner {partner.id} deactivated by admin {admin.id}")
+
+
+# ============================================================
+# ADMIN EARNINGS
+# ============================================================
+
+async def get_partner_earnings(
+    db: AsyncSession,
+    partner_user_id: int,
+    status_filter: str | None = None,
+) -> list[dict]:
+    stmt = (
+        select(PartnerEarning, User.email)
+        .join(User, PartnerEarning.referred_user_id == User.id)
+        .where(PartnerEarning.partner_user_id == partner_user_id)
+        .order_by(PartnerEarning.created_at.desc())
+    )
+    if status_filter:
+        stmt = stmt.where(PartnerEarning.status == status_filter)
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    earnings = []
+    for earning, email in rows:
+        earnings.append({
+            "earning": earning,
+            "user_email_masked": _mask_email(email),
+        })
+    return earnings
+
+
+async def mark_earning_as_paid(db: AsyncSession, earning_id: int, admin: User) -> None:
+    stmt = select(PartnerEarning).where(PartnerEarning.id == earning_id)
+    result = await db.execute(stmt)
+    earning = result.scalar_one_or_none()
+    if not earning:
+        raise ValueError("Начисление не найдено")
+    if earning.status != "pending":
+        raise ValueError(f"Начисление уже в статусе '{earning.status}'")
+
+    earning.status = "paid"
+    earning.paid_at = datetime.now(timezone.utc)
+
+    event = Event(
+        user_id=admin.id,
+        type="partner_earning_paid",
+        payload={"earning_id": earning.id, "partner_user_id": earning.partner_user_id, "amount_kop": earning.earning_amount_kop},
+    )
+    db.add(event)
+    await db.flush()
+    logger.info(f"[PARTNER] Earning {earning.id} marked as paid by admin {admin.id}")
+
+
+# ============================================================
+# PARTNER REWARD (вызывается при оплате)
+# ============================================================
+
+async def reward_partner_on_purchase(
+    db: AsyncSession,
+    buyer_user_id: int,
+    payment_amount_kop: int,
+    payment_id: int,
+) -> int | None:
+    from app.models.payment import Payment
+
+    buyer_stmt = select(User.referred_by_user_id).where(User.id == buyer_user_id)
+    buyer_result = await db.execute(buyer_stmt)
+    referrer_user_id = buyer_result.scalar_one_or_none()
+
+    if not referrer_user_id:
+        return None
+
+    partner_stmt = select(Partner).where(
+        Partner.user_id == referrer_user_id,
+        Partner.is_active == True,  # noqa: E712
+    )
+    partner_result = await db.execute(partner_stmt)
+    partner = partner_result.scalar_one_or_none()
+    if not partner:
+        return None
+
+    # Проверяем что это первая оплата
+    payments_stmt = select(func.count(Payment.id)).where(
+        Payment.user_id == buyer_user_id,
+        Payment.status == "succeeded",
+    )
+    payments_result = await db.execute(payments_stmt)
+    total_payments = payments_result.scalar_one_or_none() or 0
+
+    if total_payments > 1:
+        logger.info(f"[PARTNER] Buyer {buyer_user_id} has {total_payments} payments, skipping partner reward")
+        return None
+
+    # Идемпотентность
+    existing_stmt = select(PartnerEarning).where(
+        PartnerEarning.partner_user_id == referrer_user_id,
+        PartnerEarning.referred_user_id == buyer_user_id,
+    )
+    existing_result = await db.execute(existing_stmt)
+    if existing_result.scalar_one_or_none():
+        logger.warning(f"[PARTNER] Earning already exists for partner {referrer_user_id} and buyer {buyer_user_id}")
+        return None
+
+    commission_percent = settings.PARTNER_COMMISSION_PERCENT
+    earning_amount_kop = (payment_amount_kop * commission_percent) // 100
+
+    earning = PartnerEarning(
+        partner_user_id=referrer_user_id,
+        referred_user_id=buyer_user_id,
+        payment_id=payment_id,
+        payment_amount_kop=payment_amount_kop,
+        commission_percent=commission_percent,
+        earning_amount_kop=earning_amount_kop,
+        status="pending",
+    )
+    db.add(earning)
+
+    bonus_days = settings.PARTNER_BONUS_DAYS
+    if bonus_days > 0:
+        await activate_subscription(
+            db, user_id=buyer_user_id, plan="referral_bonus", source="referral", extra_days=bonus_days,
+        )
+
+    event_partner = Event(
+        user_id=referrer_user_id,
+        type="partner_earning_created",
+        payload={"buyer_user_id": buyer_user_id, "earning_amount_kop": earning_amount_kop},
+    )
+    db.add(event_partner)
+
+    event_buyer = Event(
+        user_id=buyer_user_id,
+        type="partner_bonus_received",
+        payload={"partner_user_id": referrer_user_id, "bonus_days": bonus_days},
+    )
+    db.add(event_buyer)
+
+    await db.flush()
+
+    logger.info(
+        f"[PARTNER] Reward: partner {referrer_user_id} gets {earning_amount_kop} kop, "
+        f"buyer {buyer_user_id} gets +{bonus_days} days"
+    )
+    return referrer_user_id
+### end of app/services/partner.py ########################################################################
+
 ### app/services/paywall.py ########################################################################
 """Сервис проверки лимитов для Freemium / Premium."""
 import logging
@@ -5235,13 +6234,15 @@ async def get_paywall_context(db: AsyncSession, user: User) -> dict:
 ### end of app/services/paywall.py ########################################################################
 
 ### app/services/referral.py ########################################################################
-"""Сервис реферальной программы."""
+"""Сервис реферальной программы (обычные юзеры + партнёры)."""
 import logging
 import secrets
 import string
 from datetime import datetime, timezone
+
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.config import settings
 from app.models.user import User
 from app.models.promo_code import PromoCode
@@ -5251,34 +6252,27 @@ from app.services.subscription import activate_subscription
 
 logger = logging.getLogger(__name__)
 
-# Алфавит для промокодов (без 0, O, 1, I, L для читаемости)
 _CODE_ALPHABET = string.ascii_uppercase.replace("O", "").replace("I", "").replace("L", "")
 _CODE_ALPHABET += string.digits.replace("0", "").replace("1", "")
-_CODE_LENGTH = 6
+_CODE_LENGTH = 9
 
 
 def _generate_code() -> str:
-    """Генерирует случайный промокод из 6 символов."""
     return "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LENGTH))
 
 
 async def get_or_create_promo_code(db: AsyncSession, user_id: int) -> PromoCode:
-    """
-    Возвращает промокод пользователя или создаёт новый.
-    """
-    # Ищем существующий
     stmt = select(PromoCode).where(
         PromoCode.owner_user_id == user_id,
         PromoCode.type == "user_referral",
-        PromoCode.is_active == True,
+        PromoCode.is_active == True,  # noqa: E712
     )
     result = await db.execute(stmt)
     existing = result.scalar_one_or_none()
     if existing:
         return existing
 
-    # Генерируем уникальный код
-    for _ in range(10):  # Максимум 10 попыток
+    for _ in range(10):
         code = _generate_code()
         stmt_check = select(PromoCode).where(PromoCode.code == code)
         result_check = await db.execute(stmt_check)
@@ -5291,12 +6285,12 @@ async def get_or_create_promo_code(db: AsyncSession, user_id: int) -> PromoCode:
         code=code,
         owner_user_id=user_id,
         type="user_referral",
+        status="approved",
         is_active=True,
         used_count=0,
     )
     db.add(promo)
     await db.flush()
-
     logger.info(f"[REFERRAL] Created promo code '{code}' for user_id={user_id}")
     return promo
 
@@ -5306,22 +6300,13 @@ async def apply_referral_code(
     user: User,
     code: str,
 ) -> tuple[bool, str]:
-    """
-    Применяет реферальный код к пользователю при регистрации.
-
-    Возвращает:
-        (success: bool, message: str)
-    """
     code = code.strip().upper()
 
-    # Проверка лимита попыток
     if user.promo_code_attempts >= settings.REFERRAL_PROMO_MAX_ATTEMPTS:
         return False, "Лимит попыток ввода промокода исчерпан"
 
-    # Увеличиваем счётчик попыток
     user.promo_code_attempts += 1
 
-    # Проверка: нельзя использовать свой код
     stmt_own = select(PromoCode).where(
         PromoCode.owner_user_id == user.id,
         PromoCode.code == code,
@@ -5330,155 +6315,120 @@ async def apply_referral_code(
     if result_own.scalar_one_or_none():
         return False, "Нельзя использовать свой промокод"
 
-    # Ищем промокод
     stmt = select(PromoCode).where(
         PromoCode.code == code,
-        PromoCode.is_active == True,
-        PromoCode.type == "user_referral",
+        PromoCode.is_active == True,  # noqa: E712
+        PromoCode.status == "approved",
+        PromoCode.type.in_(["user_referral", "partner"]),
     )
     result = await db.execute(stmt)
     promo = result.scalar_one_or_none()
-
     if not promo:
-        return False, "Промокод не найден"
+        return False, "Промокод не найден или не активен"
 
-    # Проверка: пользователь ещё не привязан к рефереру
     if user.referred_by_user_id is not None:
         return False, "Промокод уже был применён"
 
-    # Привязываем
+    # Для партнёрского промокода проверяем что партнёр активен
+    if promo.type == "partner":
+        from app.models.partner import Partner
+        partner_stmt = select(Partner).where(
+            Partner.user_id == promo.owner_user_id,
+            Partner.is_active == True,  # noqa: E712
+        )
+        partner_result = await db.execute(partner_stmt)
+        if not partner_result.scalar_one_or_none():
+            return False, "Промокод недействителен"
+
     user.referred_by_user_id = promo.owner_user_id
 
-    # Создаём запись в referrals
-    referral = Referral(
-        referrer_user_id=promo.owner_user_id,
-        referred_user_id=user.id,
-        promo_code_id=promo.id,
-        status="pending",
-    )
-    db.add(referral)
+    if promo.type == "user_referral":
+        referral = Referral(
+            referrer_user_id=promo.owner_user_id,
+            referred_user_id=user.id,
+            promo_code_id=promo.id,
+            status="pending",
+        )
+        db.add(referral)
 
-    # Увеличиваем счётчик использований промокода
     promo.used_count += 1
 
     event = Event(
         user_id=user.id,
-        type="referral_code_applied",
-        payload={"code": code, "referrer_user_id": promo.owner_user_id},
+        type="promo_code_applied",
+        payload={"code": code, "type": promo.type, "owner_user_id": promo.owner_user_id},
     )
     db.add(event)
     await db.flush()
 
-    logger.info(
-        f"[REFERRAL] Code '{code}' applied: "
-        f"user_id={user.id} referred by user_id={promo.owner_user_id}"
-    )
-    return True, "Промокод применён! Вы и ваш друг получите бонус после вашей подписки."
+    if promo.type == "partner":
+        logger.info(f"[PARTNER] Partner promo '{code}' applied: user_id={user.id} referred by {promo.owner_user_id}")
+        return True, "Промокод применён! Вы получите бонусные дни после первой оплаты."
+    else:
+        logger.info(f"[REFERRAL] Code '{code}' applied: user_id={user.id} referred by {promo.owner_user_id}")
+        return True, "Промокод применён! Вы и ваш друг получите бонус после вашей подписки."
 
 
 async def reward_referrer_on_purchase(
     db: AsyncSession,
     buyer_user_id: int,
+    payment_amount_kop: int | None = None,
+    payment_id: int | None = None,
 ) -> int | None:
-    """
-    Начисляет бонус рефереру И реферированному после покупки подписки.
-    Вызывается после успешной оплаты.
+    buyer_stmt = select(User.referred_by_user_id).where(User.id == buyer_user_id)
+    buyer_result = await db.execute(buyer_stmt)
+    referrer_user_id = buyer_result.scalar_one_or_none()
 
-    Оба получают +REFERRAL_BONUS_DAYS дней:
-    - Реферер: за привлечение платящего пользователя.
-    - Реферированный: за регистрацию по промокоду (бонус к первой покупке).
-
-    Возвращает:
-        user_id реферера или None если реферала нет.
-    """
-    # Ищем pending-реферал для этого пользователя
-    stmt = select(Referral).where(
-        Referral.referred_user_id == buyer_user_id,
-        Referral.status == "pending",
-    )
-    result = await db.execute(stmt)
-    referral = result.scalar_one_or_none()
-
-    if not referral:
+    if not referrer_user_id:
         return None
 
-    bonus_days = settings.REFERRAL_BONUS_DAYS
+    from app.models.partner import Partner
+    partner_stmt = select(Partner).where(Partner.user_id == referrer_user_id)
+    partner_result = await db.execute(partner_stmt)
+    partner = partner_result.scalar_one_or_none()
 
-    # 1. Начисляем бонус РЕФЕРЕРУ (пригласившему)
-    await activate_subscription(
-        db,
-        user_id=referral.referrer_user_id,
-        plan="referral_bonus",
-        source="referral",
-        extra_days=bonus_days,
-    )
+    if partner:
+        # ПАРТНЁР
+        if payment_amount_kop and payment_id:
+            from app.services.partner import reward_partner_on_purchase
+            await reward_partner_on_purchase(db, buyer_user_id, payment_amount_kop, payment_id)
+        return referrer_user_id
+    else:
+        # ОБЫЧНЫЙ РЕФЕРЕР
+        stmt = select(Referral).where(
+            Referral.referred_user_id == buyer_user_id,
+            Referral.status == "pending",
+        )
+        result = await db.execute(stmt)
+        referral = result.scalar_one_or_none()
+        if not referral:
+            return None
 
-    # 2. Начисляем бонус РЕФЕРИРОВАННОМУ (покупателю)
-    #    Бонус добавляется к только что купленной подписке
-    await activate_subscription(
-        db,
-        user_id=buyer_user_id,
-        plan="referral_bonus",
-        source="referral",
-        extra_days=bonus_days,
-    )
+        bonus_days = settings.REFERRAL_BONUS_DAYS
 
-    # Обновляем реферал
-    referral.status = "rewarded"
-    referral.rewarded_at = datetime.now(timezone.utc)
+        await activate_subscription(db, user_id=referral.referrer_user_id, plan="referral_bonus", source="referral", extra_days=bonus_days)
+        await activate_subscription(db, user_id=buyer_user_id, plan="referral_bonus", source="referral", extra_days=bonus_days)
 
-    # Событие для реферера
-    event = Event(
-        user_id=referral.referrer_user_id,
-        type="referral_reward_granted",
-        payload={
-            "referred_user_id": buyer_user_id,
-            "bonus_days": bonus_days,
-        },
-    )
-    db.add(event)
+        referral.status = "rewarded"
+        referral.rewarded_at = datetime.now(timezone.utc)
 
-    # Событие для реферированного
-    event2 = Event(
-        user_id=buyer_user_id,
-        type="referral_bonus_received",
-        payload={
-            "referrer_user_id": referral.referrer_user_id,
-            "bonus_days": bonus_days,
-        },
-    )
-    db.add(event2)
-    await db.flush()
+        event = Event(user_id=referral.referrer_user_id, type="referral_reward_granted", payload={"referred_user_id": buyer_user_id, "bonus_days": bonus_days})
+        db.add(event)
+        event2 = Event(user_id=buyer_user_id, type="referral_bonus_received", payload={"referrer_user_id": referral.referrer_user_id, "bonus_days": bonus_days})
+        db.add(event2)
+        await db.flush()
 
-    logger.info(
-        f"[REFERRAL] Rewards granted: referrer user_id={referral.referrer_user_id} "
-        f"and referred user_id={buyer_user_id} each get +{bonus_days} days"
-    )
-    return referral.referrer_user_id
+        logger.info(f"[REFERRAL] Rewards granted: referrer {referral.referrer_user_id} and buyer {buyer_user_id} get +{bonus_days} days")
+        return referral.referrer_user_id
 
 
 async def get_referral_stats(db: AsyncSession, user_id: int) -> dict:
-    """
-    Статистика рефералов для личного кабинета.
-
-    Returns:
-        {
-            "promo_code": str,
-            "total_invited": int,
-            "total_rewarded": int,
-            "total_bonus_days": int,
-        }
-    """
     promo = await get_or_create_promo_code(db, user_id)
 
-    # Считаем приглашённых
-    stmt_total = select(func.count(Referral.id)).where(
-        Referral.referrer_user_id == user_id,
-    )
+    stmt_total = select(func.count(Referral.id)).where(Referral.referrer_user_id == user_id)
     result_total = await db.execute(stmt_total)
     total_invited = result_total.scalar_one_or_none() or 0
 
-    # Считаем награждённых
     stmt_rewarded = select(func.count(Referral.id)).where(
         Referral.referrer_user_id == user_id,
         Referral.status == "rewarded",
@@ -7953,6 +8903,222 @@ async function copyToClipboard(text) {
 }
 ### end of app/static/js/app.js ########################################################################
 
+### app/templates/admin/partner_earnings.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Админ — Начисления партнёра{% endblock %}
+
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+    <div class="section-header">
+        <h1 style="margin: 0;">💰 Начисления партнёра (user_id: {{ partner_user_id }})</h1>
+        <a href="/admin/partners" class="secondary">
+            <i data-lucide="arrow-left" class="icon-sm" aria-hidden="true"></i> К списку
+        </a>
+    </div>
+
+    {% if earnings %}
+    <div class="table-scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th>Дата</th><th>Пользователь</th>
+                    <th style="text-align: right;">Оплата</th>
+                    <th style="text-align: right;">%</th>
+                    <th style="text-align: right;">Начисление</th>
+                    <th>Статус</th><th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in earnings %}
+                {% set e = item.earning %}
+                <tr>
+                    <td>{{ e.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td>{{ item.user_email_masked }}</td>
+                    <td style="text-align: right;">{{ "%.0f" | format(e.payment_amount_kop / 100) }} ₽</td>
+                    <td style="text-align: right;">{{ e.commission_percent }}%</td>
+                    <td style="text-align: right; font-weight: 600;">{{ "%.0f" | format(e.earning_amount_kop / 100) }} ₽</td>
+                    <td>
+                        {% if e.status == 'pending' %}<span class="badge badge-active">Ожидает</span>
+                        {% elif e.status == 'paid' %}<span class="badge badge-mastered">Выплачено {{ e.paid_at.strftime('%d.%m') }}</span>
+                        {% else %}<span class="badge badge-ignored">{{ e.status }}</span>{% endif %}
+                    </td>
+                    <td>
+                        {% if e.status == 'pending' %}
+                        <form method="POST" action="/admin/partners/mark-paid/{{ e.id }}"
+                              onsubmit="return confirm('Отметить как выплаченное?');">
+                            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                            <button type="submit" class="btn--sm btn--success">✓ Выплачено</button>
+                        </form>
+                        {% else %}—{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="card text-center" style="padding: 3rem;">
+        <p style="color: var(--text-muted);">Начислений пока нет</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+### end of app/templates/admin/partner_earnings.html ########################################################################
+
+### app/templates/admin/partners.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Админ — Партнёры{% endblock %}
+
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+    <div class="section-header">
+        <h1 style="margin: 0;">🤝 Управление партнёрами</h1>
+        <a href="/admin/prompts" class="secondary">
+            <i data-lucide="shield" class="icon-md" aria-hidden="true"></i> Промпты
+        </a>
+    </div>
+
+    <!-- Инвайты -->
+    <div class="card mb-3">
+        <div class="section-header" style="margin-bottom: 0.75rem;">
+            <h3 style="margin: 0;">Инвайт-ссылки</h3>
+            <form method="POST" action="/admin/partners/create-invite">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit" class="btn--sm">
+                    <i data-lucide="plus" class="icon-sm" aria-hidden="true"></i> Создать инвайт
+                </button>
+            </form>
+        </div>
+        {% if invites_with_links %}
+        <div class="table-scroll">
+            <table>
+                <thead><tr><th>Токен</th><th>Создан</th><th>Истекает</th><th>Статус</th><th>Ссылка</th></tr></thead>
+                <tbody>
+                    {% for item in invites_with_links %}
+                    {% set inv = item.invite %}
+                    <tr>
+                        <td><code>{{ inv.token[:16] }}...</code></td>
+                        <td>{{ inv.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                        <td>{{ inv.expires_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                        <td>{% if inv.is_used %}<span class="badge badge-ignored">Использован</span>{% else %}<span class="badge badge-active">Активен</span>{% endif %}</td>
+                        <td>{% if item.link %}<code style="font-size: 0.75rem;">{{ item.link }}</code>{% else %}—{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--text-muted); text-align: center;">Нет инвайтов</p>
+        {% endif %}
+    </div>
+
+    <!-- Ожидающие промокоды -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0;">Ожидающие подтверждения промокоды</h3>
+        {% if pending_promos %}
+        <div class="table-scroll">
+            <table>
+                <thead><tr><th>Код</th><th>Партнёр (user_id)</th><th>Создан</th><th>Действия</th></tr></thead>
+                <tbody>
+                    {% for promo in pending_promos %}
+                    <tr>
+                        <td><strong style="font-size: 1.125rem;">{{ promo.code }}</strong></td>
+                        <td>{{ promo.owner_user_id }}</td>
+                        <td>{{ promo.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                        <td>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <form method="POST" action="/admin/partners/approve-promo/{{ promo.id }}">
+                                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                    <button type="submit" class="btn--sm btn--success">✓ Подтвердить</button>
+                                </form>
+                                <form method="POST" action="/admin/partners/decline-promo/{{ promo.id }}">
+                                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                    <button type="submit" class="secondary btn--sm">✗ Отклонить</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--text-muted); text-align: center;">Нет промокодов на модерации</p>
+        {% endif %}
+    </div>
+
+    <!-- Список партнёров -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0;">Партнёры</h3>
+        {% if partners_data %}
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Название</th><th>Email</th><th>Тип</th><th>Промокод</th>
+                        <th style="text-align: right;">Регистраций</th>
+                        <th style="text-align: right;">Баланс</th>
+                        <th>Статус</th><th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in partners_data %}
+                    {% set p = item.partner %}
+                    {% set min_payout_kop = (min_payout_rub * 100)|int %}
+                    <tr>
+                        <td><strong>{{ p.name }}</strong></td>
+                        <td>{{ item.email }}</td>
+                        <td>
+                            {% if p.partner_type == 'self_employed' %}Самозанятый
+                            {% elif p.partner_type == 'individual' %}ИП
+                            {% elif p.partner_type == 'company' %}Юрлицо
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.promo_code %}
+                            <span class="badge badge-{% if item.promo_status == 'approved' %}active{% elif item.promo_status == 'pending' %}review{% else %}ignored{% endif %}">{{ item.promo_code }}</span>
+                            {% else %}—{% endif %}
+                        </td>
+                        <td style="text-align: right;">{{ item.total_registrations }}</td>
+                        <td style="text-align: right; font-weight: 600;">
+                            {% if item.pending_balance_kop >= min_payout_kop %}
+                            <span style="color: var(--text-success-strong);">{{ "%.0f" | format(item.pending_balance_kop / 100) }} ₽</span>
+                            {% else %}
+                            <span style="color: var(--text-muted);">{{ "%.0f" | format(item.pending_balance_kop / 100) }} ₽</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if p.is_active %}<span class="badge badge-active">Активен</span>
+                            {% else %}<span class="badge badge-ignored">Деактивирован</span>{% endif %}
+                        </td>
+                        <td>
+                            <div style="display: flex; gap: 0.25rem; flex-wrap: wrap;">
+                                <a href="/admin/partners/{{ p.user_id }}/earnings" class="secondary btn--sm">Начисления</a>
+                                {% if p.is_active %}
+                                <form method="POST" action="/admin/partners/deactivate/{{ p.id }}"
+                                      onsubmit="return confirm('Деактивировать партнёра?');">
+                                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                    <button type="submit" class="secondary btn--sm" style="color: var(--text-error-strong);">Отключить</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.5rem;">
+            * Минимальная сумма для вывода: {{ "%.0f" | format(min_payout_rub) }} ₽
+        </p>
+        {% else %}
+        <p style="color: var(--text-muted); text-align: center;">Партнёров пока нет</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+### end of app/templates/admin/partners.html ########################################################################
+
 ### app/templates/admin/prompts.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Админ — Промпты{% endblock %}
@@ -8112,48 +9278,50 @@ async function copyToClipboard(text) {
 ### app/templates/auth/register.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Регистрация — 101slovo{% endblock %}
+
 {% block content %}
 <div class="container--narrow" style="margin: 1.5rem auto;">
-  <div class="card card--auth">
-    <div class="page-header">
-      <div class="page-header__emoji">🚀</div>
-      <h2 style="margin: 0;">Создать аккаунт</h2>
-      <p class="page-header__subtitle">Начните учить английский уже сегодня</p>
+    <div class="card card--auth">
+        <div class="page-header">
+            <div class="page-header__emoji">🚀</div>
+            <h2 style="margin: 0;">Создать аккаунт</h2>
+            <p class="page-header__subtitle">Начните учить английский уже сегодня</p>
+        </div>
+
+        {% if error %}
+        <div class="flash-error">
+            <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/register">
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" name="email" value="{{ email|default('') }}" required placeholder="you@example.com">
+            </div>
+            <div class="form-group">
+                <label for="password">Пароль (мин. 8 символов)</label>
+                <input type="password" id="password" name="password" minlength="8" maxlength="72" required placeholder="••••••••">
+            </div>
+            <div class="form-group">
+                <label for="password_confirm">Повторите пароль</label>
+                <input type="password" id="password_confirm" name="password_confirm" minlength="8" maxlength="72" required placeholder="••••••••">
+            </div>
+            <div class="form-group--last">
+                <label for="promo_code">Промокод (необязательно)</label>
+                <input type="text" id="promo_code" name="promo_code" value="{{ ref_code|default('') }}"
+                       placeholder="Если вас пригласил друг" maxlength="9"
+                       style="text-transform: uppercase;">
+            </div>
+
+            <button type="submit" style="width: 100%; padding: 0.75rem;">Создать аккаунт</button>
+        </form>
+
+        <p class="text-center mt-3" style="color: var(--text-muted); font-size: 0.875rem;">
+            Уже есть аккаунт? <a href="/login" style="font-weight: 600;">Войти</a>
+        </p>
     </div>
-
-    {% if error %}
-    <div class="flash-error">
-      <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
-      {{ error }}
-    </div>
-    {% endif %}
-
-    <form method="POST" action="/register">
-      <div class="form-group">
-        <label for="email">Email</label>
-        <input type="email" id="email" name="email" value="{{ email|default('') }}" required placeholder="you@example.com">
-      </div>
-      <div class="form-group">
-        <label for="password">Пароль (мин. 8 символов)</label>
-        <input type="password" id="password" name="password" minlength="8" maxlength="72" required placeholder="••••••••">
-      </div>
-      <div class="form-group">
-        <label for="password_confirm">Повторите пароль</label>
-        <input type="password" id="password_confirm" name="password_confirm" minlength="8" maxlength="72" required placeholder="••••••••">
-      </div>
-      <div class="form-group--last">
-        <label for="promo_code">Промокод (необязательно)</label>
-        <input type="text" id="promo_code" name="promo_code" value="{{ ref_code|default('') }}"
-               placeholder="Если вас пригласил друг" maxlength="6"
-               style="text-transform: uppercase;">
-      </div>
-      <button type="submit" style="width: 100%; padding: 0.75rem;">Создать аккаунт</button>
-    </form>
-
-    <p class="text-center mt-3" style="color: var(--text-muted); font-size: 0.875rem;">
-      Уже есть аккаунт? <a href="/login" style="font-weight: 600;">Войти</a>
-    </p>
-  </div>
 </div>
 {% endblock %}
 ### end of app/templates/auth/register.html ########################################################################
@@ -8226,119 +9394,124 @@ async function copyToClipboard(text) {
 ### app/templates/billing/manage.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Подписка — 101slovo{% endblock %}
+
 {% block content %}
 <div class="container--medium" style="margin: 0 auto;">
-  <div class="section-header">
-    <h1 style="margin: 0;">💳 Подписка</h1>
-    <a href="/billing/plans" class="secondary">
-      <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
-      Тарифы
-    </a>
-  </div>
-
-  <!-- Текущая подписка -->
-  <div class="card mb-3">
-    <h3 style="margin-top: 0;">Текущий статус</h3>
-
-    {% if subscription.is_premium %}
-    <div style="margin-bottom: 1rem;">
-      <span class="badge badge-mastered badge--md">
-        <i data-lucide="crown" class="icon-xs" aria-hidden="true"></i>
-        Premium активна
-      </span>
+    <div class="section-header">
+        <h1 style="margin: 0;">💳 Подписка</h1>
+        <div style="display: flex; gap: 0.5rem;">
+            {% if is_partner %}
+            <a href="/partner/dashboard" class="secondary">
+                <i data-lucide="handshake" class="icon-sm" aria-hidden="true"></i>
+                Кабинет партнёра
+            </a>
+            {% endif %}
+            <a href="/billing/plans" class="secondary">
+                <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
+                Тарифы
+            </a>
+        </div>
     </div>
 
-    <div class="grid grid-3" style="margin-bottom: 1rem;">
-      <div>
-        <div class="stat-row">Тариф</div>
-        <div class="stat-row__value">{{ subscription.plan }}</div>
-      </div>
-      <div>
-        <div class="stat-row">Действует до</div>
-        <div class="stat-row__value">{{ subscription.expires_at.strftime('%d.%m.%Y') }}</div>
-      </div>
-      <div>
-        <div class="stat-row">Осталось дней</div>
-        <div class="stat-row__value">{{ subscription.days_left }}</div>
-      </div>
+    <!-- Текущая подписка -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0;">Текущий статус</h3>
+        {% if subscription.is_premium %}
+        <div style="margin-bottom: 1rem;">
+            <span class="badge badge-mastered badge--md">
+                <i data-lucide="crown" class="icon-xs" aria-hidden="true"></i>
+                Premium активна
+            </span>
+        </div>
+        <div class="grid grid-3" style="margin-bottom: 1rem;">
+            <div>
+                <div class="stat-row">Тариф</div>
+                <div class="stat-row__value">{{ subscription.plan }}</div>
+            </div>
+            <div>
+                <div class="stat-row">Действует до</div>
+                <div class="stat-row__value">{{ subscription.expires_at.strftime('%d.%m.%Y') }}</div>
+            </div>
+            <div>
+                <div class="stat-row">Осталось дней</div>
+                <div class="stat-row__value">{{ subscription.days_left }}</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 0.75rem;">
+            <a href="/billing/plans" role="button">Продлить / Сменить тариф</a>
+            <form method="POST" action="/billing/cancel" style="display: inline;">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit" class="secondary" onclick="return confirm('Отменить подписку? Доступ сохранится до конца оплаченного периода.')">
+                    Отменить подписку
+                </button>
+            </form>
+        </div>
+        {% else %}
+        <div style="margin-bottom: 0.75rem;">
+            <span class="badge badge-active badge--md">Free</span>
+        </div>
+        <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+            У вас бесплатный план: 1 урок в день, 5 уроков всего.
+        </p>
+        <a href="/billing/plans" role="button" style="background: var(--gradient-primary);">
+            <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
+            Подключить Premium
+        </a>
+        {% endif %}
     </div>
 
-    <div style="display: flex; gap: 0.75rem;">
-      <a href="/billing/plans" role="button">Продлить / Сменить тариф</a>
-      <form method="POST" action="/billing/cancel" style="display: inline;">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-        <button type="submit" class="secondary" onclick="return confirm('Отменить подписку? Доступ сохранится до конца оплаченного периода.')">
-          Отменить подписку
-        </button>
-      </form>
+    <!-- Реферальная программа (для обычных пользователей) -->
+    {% if not is_partner %}
+    <div class="card mb-3">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="gift" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
+            Пригласи друга — получи месяц бесплатно
+        </h3>
+        <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+            Поделись промокодом с другом. Когда он купит подписку, ты получишь
+            <strong>+{{ referral_bonus_days }} дней Premium</strong>.
+            Твой друг тоже получит <strong>+{{ referral_bonus_days }} дней</strong> к своей подписке.
+        </p>
+        <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
+            <div class="promo-box" aria-label="Ваш промокод: {{ referral.promo_code }}">
+                {{ referral.promo_code }}
+            </div>
+            <button type="button" class="secondary"
+                    onclick="handleCopyPromo(this, '{{ referral.promo_code }}')"
+                    aria-label="Скопировать промокод {{ referral.promo_code }} в буфер обмена">
+                <i data-lucide="copy" class="icon-sm" aria-hidden="true"></i>
+                Скопировать
+            </button>
+        </div>
+        {% if referral.total_invited > 0 %}
+        <div class="grid grid-3 grid-3--stats">
+            <div class="stat-card" style="padding: 0.875rem;">
+                <div class="stat-card__value" style="font-size: 1.5rem;">{{ referral.total_invited }}</div>
+                <div class="stat-card__label">Приглашено</div>
+            </div>
+            <div class="stat-card" style="padding: 0.875rem;">
+                <div class="stat-card__value" style="font-size: 1.5rem;">{{ referral.total_rewarded }}</div>
+                <div class="stat-card__label">Подписались</div>
+            </div>
+            <div class="stat-card" style="padding: 0.875rem;">
+                <div class="stat-card__value" style="font-size: 1.5rem;">{{ referral.total_bonus_days }}</div>
+                <div class="stat-card__label">Бонусных дней</div>
+            </div>
+        </div>
+        {% endif %}
     </div>
-
-    {% else %}
-    <div style="margin-bottom: 0.75rem;">
-      <span class="badge badge-active badge--md">Free</span>
-    </div>
-    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-      У вас бесплатный план: 1 урок в день, 5 уроков всего.
-    </p>
-    <a href="/billing/plans" role="button" style="background: var(--gradient-primary);">
-      <i data-lucide="crown" class="icon-sm" aria-hidden="true"></i>
-      Подключить Premium
-    </a>
     {% endif %}
-  </div>
-
-  <!-- Реферальная программа -->
-  <div class="card mb-3">
-    <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
-      <i data-lucide="gift" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
-      Пригласи друга — получи месяц бесплатно
-    </h3>
-    <p style="color: var(--text-secondary); margin-bottom: 1rem;">
-      Поделись промокодом с другом. Когда он купит подписку, ты получишь
-      <strong>+{{ referral_bonus_days }} дней Premium</strong>.
-      Твой друг тоже получит <strong>+{{ referral_bonus_days }} дней</strong> к своей подписке.
-    </p>
-
-    <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
-      <div class="promo-box" aria-label="Ваш промокод: {{ referral.promo_code }}">
-        {{ referral.promo_code }}
-      </div>
-      <button type="button" class="secondary"
-              onclick="handleCopyPromo(this, '{{ referral.promo_code }}')"
-              aria-label="Скопировать промокод {{ referral.promo_code }} в буфер обмена">
-        <i data-lucide="copy" class="icon-sm" aria-hidden="true"></i>
-        Скопировать
-      </button>
-    </div>
-
-    {% if referral.total_invited > 0 %}
-    <div class="grid grid-3 grid-3--stats">
-      <div class="stat-card" style="padding: 0.875rem;">
-        <div class="stat-card__value" style="font-size: 1.5rem;">{{ referral.total_invited }}</div>
-        <div class="stat-card__label">Приглашено</div>
-      </div>
-      <div class="stat-card" style="padding: 0.875rem;">
-        <div class="stat-card__value" style="font-size: 1.5rem;">{{ referral.total_rewarded }}</div>
-        <div class="stat-card__label">Подписались</div>
-      </div>
-      <div class="stat-card" style="padding: 0.875rem;">
-        <div class="stat-card__value" style="font-size: 1.5rem;">{{ referral.total_bonus_days }}</div>
-        <div class="stat-card__label">Бонусных дней</div>
-      </div>
-    </div>
-    {% endif %}
-  </div>
 </div>
 
 <script>
 async function handleCopyPromo(button, code) {
-  const ok = await copyToClipboard(code);
-  if (ok) {
-    button.innerHTML = '<i data-lucide="check" class="icon-sm" aria-hidden="true"></i> Скопировано!';
-  } else {
-    button.innerHTML = '<i data-lucide="alert-circle" class="icon-sm" aria-hidden="true"></i> Ошибка';
-  }
-  if (window.lucide) { lucide.createIcons(); }
+    const ok = await copyToClipboard(code);
+    if (ok) {
+        button.innerHTML = '<i data-lucide="check" class="icon-sm" aria-hidden="true"></i> Скопировано!';
+    } else {
+        button.innerHTML = '<i data-lucide="alert-circle" class="icon-sm" aria-hidden="true"></i> Ошибка';
+    }
+    if (window.lucide) { lucide.createIcons(); }
 }
 </script>
 {% endblock %}
@@ -10081,140 +11254,151 @@ button[type="submit"] {
 
 ### app/templates/partials/nav.html ########################################################################
 <nav class="navbar" x-data="{ mobileMenuOpen: false }" aria-label="Основная навигация">
-  <div class="navbar-inner">
-    <a href="/" class="navbar-brand" aria-label="101slovo — на главную">
-      <i data-lucide="book-open" style="width: 20px; height: 20px;" aria-hidden="true"></i>
-      101slovo
-    </a>
-
-    <!-- Бургер — ВСЕГДА рендерится, виден только на мобильных через CSS -->
-    <!-- ✅ ФИКС: @click.stop предотвращает всплытие до document,
-         иначе @click.outside на мобильном меню мгновенно закроет его -->
-    <button class="navbar-burger"
-            type="button"
-            @click.stop="mobileMenuOpen = !mobileMenuOpen"
-            :aria-expanded="mobileMenuOpen.toString()"
-            aria-controls="mobile-menu"
-            aria-label="Открыть меню навигации">
-      <i data-lucide="menu" x-show="!mobileMenuOpen" style="width: 22px; height: 22px;" aria-hidden="true"></i>
-      <i data-lucide="x" x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
-    </button>
-
-    <!-- ===== ДЕСКТОПНОЕ МЕНЮ (скрыто на мобильных через CSS) ===== -->
-    <div class="navbar-menu--desktop">
-      {% if request.state.user %}
-      <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
-        <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
-      </a>
-      <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
-        <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
-      </a>
-      <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
-        <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
-      </a>
-      <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
-        <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
-      </a>
-      {% if request.state.user.is_admin %}
-      <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
-        <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
-      </a>
-      <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
-        <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
-      </a>
-      {% endif %}
-      <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
-        <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-        <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-      </button>
-      <form action="/logout" method="POST" style="display:inline;margin-left:0.5rem;">
-        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-        <button type="submit" class="navbar-logout" aria-label="Выйти из аккаунта">
-          <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
+    <div class="navbar-inner">
+        <a href="/" class="navbar-brand" aria-label="101slovo — на главную">
+            <i data-lucide="book-open" style="width: 20px; height: 20px;" aria-hidden="true"></i>
+            101slovo
+        </a>
+        <button class="navbar-burger"
+                type="button"
+                @click.stop="mobileMenuOpen = !mobileMenuOpen"
+                :aria-expanded="mobileMenuOpen.toString()"
+                aria-controls="mobile-menu"
+                aria-label="Открыть меню навигации">
+            <i data-lucide="menu" x-show="!mobileMenuOpen" style="width: 22px; height: 22px;" aria-hidden="true"></i>
+            <i data-lucide="x" x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
         </button>
-      </form>
-      {% else %}
-      <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
-        <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-        <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-      </button>
-      <a href="/login" class="nav-link">Войти</a>
-      <a href="/register" class="nav-link nav-link--primary">Регистрация</a>
-      {% endif %}
+
+        <!-- ===== ДЕСКТОПНОЕ МЕНЮ ===== -->
+        <div class="navbar-menu--desktop">
+            {% if request.state.user %}
+            {% if request.state.user.is_onboarded %}
+            <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
+                <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
+            </a>
+            <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
+                <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+            </a>
+            <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
+                <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
+            </a>
+            <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
+                <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
+            </a>
+            {% endif %}
+            {% if request.state.is_partner %}
+            <a href="/partner/dashboard" class="nav-link {% if '/partner' in request.url.path %}active{% endif %}">
+                <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Кабинет партнёра
+            </a>
+            {% endif %}
+            {% if request.state.user.is_admin %}
+            <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
+                <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
+            </a>
+            <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
+                <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
+            </a>
+            <a href="/admin/partners" class="nav-link nav-link--admin {% if '/admin/partners' in request.url.path %}active{% endif %}">
+                <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Партнёры
+            </a>
+            {% endif %}
+            <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+                <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+                <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+            </button>
+            <form action="/logout" method="POST" style="display:inline;margin-left:0.5rem;">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit" class="navbar-logout" aria-label="Выйти из аккаунта">
+                    <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
+                </button>
+            </form>
+            {% else %}
+            <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+                <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+                <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+            </button>
+            <a href="/login" class="nav-link">Войти</a>
+            <a href="/register" class="nav-link nav-link--primary">Регистрация</a>
+            {% endif %}
+        </div>
     </div>
-  </div><!-- /.navbar-inner -->
 
-  <!-- ===== МОБИЛЬНОЕ МЕНЮ ===== -->
-  <!-- По умолчанию СКРЫТО через CSS (display: none).
-       Показывается через добавление класса .is-open (управляется Alpine). -->
-  <div class="navbar-mobile-menu"
-       id="mobile-menu"
-       :class="{ 'is-open': mobileMenuOpen }"
-       @click.outside="mobileMenuOpen = false">
-    {% if request.state.user %}
-    <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" @click="mobileMenuOpen = false">
-      <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
-    </a>
-    <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-      <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
-    </a>
-    <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-      <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
-    </a>
-    <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" @click="mobileMenuOpen = false">
-      <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
-    </a>
-    {% if request.state.user.is_admin %}
-    <a href="/admin/prompts" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-      <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
-    </a>
-    <a href="/admin/stats" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-      <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
-    </a>
-    {% endif %}
-    <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
-      <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-      <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-      Сменить тему
-    </button>
-    <form action="/logout" method="POST" style="margin-top:0.5rem;">
-      <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-      <button type="submit" class="navbar-logout" style="width:100%;" aria-label="Выйти">
-        <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
-      </button>
-    </form>
-    {% else %}
-    <a href="/login" class="nav-link" @click="mobileMenuOpen = false">Войти</a>
-    <a href="/register" class="nav-link nav-link--primary" @click="mobileMenuOpen = false">Регистрация</a>
-    <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
-      <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-      <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-      Сменить тему
-    </button>
-    {% endif %}
-  </div><!-- /.navbar-mobile-menu -->
+    <!-- ===== МОБИЛЬНОЕ МЕНЮ ===== -->
+    <div class="navbar-mobile-menu"
+         id="mobile-menu"
+         :class="{ 'is-open': mobileMenuOpen }"
+         @click.outside="mobileMenuOpen = false">
+        {% if request.state.user %}
+        {% if request.state.user.is_onboarded %}
+        <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" @click="mobileMenuOpen = false">
+            <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
+        </a>
+        <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+            <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+        </a>
+        <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+            <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
+        </a>
+        <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" @click="mobileMenuOpen = false">
+            <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
+        </a>
+        {% endif %}
+        {% if request.state.is_partner %}
+        <a href="/partner/dashboard" class="nav-link {% if '/partner' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+            <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Кабинет партнёра
+        </a>
+        {% endif %}
+        {% if request.state.user.is_admin %}
+        <a href="/admin/prompts" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+            <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
+        </a>
+        <a href="/admin/stats" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+            <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
+        </a>
+        <a href="/admin/partners" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+            <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Партнёры
+        </a>
+        {% endif %}
+        <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
+            <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+            <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+            Сменить тему
+        </button>
+        <form action="/logout" method="POST" style="margin-top:0.5rem;">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <button type="submit" class="navbar-logout" style="width:100%;" aria-label="Выйти">
+                <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
+            </button>
+        </form>
+        {% else %}
+        <a href="/login" class="nav-link" @click="mobileMenuOpen = false">Войти</a>
+        <a href="/register" class="nav-link nav-link--primary" @click="mobileMenuOpen = false">Регистрация</a>
+        <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
+            <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+            <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+            Сменить тему
+        </button>
+        {% endif %}
+    </div>
 </nav>
-
 <script>
 function toggleTheme() {
-  var html = document.documentElement;
-  var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-  html.setAttribute('data-theme', next);
-  localStorage.setItem('theme', next);
-  updateThemeIcons(next);
+    var html = document.documentElement;
+    var next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+    updateThemeIcons(next);
 }
-
 function updateThemeIcons(theme) {
-  document.querySelectorAll('.theme-icon-sun').forEach(function(el) {
-    el.style.display = theme === 'dark' ? 'block' : 'none';
-  });
-  document.querySelectorAll('.theme-icon-moon').forEach(function(el) {
-    el.style.display = theme === 'dark' ? 'none' : 'block';
-  });
+    document.querySelectorAll('.theme-icon-sun').forEach(function(el) {
+        el.style.display = theme === 'dark' ? 'block' : 'none';
+    });
+    document.querySelectorAll('.theme-icon-moon').forEach(function(el) {
+        el.style.display = theme === 'dark' ? 'none' : 'block';
+    });
 }
-
 document.addEventListener('DOMContentLoaded', function() {
-  updateThemeIcons(document.documentElement.getAttribute('data-theme'));
+    updateThemeIcons(document.documentElement.getAttribute('data-theme'));
 });
 </script>
 ### end of app/templates/partials/nav.html ########################################################################
@@ -10381,6 +11565,319 @@ document.addEventListener('DOMContentLoaded', function() {
     <span>Загрузка...</span>
 </span>
 ### end of app/templates/partials/spinner.html ########################################################################
+
+### app/templates/partner/dashboard.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Кабинет партнёра — 101slovo{% endblock %}
+
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+    <div class="section-header">
+        <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="handshake" style="width: 28px; height: 28px; color: var(--brand-primary);"></i>
+            Кабинет партнёра
+        </h1>
+    </div>
+
+    <div class="flash-info mb-3">
+        <i data-lucide="info" class="icon-md" aria-hidden="true"></i>
+        <span>
+            Вы получаете <strong>{{ commission_percent }}%</strong> от первой оплаты каждого приглашённого.
+            Приглашённый получает <strong>+{{ partner_bonus_days }} дней</strong> к подписке.
+        </span>
+    </div>
+
+    <!-- Промокод -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="tag" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
+            Ваш промокод
+        </h3>
+
+        {% if not promo %}
+        <form method="POST" action="/partner/propose-promo">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <div class="form-group">
+                <label for="code">Придумайте промокод (3–9 символов, латиница и цифры)</label>
+                <div style="display: flex; gap: 0.75rem;">
+                    <input type="text" id="code" name="code" required
+                           placeholder="Например: MASHA"
+                           maxlength="9" style="text-transform: uppercase; flex: 1;">
+                    <button type="submit">Отправить</button>
+                </div>
+                <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem;">
+                    После отправки промокод будет проверен администратором.
+                </p>
+            </div>
+        </form>
+
+        {% elif promo.status == 'pending' %}
+        <div class="flash-warning" style="margin-bottom: 0;">
+            <i data-lucide="clock" class="icon-md" aria-hidden="true"></i>
+            <span>Промокод <strong>{{ promo.code }}</strong> на модерации. Ожидайте подтверждения.</span>
+        </div>
+
+        {% elif promo.status == 'approved' %}
+        <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
+            <div class="promo-box">{{ promo.code }}</div>
+            <button type="button" class="secondary" onclick="handleCopy(this, '{{ promo.code }}')">
+                <i data-lucide="copy" class="icon-sm" aria-hidden="true"></i> Скопировать
+            </button>
+        </div>
+        {% if partner_link %}
+        <div style="margin-bottom: 1rem;">
+            <label style="font-size: 0.8125rem; color: var(--text-secondary);">Ссылка для регистрации:</label>
+            <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.25rem;">
+                <code style="flex: 1; padding: 0.5rem; background: var(--surface-100); border-radius: var(--radius-sm); font-size: 0.8125rem; word-break: break-all;">{{ partner_link }}</code>
+                <button type="button" class="secondary btn--sm" onclick="handleCopy(this, '{{ partner_link }}')">
+                    <i data-lucide="copy" class="icon-xs" aria-hidden="true"></i>
+                </button>
+            </div>
+        </div>
+        {% endif %}
+
+        {% elif promo.status == 'disabled' %}
+        <div class="flash-error" style="margin-bottom: 0;">
+            <i data-lucide="x-circle" class="icon-md" aria-hidden="true"></i>
+            <span>Промокод <strong>{{ promo.code }}</strong> деактивирован.</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Статистика -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="bar-chart-3" class="icon-lg" style="color: var(--color-info);" aria-hidden="true"></i>
+            Статистика
+        </h3>
+        <div class="grid grid-4" style="gap: 0.75rem;">
+            <div class="stat-card" style="padding: 0.875rem;">
+                <div class="stat-card__value" style="font-size: 1.5rem;">{{ stats.total_registrations }}</div>
+                <div class="stat-card__label">Регистраций</div>
+            </div>
+            <div class="stat-card" style="padding: 0.875rem;">
+                <div class="stat-card__value" style="font-size: 1.5rem;">{{ stats.total_payments }}</div>
+                <div class="stat-card__label">Оплат</div>
+            </div>
+            <div class="stat-card" style="padding: 0.875rem; border-color: var(--bg-success-border);">
+                <div class="stat-card__value" style="font-size: 1.5rem; color: var(--text-success-strong);">
+                    {{ "%.0f" | format(stats.total_earnings_kop / 100) }} ₽
+                </div>
+                <div class="stat-card__label">Заработано</div>
+            </div>
+            <div class="stat-card" style="padding: 0.875rem; border-color: var(--bg-warning-border);">
+                <div class="stat-card__value" style="font-size: 1.5rem; color: var(--text-warning-strong);">
+                    {{ "%.0f" | format(stats.pending_earnings_kop / 100) }} ₽
+                </div>
+                <div class="stat-card__label">К выплате</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Начисления -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="wallet" class="icon-lg" style="color: var(--color-success);" aria-hidden="true"></i>
+            Последние начисления
+        </h3>
+        {% if stats.recent_earnings %}
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Дата</th>
+                        <th>Пользователь</th>
+                        <th style="text-align: right;">Оплата</th>
+                        <th style="text-align: right;">%</th>
+                        <th style="text-align: right;">Начисление</th>
+                        <th>Статус</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in stats.recent_earnings %}
+                    <tr>
+                        <td>{{ e.created_at.strftime('%d.%m.%Y') }}</td>
+                        <td>{{ e.user_email_masked }}</td>
+                        <td style="text-align: right;">{{ "%.0f" | format(e.payment_amount_kop / 100) }} ₽</td>
+                        <td style="text-align: right;">{{ e.commission_percent }}%</td>
+                        <td style="text-align: right; font-weight: 600;">{{ "%.0f" | format(e.earning_amount_kop / 100) }} ₽</td>
+                        <td>
+                            {% if e.status == 'pending' %}<span class="badge badge-active">Ожидает</span>
+                            {% elif e.status == 'paid' %}<span class="badge badge-mastered">Выплачено</span>
+                            {% else %}<span class="badge badge-ignored">{{ e.status }}</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--text-muted); text-align: center; padding: 2rem 0;">
+            Пока нет начислений. Поделитесь промокодом!
+        </p>
+        {% endif %}
+    </div>
+
+    <!-- Профиль -->
+    <div class="card mb-3" x-data="{ editing: false }">
+        <div class="section-header" style="margin-bottom: 0.75rem;">
+            <h3 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="user" class="icon-lg" style="color: var(--brand-primary);" aria-hidden="true"></i>
+                Профиль партнёра
+            </h3>
+            <button @click="editing = !editing" class="secondary btn--sm">
+                <span x-text="editing ? 'Отмена' : 'Редактировать'"></span>
+            </button>
+        </div>
+
+        <div x-show="!editing" style="display: flex; flex-direction: column; gap: 0.5rem;">
+            <div><strong>Название:</strong> {{ partner.name }}</div>
+            <div><strong>Тип:</strong>
+                {% if partner.partner_type == 'self_employed' %}Самозанятый
+                {% elif partner.partner_type == 'individual' %}ИП
+                {% elif partner.partner_type == 'company' %}Юридическое лицо
+                {% endif %}
+            </div>
+            {% if partner.inn %}<div><strong>ИНН:</strong> {{ partner.inn }}</div>{% endif %}
+            {% if partner.payout_details %}<div><strong>Реквизиты:</strong> {{ partner.payout_details }}</div>{% endif %}
+        </div>
+
+        <form x-show="editing" x-cloak method="POST" action="/partner/update-profile" style="margin-top: 1rem;">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <div class="form-group">
+                <label for="edit_name">Название / ФИО *</label>
+                <input type="text" id="edit_name" name="name" required value="{{ partner.name }}">
+            </div>
+            <div class="form-group">
+                <label for="edit_type">Тип партнёра *</label>
+                <select id="edit_type" name="partner_type" required>
+                    <option value="self_employed" {% if partner.partner_type == 'self_employed' %}selected{% endif %}>Самозанятый</option>
+                    <option value="individual" {% if partner.partner_type == 'individual' %}selected{% endif %}>ИП</option>
+                    <option value="company" {% if partner.partner_type == 'company' %}selected{% endif %}>Юрлицо</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="edit_inn">ИНН</label>
+                <input type="text" id="edit_inn" name="inn" value="{{ partner.inn or '' }}" maxlength="12">
+            </div>
+            <div class="form-group--last">
+                <label for="edit_payout">Реквизиты для выплаты</label>
+                <textarea id="edit_payout" name="payout_details" rows="3">{{ partner.payout_details or '' }}</textarea>
+            </div>
+            <button type="submit" style="width: 100%;">💾 Сохранить</button>
+        </form>
+    </div>
+</div>
+
+<script>
+async function handleCopy(button, text) {
+    const ok = await copyToClipboard(text);
+    if (ok) {
+        button.innerHTML = '<i data-lucide="check" class="icon-sm" aria-hidden="true"></i> Скопировано!';
+    } else {
+        button.innerHTML = '<i data-lucide="alert-circle" class="icon-sm" aria-hidden="true"></i> Ошибка';
+    }
+    if (window.lucide) { lucide.createIcons(); }
+}
+</script>
+{% endblock %}
+### end of app/templates/partner/dashboard.html ########################################################################
+
+### app/templates/partner/register.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Регистрация партнёра — 101slovo{% endblock %}
+
+{% block content %}
+<div class="container--narrow" style="margin: 1.5rem auto;">
+    <div class="card card--auth">
+        <div class="page-header">
+            <div class="page-header__emoji">🤝</div>
+            <h2 style="margin: 0;">Стать партнёром</h2>
+            <p class="page-header__subtitle">Регистрация по приглашению</p>
+        </div>
+
+        {% if invite_error %}
+        <div class="flash-error">
+            <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
+            {{ invite_error }}
+        </div>
+        {% endif %}
+
+        {% if valid_invite %}
+        <p style="color: var(--text-secondary); margin-bottom: 1.5rem;">
+            Заполните данные. После регистрации вы сразу попадёте в кабинет партнёра.
+        </p>
+        <form method="POST" action="/partner/register">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <input type="hidden" name="invite" value="{{ invite_token }}">
+
+            {% if not request.state.user %}
+            <!-- Данные аккаунта (если не залогинен) -->
+            <fieldset>
+                <legend>Аккаунт</legend>
+                <div class="form-group">
+                    <label for="email">Email *</label>
+                    <input type="email" id="email" name="email" required placeholder="you@example.com">
+                </div>
+                <div class="form-group">
+                    <label for="password">Пароль (мин. 8 символов) *</label>
+                    <input type="password" id="password" name="password" minlength="8" maxlength="72" required placeholder="••••••••">
+                </div>
+                <div class="form-group--last" style="margin-bottom: 0;">
+                    <label for="password_confirm">Повторите пароль *</label>
+                    <input type="password" id="password_confirm" name="password_confirm" minlength="8" maxlength="72" required placeholder="••••••••">
+                </div>
+            </fieldset>
+            {% endif %}
+
+            <!-- Данные партнёра -->
+            <fieldset>
+                <legend>Данные партнёра</legend>
+                <div class="form-group">
+                    <label for="name">Название / ФИО *</label>
+                    <input type="text" id="name" name="name" required
+                           placeholder="Например: Школа 'SpeakUp' или Иван Иванов">
+                </div>
+
+                <div class="form-group">
+                    <label for="partner_type">Тип партнёра *</label>
+                    <select id="partner_type" name="partner_type" required>
+                        <option value="">Выберите тип</option>
+                        <option value="self_employed">Самозанятый</option>
+                        <option value="individual">ИП</option>
+                        <option value="company">Юридическое лицо</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="inn">ИНН (необязательно)</label>
+                    <input type="text" id="inn" name="inn" maxlength="12" placeholder="10 или 12 цифр">
+                </div>
+
+                <div class="form-group--last" style="margin-bottom: 0;">
+                    <label for="payout_details">Реквизиты для выплаты (необязательно)</label>
+                    <textarea id="payout_details" name="payout_details" rows="2"
+                              placeholder="Номер карты, расчётный счёт и т.д."></textarea>
+                    <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem;">
+                        Можно заполнить позже в кабинете партнёра.
+                    </p>
+                </div>
+            </fieldset>
+
+            <button type="submit" style="width: 100%; padding: 0.75rem; margin-top: 1rem;">
+                <i data-lucide="user-plus" class="icon-sm" aria-hidden="true"></i>
+                Зарегистрироваться как партнёр
+            </button>
+        </form>
+        {% elif not invite_error %}
+        <p style="color: var(--text-muted); text-align: center;">
+            Перейдите по инвайт-ссылке, полученной от администратора.
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+### end of app/templates/partner/register.html ########################################################################
 
 ### app/templates/settings.html ########################################################################
 {% extends "base.html" %}
@@ -11822,6 +13319,37 @@ def downgrade() -> None:
     # ### end Alembic commands ###
 ### end of migrations/versions/4ff3f0ad8020_increase_pos_column_length_to_16.py ########################################################################
 
+### migrations/versions/74b4de0ad7a8_increase_promo_code_length_to_9.py ########################################################################
+"""increase promo code length to 9
+Revision ID: c2d3e4f5a6b7
+Revises: b1c2d3e4f5g6
+Create Date: 2026-10-10 14:00:00.000000
+"""
+from alembic import op
+import sqlalchemy as sa
+
+revision = 'c2d3e4f5a6b7'
+down_revision = 'b1c2d3e4f5g6'
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.alter_column(
+        'promo_codes', 'code',
+        existing_type=sa.String(length=6),
+        type_=sa.String(length=9),
+    )
+
+
+def downgrade() -> None:
+    op.alter_column(
+        'promo_codes', 'code',
+        existing_type=sa.String(length=9),
+        type_=sa.String(length=6),
+    )
+### end of migrations/versions/74b4de0ad7a8_increase_promo_code_length_to_9.py ########################################################################
+
 ### migrations/versions/add_monetization_tables.py ########################################################################
 """add monetization tables
 
@@ -11941,6 +13469,108 @@ def downgrade() -> None:
     op.drop_index('ix_payments_user_id', table_name='payments')
     op.drop_table('payments')
 ### end of migrations/versions/add_monetization_tables.py ########################################################################
+
+### migrations/versions/add_partner_tables.py ########################################################################
+"""add partner tables
+Revision ID: b1c2d3e4f5g6
+Revises: a1b2c3d4e5f6
+Create Date: 2026-10-10 12:00:00.000000
+"""
+from alembic import op
+import sqlalchemy as sa
+
+# revision identifiers, used by Alembic.
+revision = 'b1c2d3e4f5g6'
+down_revision = 'a1b2c3d4e5f6'
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    # === Изменяем длину промокода с 6 до 9 символов ===
+    op.alter_column(
+        'promo_codes', 'code',
+        existing_type=sa.String(length=6),
+        type_=sa.String(length=9),
+    )
+    
+    # === Таблица partners ===
+    op.create_table('partners',
+        sa.Column('id', sa.BigInteger(), sa.Identity(always=False), nullable=False),
+        sa.Column('user_id', sa.BigInteger(), nullable=False),
+        sa.Column('name', sa.String(length=256), nullable=False),
+        sa.Column('partner_type', sa.String(length=20), nullable=False),
+        sa.Column('inn', sa.String(length=20), nullable=True),
+        sa.Column('payout_details', sa.Text(), nullable=True),
+        sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('user_id', name='uq_partners_user_id')
+    )
+    op.create_index('ix_partners_user_id', 'partners', ['user_id'], unique=False)
+    
+    # === Таблица partner_invites ===
+    op.create_table('partner_invites',
+        sa.Column('id', sa.BigInteger(), sa.Identity(always=False), nullable=False),
+        sa.Column('token', sa.String(length=64), nullable=False),
+        sa.Column('created_by', sa.BigInteger(), nullable=False),
+        sa.Column('used_by_partner_id', sa.BigInteger(), nullable=True),
+        sa.Column('is_used', sa.Boolean(), nullable=False, server_default='false'),
+        sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.ForeignKeyConstraint(['created_by'], ['users.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['used_by_partner_id'], ['partners.id'], ondelete='SET NULL'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('token', name='uq_partner_invites_token')
+    )
+    op.create_index('ix_partner_invites_is_used', 'partner_invites', ['is_used'], unique=False)
+    
+    # === Таблица partner_earnings ===
+    op.create_table('partner_earnings',
+        sa.Column('id', sa.BigInteger(), sa.Identity(always=False), nullable=False),
+        sa.Column('partner_user_id', sa.BigInteger(), nullable=False),
+        sa.Column('referred_user_id', sa.BigInteger(), nullable=False),
+        sa.Column('payment_id', sa.BigInteger(), nullable=False),
+        sa.Column('payment_amount_kop', sa.Integer(), nullable=False),
+        sa.Column('commission_percent', sa.Integer(), nullable=False),
+        sa.Column('earning_amount_kop', sa.Integer(), nullable=False),
+        sa.Column('status', sa.String(length=16), nullable=False),
+        sa.Column('paid_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.ForeignKeyConstraint(['partner_user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['referred_user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['payment_id'], ['payments.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index('ix_partner_earnings_partner_user_id', 'partner_earnings', ['partner_user_id'], unique=False)
+    op.create_index('ix_partner_earnings_status', 'partner_earnings', ['status'], unique=False)
+    
+    # === Добавляем status в promo_codes ===
+    op.add_column('promo_codes', sa.Column('status', sa.String(length=16), nullable=False, server_default='approved'))
+    op.create_index('ix_promo_codes_status', 'promo_codes', ['status'], unique=False)
+    
+    # === Обновляем существующие промокоды: ставим status='approved' ===
+    op.execute("UPDATE promo_codes SET status = 'approved' WHERE status IS NULL OR status = ''")
+
+
+def downgrade() -> None:
+    op.drop_index('ix_promo_codes_status', table_name='promo_codes')
+    op.drop_column('promo_codes', 'status')
+    op.drop_index('ix_partner_earnings_status', table_name='partner_earnings')
+    op.drop_index('ix_partner_earnings_partner_user_id', table_name='partner_earnings')
+    op.drop_table('partner_earnings')
+    op.drop_index('ix_partner_invites_is_used', table_name='partner_invites')
+    op.drop_table('partner_invites')
+    op.drop_index('ix_partners_user_id', table_name='partners')
+    op.drop_table('partners')
+    # === Возвращаем длину промокода к 6 ===
+    op.alter_column(
+        'promo_codes', 'code',
+        existing_type=sa.String(length=9),
+        type_=sa.String(length=6),
+    )
+### end of migrations/versions/add_partner_tables.py ########################################################################
 
 ### migrations/versions/add_total_tokens_fields.py ########################################################################
 """add total_tokens fields
