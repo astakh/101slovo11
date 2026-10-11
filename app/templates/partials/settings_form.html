@@ -13,7 +13,7 @@
         <label class="section-header" style="margin-bottom: 0.75rem;">
             <span style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; color: var(--text-primary);">
                 <i data-lucide="graduation-cap" class="icon-lg" style="color: var(--brand-primary);" aria-hidden="true"></i>
-                <strong>1. Ваш уровень английского</strong>
+                <strong>Ваш уровень английского</strong>
             </span>
         </label>
         <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;"
@@ -36,7 +36,7 @@
         <label class="section-header" style="margin-bottom: 0.75rem;">
             <span style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; color: var(--text-primary);">
                 <i data-lucide="book" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
-                <strong>2. Тематический словарь</strong>
+                <strong>Тематический словарь</strong>
             </span>
         </label>
         <div class="grid grid-3 grid-3--compact" style="gap: 0.5rem;"
@@ -58,7 +58,7 @@
     <div class="card card--settings mb-3" x-data="{ val: {{ words_value }} }">
         <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
             <i data-lucide="type" class="icon-lg" style="color: var(--color-success);" aria-hidden="true"></i>
-            <strong>3. Слов в одном уроке:</strong>
+            <strong>Слов в одном уроке:</strong>
             <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
         </label>
         <input type="range" name="words_per_lesson"
@@ -72,26 +72,6 @@
         </div>
     </div>
 
-    <!-- 4. Уроков в день -->
-    <div class="card card--settings mb-3" x-data="{ val: {{ limit_value }} }">
-        <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; margin-bottom: 0.75rem; color: var(--text-primary);">
-            <i data-lucide="calendar" class="icon-lg" style="color: var(--color-warning);" aria-hidden="true"></i>
-            <strong>4. Уроков в день:</strong>
-            <span x-text="val" style="color: var(--brand-primary); font-weight: 800; font-size: 1.0625rem; margin-left: 0.25rem;"></span>
-        </label>
-        <input type="range" name="daily_lesson_limit"
-               min="1" max="{{ limit_max }}"
-               value="{{ limit_value }}" required
-               @input="val = $event.target.value"
-               style="width: 100%;">
-        <div class="info-box" style="margin-top: 0.625rem;">
-            <i data-lucide="info" class="icon-sm" style="flex-shrink: 0; margin-top: 1px; color: var(--color-info);" aria-hidden="true"></i>
-            <span>
-                На бесплатном тарифе доступен <strong>{{ free_daily_limit }} урок в день</strong>.
-                Выбранный лимит (<span x-text="val" style="font-weight: 600;"></span>) будет действовать при подключении <strong>Premium</strong>.
-            </span>
-        </div>
-    </div>
 
     <!-- Кнопка отправки -->
     <button type="submit" class="btn-lg" style="width: 100%; padding: 0.875rem;">
