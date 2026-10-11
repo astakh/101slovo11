@@ -9969,7 +9969,7 @@ async function handleCopyPromo(button, code) {
             ИНН: 501723142274<br>
             ОГРНИП: 325508100740497<br>
             Адрес: МО, г. Раменское, тер. СНТ Старниково, д.48<br>
-            Email: <a href="mailto:support@101slovo.ru">support@101slovo.ru</a><br>
+            Email: <a href="mailto:ream.101slovo@yandex.ru">ream.101slovo@yandex.ru</a><br>
             Телефон: +7 (925) 010-58-94
         </p>
 
@@ -10027,7 +10027,7 @@ async function handleCopyPromo(button, code) {
         <h3>8. Отзыв согласия</h3>
         <p>
             Я вправе отозвать настоящее согласие в любой момент, направив письменное
-            заявление на <a href="mailto:support@101slovo.ru">support@101slovo.ru</a>.
+            заявление на <a href="mailto:ream.101slovo@yandex.ru">ream.101slovo@yandex.ru</a>.
             После отзыва согласия обработка данных прекращается, за исключением случаев,
             предусмотренных п. 2–11 ч. 1 ст. 6 152-ФЗ.
         </p>
@@ -10522,7 +10522,7 @@ async function handleCopyPromo(button, code) {
         </ul>
         <p>
             Для реализации прав направьте запрос на
-            <a href="mailto:support@101slovo.ru">support@101slovo.ru</a>
+            <a href="mailto:ream.101slovo@yandex.ru">ream.101slovo@yandex.ru</a>
             с указанием email аккаунта. Срок ответа — 30 дней.
         </p>
 
@@ -10548,7 +10548,7 @@ async function handleCopyPromo(button, code) {
             <p style="margin: 0.25rem 0;">ИНН: 501723142274</p>
             <p style="margin: 0.25rem 0;">ОГРНИП: 325508100740497</p>
             <p style="margin: 0.25rem 0;">Адрес: МО, г. Раменское, тер. СНТ Старниково, д.48</p>
-            <p style="margin: 0.25rem 0;">Email: <a href="mailto:support@101slovo.ru">support@101slovo.ru</a></p>
+            <p style="margin: 0.25rem 0;">Email: <a href="mailto:ream.101slovo@yandex.ru">ream.101slovo@yandex.ru</a></p>
             <p style="margin: 0.25rem 0;">Телефон: +7 (925) 010-58-94</p>
         </div>
 
@@ -10669,7 +10669,7 @@ async function handleCopyPromo(button, code) {
         <h3>12. Контакты</h3>
         <p>
             По вопросам использования Сервиса обращайтесь:
-            <a href="mailto:support@101slovo.ru">support@101slovo.ru</a>
+            <a href="mailto:ream.101slovo@yandex.ru">ream.101slovo@yandex.ru</a>
         </p>
 
     </div>
