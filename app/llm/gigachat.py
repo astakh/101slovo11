@@ -5,7 +5,9 @@ import json
 import time
 import uuid
 import logging
+
 import httpx
+
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
 
 class GigaChatError(Exception):
     """Базовая ошибка GigaChat."""
+
     def __init__(self, message: str, code: str = "llm_error", http_status: int | None = None):
         super().__init__(message)
         self.code = code
@@ -31,6 +34,7 @@ class GigaChatError(Exception):
 
 class GigaTokenManager:
     """Управление OAuth-токеном GigaChat с ленивым обновлением."""
+
     def __init__(self):
         self._access_token: str | None = None
         self._expires_at: float = 0
@@ -45,6 +49,18 @@ class GigaTokenManager:
                 return self._access_token
             await self._refresh_token()
             return self._access_token  # type: ignore
+
+    def invalidate(self) -> None:
+        """
+        Принудительно помечает текущий токен как невалидный.
+        Вызывается при получении HTTP 401 от API, чтобы следующий
+        вызов get_token() гарантированно запросил новый токен.
+        Потокобезопасность: вызывается из того же event loop,
+        asyncio.Lock защищает только async-методы.
+        """
+        self._access_token = None
+        self._expires_at = 0
+        logger.info("🔄 OAuth токен помечен как невалидный (invalidate)")
 
     async def _refresh_token(self) -> None:
         """Обновляет токен через OAuth."""
@@ -84,7 +100,18 @@ class GigaTokenManager:
         try:
             data = resp.json()
             self._access_token = data["access_token"]
-            self._expires_at = float(data.get("expires_at", time.time() + 1800))
+
+            # Парсим expires_at с защитой от миллисекунд
+            expires_at_raw = float(data.get("expires_at", time.time() + 1800))
+            # GigaChat может возвращать в миллисекундах (> 1e12 = после 2001 в секундах)
+            if expires_at_raw > 1e12:
+                expires_at_raw /= 1000.0
+                logger.info(
+                    f"⚠️ expires_at получен в миллисекундах, "
+                    f"конвертирован: {expires_at_raw}"
+                )
+            self._expires_at = expires_at_raw
+
             logger.info("✅ OAuth токен GigaChat успешно получен.")
         except (KeyError, ValueError, json.JSONDecodeError) as e:
             logger.error(f"GigaChat OAuth: Не удалось распарсить ответ. Ответ: {resp.text[:200]}")
@@ -132,6 +159,7 @@ async def chat(
                     headers=headers,
                     timeout=deadline_seconds,
                 )
+
             latency_ms = int((time.time() - start_time) * 1000)
 
             if resp.status_code == 200:
@@ -145,12 +173,21 @@ async def chat(
                 delay = RETRY_DELAY_BASE * (2 ** (attempt - 1))
                 logger.warning(f"GigaChat API: {resp.status_code}, retry {attempt}/{MAX_RETRIES} in {delay}s")
                 await asyncio.sleep(delay)
-                if resp.status_code == 401:
-                    token = await _token_manager.get_token()
+                continue
+
+            if resp.status_code == 401:
+                # ✅ ФИКС: Принудительно сбрасываем токен, чтобы get_token()
+                # гарантированно запросил новый, а не вернул кэшированный.
+                _token_manager.invalidate()
+                token = await _token_manager.get_token()
                 last_error = GigaChatError(
                     f"HTTP {resp.status_code}",
                     code="llm_http_error",
                     http_status=resp.status_code,
+                )
+                logger.warning(
+                    f"GigaChat API: 401 Token expired, "
+                    f"token refreshed (attempt {attempt}/{MAX_RETRIES})"
                 )
                 continue
 
@@ -206,7 +243,7 @@ async def chat_json(
 ) -> tuple[dict | list, int, int, int, int]:
     """
     Вызов GigaChat с извлечением JSON из ответа.
-    
+
     Returns:
         (parsed, prompt_tokens, completion_tokens, total_tokens, latency_ms)
     """
@@ -217,14 +254,15 @@ async def chat_json(
             max_tokens=max_tokens,
             deadline_seconds=deadline_seconds,
         )
+
         choices = response.get("choices", [])
         if not choices:
             raise GigaChatError("No choices in response", code="llm_empty_response")
 
         content = choices[0].get("message", {}).get("content", "")
         finish_reason = choices[0].get("finish_reason", "")
-
         usage = response.get("usage", {})
+
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
         total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
