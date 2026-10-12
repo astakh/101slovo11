@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Админ — Обращения в поддержку{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+    <div class="section-header">
+        <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="message-circle" style="width: 24px; height: 24px; color: var(--brand-primary);" aria-hidden="true"></i>
+            Обращения в поддержку
+        </h1>
+    </div>
+
+    {# Фильтры #}
+    <form method="GET" action="/admin/support" class="card mb-3" style="padding: 0.875rem 1rem;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.75rem; align-items: end;">
+            <div>
+                <label for="status" style="margin-bottom: 0.25rem; font-size: 0.75rem;">Статус</label>
+                <select id="status" name="status" style="min-width: 150px;">
+                    <option value="">Все</option>
+                    {% for s in valid_statuses %}
+                        <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>
+                            {{ status_labels[s] }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="category" style="margin-bottom: 0.25rem; font-size: 0.75rem;">Категория</label>
+                <select id="category" name="category" style="min-width: 150px;">
+                    <option value="">Все</option>
+                    {% for c in valid_categories %}
+                        <option value="{{ c }}" {% if category_filter == c %}selected{% endif %}>
+                            {{ category_labels[c] }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit">Применить</button>
+        </div>
+    </form>
+
+    {% if not tickets %}
+        <div class="card text-center" style="padding: 3rem;">
+            <p style="color: var(--text-muted);">Обращений не найдено</p>
+        </div>
+    {% else %}
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Тема</th>
+                        <th>Пользователь</th>
+                        <th>Категория</th>
+                        <th>Статус</th>
+                        <th>Обновлено</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in tickets %}
+                        {% set t = item.ticket %}
+                        {% set status_class = 'badge-mastered' if t.status == 'resolved' else ('badge-ignored' if t.status == 'closed' else ('badge-active' if t.status == 'in_progress' else 'badge-new')) %}
+                        <tr style="{% if item.unread %}background: rgba(99, 102, 241, 0.04); font-weight: 500;{% endif %}">
+                            <td>
+                                <a href="/admin/support/{{ t.id }}" style="font-weight: 600; color: var(--text-primary); text-decoration: none;">
+                                    {% if item.unread %}
+                                        <span style="display: inline-block; width: 6px; height: 6px; background: var(--brand-primary); border-radius: 50%; margin-right: 0.375rem; vertical-align: middle;" title="Непрочитано"></span>
+                                    {% endif %}
+                                    {{ t.subject }}
+                                </a>
+                                {% if item.is_partner %}
+                                    <span class="badge badge-review" style="margin-left: 0.375rem; font-size: 0.625rem;">Партнёр</span>
+                                {% endif %}
+                            </td>
+                            <td style="font-size: 0.8125rem; color: var(--text-secondary);">{{ item.user_email }}</td>
+                            <td><span class="badge badge-review">{{ item.category_label }}</span></td>
+                            <td><span class="badge {{ status_class }}">{{ item.status_label }}</span></td>
+                            <td style="font-size: 0.8125rem; color: var(--text-muted);">
+                                {{ (t.last_user_message_at or t.created_at).strftime('%d.%m %H:%M') }}
+                            </td>
+                            <td>
+                                <a href="/admin/support/{{ t.id }}" class="secondary btn--sm">Открыть</a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.75rem;">
+            Всего обращений: {{ tickets|length }}
+        </p>
+    {% endif %}
+</div>
+{% endblock %}

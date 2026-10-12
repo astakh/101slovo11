@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Обращение #{{ ticket.id }} — Админ{% endblock %}
+{% block content %}
+{% set is_admin_view = true %}
+<div class="container--narrow" style="margin: 2rem auto;">
+    <p style="margin-bottom: 1rem;">
+        <a href="/admin/support" style="display: inline-flex; align-items: center; gap: 0.375rem; color: var(--text-secondary);">
+            <i data-lucide="arrow-left" class="icon-sm" aria-hidden="true"></i>
+            К списку обращений
+        </a>
+    </p>
+
+    {# Шапка с информацией о тикете #}
+    <div class="card mb-3">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+            <div style="flex: 1; min-width: 0;">
+                <h2 style="margin: 0 0 0.5rem 0; font-size: 1.25rem; word-break: break-word;">
+                    {{ ticket.subject }}
+                </h2>
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; color: var(--text-muted); font-size: 0.8125rem;">
+                    {% set status_class = 'badge-mastered' if ticket.status == 'resolved' else ('badge-ignored' if ticket.status == 'closed' else ('badge-active' if ticket.status == 'in_progress' else 'badge-new')) %}
+                    <span class="badge {{ status_class }}">{{ status_label }}</span>
+                    <span class="badge badge-review">{{ category_label }}</span>
+                    <span>·</span>
+                    <span>
+                        <i data-lucide="user" class="icon-xs" style="vertical-align: middle;" aria-hidden="true"></i>
+                        {{ ticket_user.email if ticket_user else '—' }}
+                    </span>
+                    {% if is_partner %}
+                        <span class="badge badge-review">Партнёр</span>
+                    {% endif %}
+                    <span>·</span>
+                    <span>{{ ticket.created_at.strftime('%d.%m.%Y в %H:%M') }}</span>
+                </div>
+            </div>
+        </div>
+
+        {# Смена статуса #}
+        <form method="POST" action="/admin/support/{{ ticket.id }}/status"
+              style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding-top: 0.75rem; border-top: 1px solid var(--border-light);">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <label for="new_status" style="margin: 0; font-size: 0.8125rem; color: var(--text-secondary);">Статус:</label>
+            <select id="new_status" name="new_status" style="min-width: 160px;">
+                {% for s in valid_statuses %}
+                    <option value="{{ s }}" {% if ticket.status == s %}selected{% endif %}>
+                        {{ status_labels[s] }}
+                    </option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="secondary btn--sm">
+                <i data-lucide="save" class="icon-xs" aria-hidden="true"></i>
+                Сохранить
+            </button>
+        </form>
+    </div>
+
+    {# Переписка #}
+    <div id="support-messages">
+        {% include "support/_messages.html" %}
+    </div>
+
+    {# Форма ответа админа #}
+    <div class="card mt-3">
+        <form hx-post="/admin/support/{{ ticket.id }}/reply"
+              hx-target="#support-messages"
+              hx-swap="innerHTML"
+              hx-indicator="#admin-reply-spinner">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <label for="admin-reply-content" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                <i data-lucide="shield-check" class="icon-md" style="color: var(--brand-secondary);" aria-hidden="true"></i>
+                <strong>Ответ поддержки</strong>
+            </label>
+            <textarea id="admin-reply-content"
+                      name="content"
+                      rows="4"
+                      required
+                      maxlength="{{ max_message_length }}"
+                      placeholder="Напишите ответ пользователю..."
+                      style="margin-bottom: 0.75rem;"></textarea>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;">
+                <div style="color: var(--text-muted); font-size: 0.75rem;">
+                    Макс. {{ max_message_length }} симв.
+                </div>
+                <button type="submit" hx-disabled-elt="this">
+                    <i data-lucide="send" class="icon-sm" aria-hidden="true"></i>
+                    Отправить
+                </button>
+            </div>
+            <span class="htmx-indicator" id="admin-reply-spinner" style="margin-top: 0.5rem;">
+                <span class="spinner"></span>
+                <span>Отправка...</span>
+            </span>
+        </form>
+    </div>
+</div>
+
+<script>
+document.body.addEventListener('supportReplySent', function() {
+    var ta = document.getElementById('admin-reply-content');
+    if (ta) { ta.value = ''; }
+});
+</script>
+{% endblock %}

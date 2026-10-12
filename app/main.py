@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal, partner
+from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal, partner, support
 from app.middleware import AppMiddleware
 from app.core.templates import templates
 from app.db import AsyncSessionLocal
@@ -69,6 +69,7 @@ app.include_router(vocabulary.router)
 app.include_router(billing.router)
 app.include_router(legal.router)
 app.include_router(partner.router)
+app.include_router(support.router)
 app.include_router(admin.router)
 
 
@@ -89,13 +90,11 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def root(request: Request):
     if request.state.user:
         return Response(status_code=303, headers={"Location": "/dashboard"})
-
     monthly_price = app_settings.SUBSCRIPTION_MONTHLY_PRICE_KOP / 100
     six_month_price = app_settings.SUBSCRIPTION_6M_PRICE_KOP / 100
     six_month_per_month = six_month_price / 6
     six_month_full = monthly_price * 6
     six_month_saving = six_month_full - six_month_price
-
     return templates.TemplateResponse(
         "landing.html",
         {

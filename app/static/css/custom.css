@@ -1362,3 +1362,117 @@ tbody tr:last-child td { border-bottom: none; }
   .pagination a { min-width: 32px; height: 32px; font-size: 0.875rem; }
   .grid-3--compact { gap: 0.375rem; }
 }
+
+/* ============================================
+SUPPORT TICKETS (обращения в поддержку)
+============================================ */
+.support-ticket-card {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.125rem;
+    background: var(--surface-0);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: inherit;
+    transition: all var(--transition-fast);
+}
+.support-ticket-card:hover {
+    border-color: var(--brand-primary-light);
+    box-shadow: var(--shadow-sm);
+    transform: translateX(2px);
+}
+.support-ticket-card--unread {
+    border-left: 3px solid var(--brand-primary);
+    background: rgba(99, 102, 241, 0.03);
+}
+
+.support-message {
+    padding: 0.875rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-light);
+    background: var(--surface-0);
+    position: relative;
+    margin-bottom: 0.75rem;
+}
+.support-message--own {
+    background: rgba(99, 102, 241, 0.04);
+    border-color: rgba(99, 102, 241, 0.2);
+    margin-left: 1.5rem;
+}
+.support-message--user {
+    background: var(--surface-50);
+    margin-right: 1.5rem;
+}
+.support-message--admin {
+    background: rgba(236, 72, 153, 0.04);
+    border-color: rgba(236, 72, 153, 0.2);
+    margin-right: 1.5rem;
+}
+.support-message--deleted {
+    background: var(--surface-50);
+    border: 1px dashed var(--border-medium);
+    padding: 0.625rem 1rem;
+    opacity: 0.7;
+}
+.support-message__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.375rem;
+    font-size: 0.8125rem;
+}
+.support-message__body {
+    color: var(--text-primary);
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.9375rem;
+}
+.support-message__admin-actions {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+.support-message:hover .support-message__admin-actions {
+    opacity: 1;
+}
+.support-message__delete-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-error-strong);
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: none;
+}
+.support-message__delete-btn:hover {
+    background: var(--bg-error);
+    transform: none;
+}
+
+.nav-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1;
+    color: white;
+    background: var(--brand-primary);
+    border-radius: var(--radius-full);
+    margin-left: 0.25rem;
+}
+.nav-badge--admin {
+    background: var(--brand-secondary);
+}

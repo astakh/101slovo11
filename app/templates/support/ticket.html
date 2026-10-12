@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Обращение: {{ ticket.subject }} — 101slovo{% endblock %}
+{% block content %}
+{% set is_admin_view = false %}
+<div class="container--narrow" style="margin: 0 auto;">
+    <p style="margin-bottom: 1rem;">
+        <a href="/support" style="display: inline-flex; align-items: center; gap: 0.375rem; color: var(--text-secondary);">
+            <i data-lucide="arrow-left" class="icon-sm" aria-hidden="true"></i>
+            К списку обращений
+        </a>
+    </p>
+
+    {# Шапка тикета #}
+    <div class="card mb-3">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 0;">
+                <h2 style="margin: 0 0 0.5rem 0; font-size: 1.25rem; word-break: break-word;">
+                    {{ ticket.subject }}
+                </h2>
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; color: var(--text-muted); font-size: 0.8125rem;">
+                    {% set status_class = 'badge-mastered' if ticket.status == 'resolved' else ('badge-ignored' if ticket.status == 'closed' else ('badge-active' if ticket.status == 'in_progress' else 'badge-new')) %}
+                    <span class="badge {{ status_class }}">{{ status_label }}</span>
+                    <span class="badge badge-review">{{ category_label }}</span>
+                    <span>·</span>
+                    <span>{{ ticket.created_at.strftime('%d.%m.%Y в %H:%M') }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# Переписка #}
+    <div id="support-messages">
+        {% include "support/_messages.html" %}
+    </div>
+
+    {# Форма ответа (если тикет не закрыт) #}
+    {% if ticket.status != 'closed' %}
+        <div class="card mt-3">
+            <form hx-post="/support/{{ ticket.id }}/reply"
+                  hx-target="#support-messages"
+                  hx-swap="innerHTML"
+                  hx-indicator="#reply-spinner">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <label for="reply-content" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                    <i data-lucide="message-square" class="icon-md" style="color: var(--brand-primary);" aria-hidden="true"></i>
+                    <strong>Ваш ответ</strong>
+                </label>
+                <textarea id="reply-content"
+                          name="content"
+                          rows="4"
+                          required
+                          maxlength="{{ max_message_length }}"
+                          placeholder="Напишите ответ..."
+                          style="margin-bottom: 0.75rem;"></textarea>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;">
+                    <div style="color: var(--text-muted); font-size: 0.75rem;">
+                        Макс. {{ max_message_length }} симв.
+                    </div>
+                    <button type="submit" hx-disabled-elt="this">
+                        <i data-lucide="send" class="icon-sm" aria-hidden="true"></i>
+                        Отправить
+                    </button>
+                </div>
+                <span class="htmx-indicator" id="reply-spinner" style="margin-top: 0.5rem;">
+                    <span class="spinner"></span>
+                    <span>Отправка...</span>
+                </span>
+            </form>
+        </div>
+    {% else %}
+        <div class="flash-info mt-3">
+            <i data-lucide="lock" class="icon-md" aria-hidden="true"></i>
+            <span>Обращение закрыто. Ответы недоступны.</span>
+        </div>
+    {% endif %}
+</div>
+
+<script>
+document.body.addEventListener('supportReplySent', function() {
+    var ta = document.getElementById('reply-content');
+    if (ta) { ta.value = ''; }
+});
+</script>
+{% endblock %}

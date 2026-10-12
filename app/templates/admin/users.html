@@ -10,6 +10,30 @@
         </a>
     </div>
 
+    <!-- Вкладки -->
+    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 2px solid var(--border-light); padding-bottom: 0;">
+        <a href="/admin/users"
+           style="padding: 0.625rem 1.25rem; text-decoration: none; font-weight: 600; border-radius: var(--radius-md) var(--radius-md) 0 0;
+                  {% if active_tab == 'search' %}
+                  background: var(--brand-primary); color: white;
+                  {% else %}
+                  background: transparent; color: var(--text-secondary);
+                  {% endif %}">
+            <i data-lucide="search" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
+            Поиск
+        </a>
+        <a href="/admin/users/stats"
+           style="padding: 0.625rem 1.25rem; text-decoration: none; font-weight: 600; border-radius: var(--radius-md) var(--radius-md) 0 0;
+                  {% if active_tab == 'stats' %}
+                  background: var(--brand-primary); color: white;
+                  {% else %}
+                  background: transparent; color: var(--text-secondary);
+                  {% endif %}">
+            <i data-lucide="bar-chart-3" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
+            Статистика
+        </a>
+    </div>
+
     <!-- Поиск по email -->
     <div class="card mb-3">
         <h3 style="margin-top: 0;">Поиск пользователя</h3>

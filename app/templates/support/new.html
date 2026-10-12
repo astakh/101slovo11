@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Новое обращение — 101slovo{% endblock %}
+{% block content %}
+<div class="container--narrow" style="margin: 0 auto;">
+    <p style="margin-bottom: 1rem;">
+        <a href="/support" style="display: inline-flex; align-items: center; gap: 0.375rem; color: var(--text-secondary);">
+            <i data-lucide="arrow-left" class="icon-sm" aria-hidden="true"></i>
+            К списку обращений
+        </a>
+    </p>
+
+    <div class="page-header" style="text-align: left; margin-bottom: 1.25rem;">
+        <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="message-square-plus" style="width: 24px; height: 24px; color: var(--brand-primary);" aria-hidden="true"></i>
+            Новое обращение
+        </h1>
+        <p class="page-header__subtitle" style="margin-top: 0.375rem;">
+            Опишите вопрос, предложение или проблему — мы ответим в этом треде
+        </p>
+    </div>
+
+    {% if errors %}
+        <div class="flash-error mb-3">
+            <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
+            <ul style="margin: 0; padding-left: 1.25rem;">
+                {% for err in errors %}
+                    <li>{{ err }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
+    <form method="POST" action="/support/new" class="card">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+
+        <div class="form-group">
+            <label>Категория *</label>
+            <div class="grid grid-4" style="gap: 0.5rem;" x-data="{ selected: '{{ form.category }}' }">
+                {% for cat in categories %}
+                    <label class="option-card"
+                           :class="{ 'option-card--active': selected === '{{ cat.code }}' }"
+                           @click="selected = '{{ cat.code }}'">
+                        <input type="radio" name="category" value="{{ cat.code }}" required
+                               :checked="selected === '{{ cat.code }}'"
+                               style="position: absolute; opacity: 0; pointer-events: none;">
+                        <span style="font-weight: 600; font-size: 0.875rem;">{{ cat.label }}</span>
+                    </label>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="subject">Тема *</label>
+            <input type="text"
+                   id="subject"
+                   name="subject"
+                   value="{{ form.subject }}"
+                   required
+                   maxlength="{{ max_subject_length }}"
+                   placeholder="Кратко опишите суть обращения">
+        </div>
+
+        <div class="form-group--last">
+            <label for="content">Сообщение *</label>
+            <textarea id="content"
+                      name="content"
+                      rows="6"
+                      required
+                      maxlength="{{ max_message_length }}"
+                      placeholder="Опишите подробно: что произошло, что вы ожидали, какие шаги предпринимали...">{{ form.content }}</textarea>
+            <div style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem;">
+                Максимум {{ max_message_length }} символов
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem;">
+            <a href="/support" class="secondary" style="flex: 0;">Отмена</a>
+            <button type="submit" style="flex: 1;">
+                <i data-lucide="send" class="icon-sm" aria-hidden="true"></i>
+                Отправить обращение
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

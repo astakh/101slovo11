@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% block title %}Админ — Статистика пользователей{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+
+    <div class="section-header">
+        <h1 style="margin: 0;">📊 Статистика пользователей</h1>
+        <a href="/admin/prompts" class="secondary">
+            <i data-lucide="shield" class="icon-md" aria-hidden="true"></i> Промпты
+        </a>
+    </div>
+
+    <!-- Вкладки -->
+    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 2px solid var(--border-light); padding-bottom: 0;">
+        <a href="/admin/users"
+           style="padding: 0.625rem 1.25rem; text-decoration: none; font-weight: 600; border-radius: var(--radius-md) var(--radius-md) 0 0;
+                  {% if active_tab == 'search' %}
+                  background: var(--brand-primary); color: white;
+                  {% else %}
+                  background: transparent; color: var(--text-secondary);
+                  {% endif %}">
+            <i data-lucide="search" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
+            Поиск
+        </a>
+        <a href="/admin/users/stats"
+           style="padding: 0.625rem 1.25rem; text-decoration: none; font-weight: 600; border-radius: var(--radius-md) var(--radius-md) 0 0;
+                  {% if active_tab == 'stats' %}
+                  background: var(--brand-primary); color: white;
+                  {% else %}
+                  background: transparent; color: var(--text-secondary);
+                  {% endif %}">
+            <i data-lucide="bar-chart-3" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
+            Статистика
+        </a>
+    </div>
+
+    <!-- ==================== СВОДКА ==================== -->
+    <div class="grid grid-4" style="margin-bottom: 1.5rem;">
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.total }}</div>
+            <div class="stat-card__label">Всего пользователей</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.onboarded }}</div>
+            <div class="stat-card__label">Прошли онбординг</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.premium }}</div>
+            <div class="stat-card__label">Premium активных</div>
+            <div class="stat-card__sublabel">Конверсия: {{ stats.summary.conversion_pct }}%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.partners }}</div>
+            <div class="stat-card__label">Партнёров активных</div>
+        </div>
+    </div>
+
+    <div class="grid grid-4" style="margin-bottom: 2rem;">
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.new_today }}</div>
+            <div class="stat-card__label">Новых сегодня</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.new_7d }}</div>
+            <div class="stat-card__label">Новых за 7 дней</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.new_30d }}</div>
+            <div class="stat-card__label">Новых за 30 дней</div>
+        </div>
+        <div class="stat-card" style="border-color: {% if stats.activity.churn_14d > 0 %}var(--bg-warning-border){% endif %};">
+            <div class="stat-card__value" style="color: {% if stats.activity.churn_14d > 0 %}var(--text-warning-strong){% endif %};">
+                {{ stats.activity.churn_14d }}
+            </div>
+            <div class="stat-card__label">Churn risk (14+ дней)</div>
+        </div>
+    </div>
+
+    <!-- ==================== АКТИВНОСТЬ ==================== -->
+    <div class="grid grid-3" style="margin-bottom: 2rem;">
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.activity.dau }}</div>
+            <div class="stat-card__label">DAU (сегодня)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.activity.wau }}</div>
+            <div class="stat-card__label">WAU (7 дней)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.activity.mau }}</div>
+            <div class="stat-card__label">MAU (30 дней)</div>
+        </div>
+    </div>
+
+    <!-- ==================== ГРАФИК РЕГИСТРАЦИЙ ==================== -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0;">Регистрации за последние 30 дней</h3>
+        {% set chart = stats.registrations_chart %}
+        {% set max_count = chart | map(attribute='count') | max %}
+        {% set chart_height = 120 %}
+        {% set chart_width = 600 %}
+        {% set bar_gap = 2 %}
+        {% set bar_width = (chart_width - (chart | length - 1) * bar_gap) / (chart | length) %}
+
+        <svg viewBox="0 0 {{ chart_width }} {{ chart_height + 30 }}" style="width: 100%; height: auto;" role="img" aria-label="График регистраций за последние 30 дней">
+            <!-- Горизонтальная линия основания -->
+            <line x1="0" y1="{{ chart_height }}" x2="{{ chart_width }}" y2="{{ chart_height }}" stroke="var(--border-light)" stroke-width="1"/>
+
+            {% for item in chart %}
+            {% set bar_height = (item.count / max_count * (chart_height - 10)) | int if max_count > 0 else 0 %}
+            {% set x = loop.index0 * (bar_width + bar_gap) %}
+            {% set y = chart_height - bar_height %}
+
+            {% if item.count > 0 %}
+            <rect x="{{ x }}" y="{{ y }}" width="{{ bar_width }}" height="{{ bar_height }}"
+                  fill="var(--brand-primary)" rx="1" opacity="0.8">
+                <title>{{ item.label }}: {{ item.count }}</title>
+            </rect>
+            {% endif %}
+
+            <!-- Подпись каждой 5-й даты -->
+            {% if loop.index0 % 5 == 0 %}
+            <text x="{{ x + bar_width / 2 }}" y="{{ chart_height + 15 }}"
+                  font-size="8" fill="var(--text-muted)" text-anchor="middle">
+                {{ item.label }}
+            </text>
+            {% endif %}
+            {% endfor %}
+        </svg>
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.5rem;">
+            Максимум за день: {{ max_count }}
+        </p>
+    </div>
+
+    <!-- ==================== РАСПРЕДЕЛЕНИЯ ==================== -->
+    <div class="grid grid-2" style="margin-bottom: 2rem;">
+        <!-- Уровни -->
+        <div class="card">
+            <h3 style="margin-top: 0;">Уровни</h3>
+            {% set levels = stats.levels %}
+            {% set total_levels = levels.values() | sum %}
+            <table>
+                <thead>
+                    <tr><th>Уровень</th><th style="text-align: right;">Кол-во</th><th>Доля</th></tr>
+                </thead>
+                <tbody>
+                    {% for lvl, cnt in levels.items() %}
+                    {% if cnt > 0 %}
+                    <tr>
+                        <td><strong>{{ lvl }}</strong></td>
+                        <td style="text-align: right;">{{ cnt }}</td>
+                        <td>
+                            <div style="background: var(--surface-100); border-radius: var(--radius-full); height: 8px; width: 100%;">
+                                <div style="background: var(--brand-primary); border-radius: var(--radius-full); height: 8px; width: {{ (cnt / total_levels * 100) | int }}%;"></div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Словари -->
+        <div class="card">
+            <h3 style="margin-top: 0;">Словари</h3>
+            {% set dicts = stats.dictionaries %}
+            {% set total_dicts = dicts.values() | sum %}
+            <table>
+                <thead>
+                    <tr><th>Словарь</th><th style="text-align: right;">Кол-во</th><th>Доля</th></tr>
+                </thead>
+                <tbody>
+                    {% for name, cnt in dicts.items() %}
+                    {% if cnt > 0 %}
+                    <tr>
+                        <td><strong>{{ name }}</strong></td>
+                        <td style="text-align: right;">{{ cnt }}</td>
+                        <td>
+                            <div style="background: var(--surface-100); border-radius: var(--radius-full); height: 8px; width: 100%;">
+                                <div style="background: var(--brand-secondary); border-radius: var(--radius-full); height: 8px; width: {{ (cnt / total_dicts * 100) | int }}%;"></div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ==================== КОГОРТЫ / RETENTION ==================== -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0;">Когортный анализ (удержание по неделям)</h3>
+        <p style="color: var(--text-muted); font-size: 0.8125rem; margin-top: 0;">
+            Процент пользователей, которые были активны на каждой неделе после регистрации.
+        </p>
+        {% if stats.cohorts %}
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Когорта</th>
+                        <th style="text-align: right;">Размер</th>
+                        <th style="text-align: right;">Неделя 1</th>
+                        <th style="text-align: right;">Неделя 2</th>
+                        <th style="text-align: right;">Неделя 3</th>
+                        <th style="text-align: right;">Неделя 4+</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cohort in stats.cohorts %}
+                    <tr>
+                        <td><strong>{{ cohort.label }}</strong></td>
+                        <td style="text-align: right;">{{ cohort.size }}</td>
+                        {% for pct in cohort.weeks %}
+                        <td style="text-align: right;">
+                            {% if pct is none %}
+                            <span style="color: var(--text-muted);">—</span>
+                            {% else %}
+                            {% set color = 'var(--text-success-strong)' if pct >= 50 else ('var(--text-warning-strong)' if pct >= 25 else 'var(--text-error-strong)') %}
+                            <span style="color: {{ color }}; font-weight: 600;">{{ pct }}%</span>
+                            {% endif %}
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--text-muted); text-align: center; padding: 2rem 0;">
+            Нет данных для когортного анализа
+        </p>
+        {% endif %}
+    </div>
+
+    <!-- ==================== ТОП-ТАБЛИЦЫ ==================== -->
+    <div class="grid grid-3" style="margin-bottom: 2rem;">
+        <!-- Топ по урокам за неделю -->
+        <div class="card">
+            <h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="book-open" style="width: 16px; height: 16px; color: var(--brand-primary);" aria-hidden="true"></i>
+                Топ по урокам (7 дней)
+            </h4>
+            {% if stats.top_lessons_week %}
+            <table>
+                <thead>
+                    <tr><th>#</th><th>Пользователь</th><th style="text-align: right;">Уроков</th></tr>
+                </thead>
+                <tbody>
+                    {% for item in stats.top_lessons_week %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td style="font-size: 0.8125rem;">{{ item.email }}</td>
+                        <td style="text-align: right; font-weight: 600;">{{ item.value }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: var(--text-muted); text-align: center;">Нет данных</p>
+            {% endif %}
+        </div>
+
+        <!-- Топ по стрикам -->
+        <div class="card">
+            <h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="flame" style="width: 16px; height: 16px; color: var(--text-warning-strong);" aria-hidden="true"></i>
+                Топ по стрикам
+            </h4>
+            {% if stats.top_streaks %}
+            <table>
+                <thead>
+                    <tr><th>#</th><th>Пользователь</th><th style="text-align: right;">Дней</th></tr>
+                </thead>
+                <tbody>
+                    {% for item in stats.top_streaks %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td style="font-size: 0.8125rem;">{{ item.email }}</td>
+                        <td style="text-align: right; font-weight: 600;">🔥 {{ item.value }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: var(--text-muted); text-align: center;">Нет данных</p>
+            {% endif %}
+        </div>
+
+        <!-- Топ по словам -->
+        <div class="card">
+            <h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="book" style="width: 16px; height: 16px; color: var(--color-success);" aria-hidden="true"></i>
+                Топ по активным словам
+            </h4>
+            {% if stats.top_words %}
+            <table>
+                <thead>
+                    <tr><th>#</th><th>Пользователь</th><th style="text-align: right;">Слов</th></tr>
+                </thead>
+                <tbody>
+                    {% for item in stats.top_words %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td style="font-size: 0.8125rem;">{{ item.email }}</td>
+                        <td style="text-align: right; font-weight: 600;">{{ item.value }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: var(--text-muted); text-align: center;">Нет данных</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Примечание -->
+    <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 1rem;">
+        💡 Статистика обновляется при каждом открытии страницы.
+        Для когорт «—» означает, что данные за эту неделю ещё не полные.
+    </p>
+
+</div>
+{% endblock %}

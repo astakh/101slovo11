@@ -1225,7 +1225,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal, partner
+from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal, partner, support
 from app.middleware import AppMiddleware
 from app.core.templates import templates
 from app.db import AsyncSessionLocal
@@ -1288,6 +1288,7 @@ app.include_router(vocabulary.router)
 app.include_router(billing.router)
 app.include_router(legal.router)
 app.include_router(partner.router)
+app.include_router(support.router)
 app.include_router(admin.router)
 
 
@@ -1308,13 +1309,11 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def root(request: Request):
     if request.state.user:
         return Response(status_code=303, headers={"Location": "/dashboard"})
-
     monthly_price = app_settings.SUBSCRIPTION_MONTHLY_PRICE_KOP / 100
     six_month_price = app_settings.SUBSCRIPTION_6M_PRICE_KOP / 100
     six_month_per_month = six_month_price / 6
     six_month_full = monthly_price * 6
     six_month_saving = six_month_full - six_month_price
-
     return templates.TemplateResponse(
         "landing.html",
         {
@@ -1339,6 +1338,7 @@ async def health():
 ### end of app/main.py ########################################################################
 
 ### app/middleware.py ########################################################################
+# app/middleware.py
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request, Response
 from sqlalchemy import select
@@ -1361,6 +1361,8 @@ class AppMiddleware(BaseHTTPMiddleware):
         # 3. Аутентификация
         request.state.user = None
         request.state.is_partner = False
+        request.state.unread_support_count = 0
+        request.state.admin_unread_support_count = 0
 
         session_token = request.cookies.get("session")
         if session_token:
@@ -1372,6 +1374,7 @@ class AppMiddleware(BaseHTTPMiddleware):
                 )
                 result = await db.execute(stmt)
                 auth_session = result.scalar_one_or_none()
+
                 if auth_session:
                     user_stmt = select(User).where(User.id == auth_session.user_id)
                     user_result = await db.execute(user_stmt)
@@ -1388,12 +1391,29 @@ class AppMiddleware(BaseHTTPMiddleware):
                             partner_result = await db.execute(partner_stmt)
                             request.state.is_partner = partner_result.scalar_one_or_none() is not None
                         except Exception:
-                            # Если таблица ещё не создана или другая ошибка — не падаем
                             request.state.is_partner = False
+
+                        # 5. Счётчики непрочитанных обращений
+                        try:
+                            from app.services.support import (
+                                get_user_unread_count,
+                                get_admin_unread_count,
+                            )
+                            request.state.unread_support_count = (
+                                await get_user_unread_count(db, request.state.user.id)
+                            )
+                            if request.state.user.is_admin:
+                                request.state.admin_unread_support_count = (
+                                    await get_admin_unread_count(db)
+                                )
+                        except Exception:
+                            # Не падаем, если таблицы ещё не созданы
+                            request.state.unread_support_count = 0
+                            request.state.admin_unread_support_count = 0
 
         response = await call_next(request)
 
-        # 5. Очистка flash после отдачи ответа
+        # 6. Очистка flash после отдачи ответа
         if request.state.flashes:
             clear_flashes(response)
 
@@ -1401,6 +1421,7 @@ class AppMiddleware(BaseHTTPMiddleware):
 ### end of app/middleware.py ########################################################################
 
 ### app/models/__init__.py ########################################################################
+# app/models/__init__.py
 from .base import Base
 from .user import User
 from .auth_session import AuthSession
@@ -1418,12 +1439,15 @@ from .referral import Referral
 from .partner import Partner
 from .partner_invite import PartnerInvite
 from .partner_earning import PartnerEarning
+from .support_ticket import SupportTicket
+from .support_message import SupportMessage
 
 __all__ = [
     "Base", "User", "AuthSession", "Word", "UserWord",
     "Lesson", "LessonExercise", "Prompt", "LlmCall", "Event",
     "Subscription", "Payment", "PromoCode", "Referral",
     "Partner", "PartnerInvite", "PartnerEarning",
+    "SupportTicket", "SupportMessage",
 ]
 ### end of app/models/__init__.py ########################################################################
 
@@ -1833,6 +1857,106 @@ class Subscription(Base):
     )
 ### end of app/models/subscription.py ########################################################################
 
+### app/models/support_message.py ########################################################################
+# app/models/support_message.py
+"""Модель сообщения в тикете поддержки."""
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Identity, Index, Text
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql import func, text
+from datetime import datetime
+from .base import Base
+
+
+class SupportMessage(Base):
+    __tablename__ = "support_messages"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("support_tickets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    author_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    deleted_by_admin_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_support_messages_ticket", "ticket_id", "created_at"),
+        Index(
+            "ix_support_messages_active",
+            "ticket_id",
+            "created_at",
+            postgresql_where=text("is_deleted = false"),
+        ),
+    )
+### end of app/models/support_message.py ########################################################################
+
+### app/models/support_ticket.py ########################################################################
+# app/models/support_ticket.py
+"""Модель обращения в поддержку (тикет)."""
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Index, String
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.sql import func, text
+from datetime import datetime
+from .base import Base
+
+
+class SupportTicket(Base):
+    __tablename__ = "support_tickets"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # question | suggestion | problem | other
+    category: Mapped[str] = mapped_column(String(16), nullable=False)
+    subject: Mapped[str] = mapped_column(String(200), nullable=False)
+    # open | in_progress | resolved | closed
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="open"
+    )
+    last_user_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_admin_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    user_last_viewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    admin_last_viewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_support_tickets_user_status", "user_id", "status"),
+        Index(
+            "ix_support_tickets_admin_queue",
+            "status",
+            "last_user_message_at",
+            postgresql_where=text("status IN ('open', 'in_progress')"),
+        ),
+        Index("ix_support_tickets_created", "created_at"),
+    )
+### end of app/models/support_ticket.py ########################################################################
+
 ### app/models/user.py ########################################################################
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Identity, Integer, SmallInteger, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -1929,16 +2053,25 @@ class Word(Base):
 ### end of app/models/word.py ########################################################################
 
 ### app/routers/admin.py ########################################################################
+# app/routers/admin.py
 """Админские роуты."""
-from fastapi import APIRouter, Request, Depends, Form, HTTPException, status
+from datetime import datetime, timezone
+from fastapi import APIRouter, Request, Depends, Form, HTTPException, status, Query
 from fastapi.responses import RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.deps import require_admin, require_csrf
 from app.core.templates import templates
 from app.models.user import User
+from app.models.event import Event
 from app.services.admin_prompts import get_all_prompts, update_prompt, validate_prompt_template
 from app.services.admin_stats import get_token_stats
+from app.services.admin_user_stats import get_user_stats
+from app.services.subscription import (
+    activate_subscription,
+    get_subscription_status,
+)
 from app.services.partner import (
     create_partner_invite,
     get_all_invites,
@@ -1949,6 +2082,19 @@ from app.services.partner import (
     deactivate_partner,
     get_partner_earnings,
     mark_earning_as_paid,
+)
+from app.services.support import (
+    get_admin_tickets,
+    get_ticket_with_messages,
+    add_admin_reply,
+    change_ticket_status,
+    delete_message,
+    mark_ticket_viewed_by_admin,
+    VALID_CATEGORIES,
+    VALID_STATUSES,
+    CATEGORY_LABELS,
+    STATUS_LABELS,
+    MAX_MESSAGE_LENGTH,
 )
 from app.config import settings
 from app.utils.flash import add_flash
@@ -2005,9 +2151,106 @@ async def admin_stats_page(
 
 
 # ============================================================
+# USERS MANAGEMENT
+# ============================================================
+@router.get("/users")
+async def admin_users_page(
+    request: Request,
+    email: str = "",
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Страница поиска пользователя по email и начисления дней."""
+    found_user = None
+    sub_status = None
+    search_error = None
+    if email.strip():
+        stmt = select(User).where(User.email == email.strip().lower())
+        result = await db.execute(stmt)
+        found_user = result.scalar_one_or_none()
+        if found_user:
+            sub_status = await get_subscription_status(db, found_user.id)
+        else:
+            search_error = f"Пользователь с email '{email.strip()}' не найден"
+    return templates.TemplateResponse(
+        "admin/users.html",
+        {
+            "request": request,
+            "user": admin,
+            "found_user": found_user,
+            "sub_status": sub_status,
+            "search_email": email.strip(),
+            "search_error": search_error,
+            "active_tab": "search",
+        },
+    )
+
+
+@router.get("/users/stats")
+async def admin_user_stats_page(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Страница статистики по пользователям."""
+    stats = await get_user_stats(db)
+    return templates.TemplateResponse(
+        "admin/user_stats.html",
+        {
+            "request": request,
+            "user": admin,
+            "stats": stats,
+            "active_tab": "stats",
+        },
+    )
+
+
+@router.post("/users/grant-days", dependencies=[Depends(require_csrf)])
+async def admin_grant_days(
+    request: Request,
+    user_id: int = Form(...),
+    days: int = Form(...),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Начисление дней Premium пользователю (без оплаты)."""
+    if days < 1:
+        raise HTTPException(status_code=400, detail="Количество дней должно быть не менее 1")
+    stmt = select(User).where(User.id == user_id)
+    result = await db.execute(stmt)
+    target_user = result.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    await activate_subscription(
+        db,
+        user_id=target_user.id,
+        plan="admin_bonus",
+        source="admin",
+        extra_days=days,
+    )
+    event = Event(
+        user_id=target_user.id,
+        type="admin_days_granted",
+        payload={
+            "days": days,
+            "admin_user_id": admin.id,
+            "admin_email": admin.email,
+            "granted_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    db.add(event)
+    await db.flush()
+    response = RedirectResponse(
+        url=f"/admin/users?email={target_user.email}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+    add_flash(response, "success", f"Пользователю {target_user.email} начислено {days} дн. Premium")
+    return response
+
+
+# ============================================================
 # PARTNERS MANAGEMENT
 # ============================================================
-
 @router.get("/partners")
 async def admin_partners_page(
     request: Request,
@@ -2017,13 +2260,11 @@ async def admin_partners_page(
     partners_data = await get_all_partners(db)
     invites = await get_all_invites(db)
     pending_promos = await get_pending_promo_codes(db)
-
     base_url = str(request.base_url).rstrip("/")
     invites_with_links = []
     for inv in invites:
         link = f"{base_url}/partner/register?invite={inv.token}" if not inv.is_used else None
         invites_with_links.append({"invite": inv, "link": link})
-
     return templates.TemplateResponse(
         "admin/partners.html",
         {
@@ -2125,6 +2366,165 @@ async def admin_mark_paid(
         return response
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ============================================================
+# SUPPORT (обращения в поддержку)
+# ============================================================
+@router.get("/support")
+async def admin_support_list(
+    request: Request,
+    status_filter: str | None = Query(default=None, alias="status"),
+    category_filter: str | None = Query(default=None, alias="category"),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Список всех обращений в поддержку."""
+    tickets = await get_admin_tickets(
+        db,
+        status_filter=status_filter,
+        category_filter=category_filter,
+    )
+    return templates.TemplateResponse(
+        "admin/support_list.html",
+        {
+            "request": request,
+            "user": admin,
+            "tickets": tickets,
+            "status_filter": status_filter,
+            "category_filter": category_filter,
+            "valid_statuses": VALID_STATUSES,
+            "valid_categories": VALID_CATEGORIES,
+            "status_labels": STATUS_LABELS,
+            "category_labels": CATEGORY_LABELS,
+        },
+    )
+
+
+@router.get("/support/{ticket_id}")
+async def admin_support_ticket_view(
+    request: Request,
+    ticket_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Просмотр тикета поддержки админом."""
+    data = await get_ticket_with_messages(db, ticket_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Обращение не найдено")
+
+    await mark_ticket_viewed_by_admin(db, ticket_id)
+
+    return templates.TemplateResponse(
+        "admin/support_ticket.html",
+        {
+            "request": request,
+            "user": admin,
+            **data,
+            "max_message_length": MAX_MESSAGE_LENGTH,
+            "valid_statuses": VALID_STATUSES,
+            "status_labels": STATUS_LABELS,
+            "is_admin_view": True,
+        },
+    )
+
+
+@router.post("/support/{ticket_id}/reply", dependencies=[Depends(require_csrf)])
+async def admin_support_reply(
+    request: Request,
+    ticket_id: int,
+    content: str = Form(...),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Админ отвечает в тикете."""
+    is_htmx = bool(request.headers.get("HX-Request"))
+
+    try:
+        await add_admin_reply(db, admin, ticket_id, content)
+    except ValueError as e:
+        if is_htmx:
+            return templates.TemplateResponse(
+                "support/_reply_error.html",
+                {"request": request, "error": str(e)},
+                status_code=422,
+            )
+        response = RedirectResponse(
+            url=f"/admin/support/{ticket_id}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+        add_flash(response, "error", str(e))
+        return response
+
+    if is_htmx:
+        data = await get_ticket_with_messages(db, ticket_id)
+        return templates.TemplateResponse(
+            "support/_messages.html",
+            {
+                "request": request,
+                "user": admin,
+                **data,
+                "is_admin_view": True,
+            },
+            headers={"HX-Trigger": "supportReplySent"},
+        )
+
+    return RedirectResponse(
+        url=f"/admin/support/{ticket_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/support/{ticket_id}/status", dependencies=[Depends(require_csrf)])
+async def admin_support_change_status(
+    request: Request,
+    ticket_id: int,
+    new_status: str = Form(...),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Админ меняет статус тикета."""
+    try:
+        await change_ticket_status(db, admin, ticket_id, new_status)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    response = RedirectResponse(
+        url=f"/admin/support/{ticket_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+    add_flash(response, "success", f"Статус изменён на «{STATUS_LABELS.get(new_status, new_status)}»")
+    return response
+
+
+@router.post("/support/messages/{message_id}/delete", dependencies=[Depends(require_csrf)])
+async def admin_support_delete_message(
+    request: Request,
+    message_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Админ удаляет сообщение (soft delete)."""
+    try:
+        message = await delete_message(db, admin, message_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    ticket_id = message.ticket_id
+
+    is_htmx = bool(request.headers.get("HX-Request"))
+    if is_htmx:
+        return templates.TemplateResponse(
+            "support/_deleted_message.html",
+            {"request": request, "message_id": message_id},
+        )
+
+    response = RedirectResponse(
+        url=f"/admin/support/{ticket_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+    add_flash(response, "success", "Сообщение удалено")
+    return response
 ### end of app/routers/admin.py ########################################################################
 
 ### app/routers/auth.py ########################################################################
@@ -3354,11 +3754,12 @@ from app.db import get_db
 from app.deps import require_auth
 from app.services.dashboard import get_dashboard_data
 from app.services.paywall import get_paywall_context
-from app.services.subscription import get_subscription_status
+from app.services.subscription import get_subscription_status, get_admin_bonus_notification
 from app.core.templates import templates
 from app.models.user import User
 
 router = APIRouter(tags=["pages"])
+
 
 @router.get("/dashboard")
 async def dashboard_page(
@@ -3382,6 +3783,9 @@ async def dashboard_page(
 
     subscription = await get_subscription_status(db, user.id)
 
+    # Проверяем, есть ли недавний бонус от администратора
+    admin_bonus = await get_admin_bonus_notification(db, user.id)
+
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -3389,6 +3793,7 @@ async def dashboard_page(
             "user": user,
             "paywall": paywall,
             "subscription": subscription,
+            "admin_bonus": admin_bonus,
             # ✅ ФИКС: передаём явно для partials/paywall.html
             "free_lessons_total": paywall.get("free_lessons_total"),
             **data,
@@ -3774,6 +4179,217 @@ async def settings_post(
     add_flash(response, "success", "Настройки успешно сохранены!")
     return response
 ### end of app/routers/settings.py ########################################################################
+
+### app/routers/support.py ########################################################################
+# app/routers/support.py
+"""Роуты обращений в поддержку для пользователей."""
+import logging
+from fastapi import APIRouter, Request, Depends, Form, HTTPException, status
+from fastapi.responses import RedirectResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db import get_db
+from app.deps import require_auth, require_csrf
+from app.core.templates import templates
+from app.models.user import User
+from app.services.support import (
+    create_ticket,
+    add_user_reply,
+    get_user_tickets,
+    get_ticket_with_messages,
+    mark_ticket_viewed_by_user,
+    validate_ticket_input,
+    VALID_CATEGORIES,
+    CATEGORY_LABELS,
+    MAX_MESSAGE_LENGTH,
+    MAX_SUBJECT_LENGTH,
+)
+from app.utils.flash import add_flash
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/support", tags=["support"])
+
+
+@router.get("")
+async def support_list(
+    request: Request,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Список своих тикетов."""
+    if not user.is_onboarded:
+        return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
+    tickets = await get_user_tickets(db, user)
+    return templates.TemplateResponse(
+        "support/list.html",
+        {
+            "request": request,
+            "user": user,
+            "tickets": tickets,
+        },
+    )
+
+
+@router.get("/new")
+async def support_new_form(
+    request: Request,
+    user: User = Depends(require_auth),
+):
+    """Форма создания нового тикета."""
+    if not user.is_onboarded:
+        return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
+    categories = [
+        {"code": code, "label": CATEGORY_LABELS[code]}
+        for code in VALID_CATEGORIES
+    ]
+    return templates.TemplateResponse(
+        "support/new.html",
+        {
+            "request": request,
+            "user": user,
+            "categories": categories,
+            "max_subject_length": MAX_SUBJECT_LENGTH,
+            "max_message_length": MAX_MESSAGE_LENGTH,
+            "form": {"category": "", "subject": "", "content": ""},
+            "errors": [],
+        },
+    )
+
+
+@router.post("/new", dependencies=[Depends(require_csrf)])
+async def support_create(
+    request: Request,
+    category: str = Form(...),
+    subject: str = Form(...),
+    content: str = Form(...),
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Создание нового тикета."""
+    if not user.is_onboarded:
+        return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
+    errors = validate_ticket_input(category, subject, content)
+    if errors:
+        categories = [
+            {"code": code, "label": CATEGORY_LABELS[code]}
+            for code in VALID_CATEGORIES
+        ]
+        return templates.TemplateResponse(
+            "support/new.html",
+            {
+                "request": request,
+                "user": user,
+                "categories": categories,
+                "max_subject_length": MAX_SUBJECT_LENGTH,
+                "max_message_length": MAX_MESSAGE_LENGTH,
+                "form": {
+                    "category": category,
+                    "subject": subject,
+                    "content": content,
+                },
+                "errors": errors,
+            },
+            status_code=422,
+        )
+
+    try:
+        ticket = await create_ticket(
+            db, user,
+            category=category,
+            subject=subject,
+            content=content,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    response = RedirectResponse(
+        url=f"/support/{ticket.id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+    add_flash(response, "success", "Обращение создано. Мы ответим в ближайшее время.")
+    return response
+
+
+@router.get("/{ticket_id}")
+async def support_ticket_view(
+    request: Request,
+    ticket_id: int,
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Просмотр тикета (переписка)."""
+    if not user.is_onboarded:
+        return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
+    data = await get_ticket_with_messages(db, ticket_id)
+    if not data or data["ticket"].user_id != user.id:
+        raise HTTPException(status_code=404, detail="Обращение не найдено")
+
+    await mark_ticket_viewed_by_user(db, user, ticket_id)
+
+    return templates.TemplateResponse(
+        "support/ticket.html",
+        {
+            "request": request,
+            "user": user,
+            **data,
+            "max_message_length": MAX_MESSAGE_LENGTH,
+            "is_admin_view": False,
+        },
+    )
+
+
+@router.post("/{ticket_id}/reply", dependencies=[Depends(require_csrf)])
+async def support_user_reply(
+    request: Request,
+    ticket_id: int,
+    content: str = Form(...),
+    user: User = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Пользователь отвечает в тикете."""
+    if not user.is_onboarded:
+        return RedirectResponse(url="/onboarding", status_code=status.HTTP_303_SEE_OTHER)
+
+    is_htmx = bool(request.headers.get("HX-Request"))
+
+    try:
+        await add_user_reply(db, user, ticket_id, content)
+    except ValueError as e:
+        if is_htmx:
+            return templates.TemplateResponse(
+                "support/_reply_error.html",
+                {"request": request, "error": str(e)},
+                status_code=422,
+            )
+        response = RedirectResponse(
+            url=f"/support/{ticket_id}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+        add_flash(response, "error", str(e))
+        return response
+
+    if is_htmx:
+        data = await get_ticket_with_messages(db, ticket_id)
+        return templates.TemplateResponse(
+            "support/_messages.html",
+            {
+                "request": request,
+                "user": user,
+                **data,
+                "is_admin_view": False,
+            },
+            headers={"HX-Trigger": "supportReplySent"},
+        )
+
+    return RedirectResponse(
+        url=f"/support/{ticket_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+### end of app/routers/support.py ########################################################################
 
 ### app/routers/vocabulary.py ########################################################################
 # app/routers/vocabulary.py
@@ -4270,6 +4886,481 @@ async def get_token_stats(db: AsyncSession) -> dict:
 
     return stats
 ### end of app/services/admin_stats.py ########################################################################
+
+### app/services/admin_user_stats.py ########################################################################
+"""Сервис статистики по пользователям для админки."""
+import logging
+from datetime import date, datetime, timedelta, timezone
+from sqlalchemy import select, func, and_, case
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.user import User
+from app.models.lesson import Lesson
+from app.models.user_word import UserWord
+from app.models.subscription import Subscription
+from app.models.partner import Partner
+from app.utils.streak import calculate_streak
+
+logger = logging.getLogger(__name__)
+
+# Количество месяцев для когорт
+COHORT_MONTHS = 6
+# Количество дней для графика регистраций
+REGISTRATION_CHART_DAYS = 30
+# Размер топа
+TOP_LIMIT = 10
+# Для стриков берём юзеров, активных за последние N дней
+STREAK_ACTIVITY_DAYS = 60
+
+
+async def get_user_stats(db: AsyncSession) -> dict:
+    """
+    Возвращает полную статистику по пользователям.
+
+    Returns:
+        {
+            "summary": {...},
+            "registrations_chart": [...],
+            "levels": {...},
+            "dictionaries": {...},
+            "activity": {...},
+            "cohorts": [...],
+            "top_lessons_week": [...],
+            "top_streaks": [...],
+            "top_words": [...],
+        }
+    """
+    today = date.today()
+    now = datetime.now(timezone.utc)
+
+    # 1. Сводка
+    summary = await _get_summary(db, today, now)
+
+    # 2. График регистраций (последние 30 дней)
+    registrations_chart = await _get_registrations_chart(db, today)
+
+    # 3. Распределения
+    levels = await _get_levels_distribution(db)
+    dictionaries = await _get_dictionaries_distribution(db)
+
+    # 4. Активность
+    activity = await _get_activity(db, today)
+
+    # 5. Когорты / Retention
+    cohorts = await _get_cohorts(db, today)
+
+    # 6. Топ-таблицы
+    top_lessons_week = await _get_top_lessons_week(db, today)
+    top_streaks = await _get_top_streaks(db, today)
+    top_words = await _get_top_words(db)
+
+    return {
+        "summary": summary,
+        "registrations_chart": registrations_chart,
+        "levels": levels,
+        "dictionaries": dictionaries,
+        "activity": activity,
+        "cohorts": cohorts,
+        "top_lessons_week": top_lessons_week,
+        "top_streaks": top_streaks,
+        "top_words": top_words,
+    }
+
+
+async def _get_summary(db: AsyncSession, today: date, now: datetime) -> dict:
+    """Сводные карточки."""
+    today_start = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+    week_ago = now - timedelta(days=7)
+    month_ago = now - timedelta(days=30)
+
+    stmt = select(
+        func.count(User.id).label("total"),
+        func.count(User.id).filter(User.is_onboarded == True).label("onboarded"),  # noqa: E712
+        func.count(User.id).filter(User.created_at >= today_start).label("new_today"),
+        func.count(User.id).filter(User.created_at >= week_ago).label("new_7d"),
+        func.count(User.id).filter(User.created_at >= month_ago).label("new_30d"),
+    )
+    row = (await db.execute(stmt)).one()
+
+    # Премиум активные
+    premium_stmt = select(func.count(func.distinct(Subscription.user_id))).where(
+        Subscription.status == "active",
+        Subscription.expires_at > now,
+    )
+    premium_count = (await db.execute(premium_stmt)).scalar() or 0
+
+    # Партнёры активные
+    partners_stmt = select(func.count(Partner.id)).where(Partner.is_active == True)  # noqa: E712
+    partners_count = (await db.execute(partners_stmt)).scalar() or 0
+
+    onboarded = row.onboarded or 0
+    conversion_pct = round(premium_count / onboarded * 100, 1) if onboarded > 0 else 0.0
+
+    return {
+        "total": row.total or 0,
+        "onboarded": onboarded,
+        "new_today": row.new_today or 0,
+        "new_7d": row.new_7d or 0,
+        "new_30d": row.new_30d or 0,
+        "premium": premium_count,
+        "conversion_pct": conversion_pct,
+        "partners": partners_count,
+    }
+
+
+async def _get_registrations_chart(db: AsyncSession, today: date) -> list[dict]:
+    """Данные для графика регистраций по дням (последние 30 дней)."""
+    start_date = today - timedelta(days=REGISTRATION_CHART_DAYS - 1)
+    start_dt = datetime(start_date.year, start_date.month, start_date.day, tzinfo=timezone.utc)
+
+    stmt = (
+        select(
+            func.date(User.created_at).label("reg_date"),
+            func.count(User.id).label("cnt"),
+        )
+        .where(User.created_at >= start_dt)
+        .group_by(func.date(User.created_at))
+    )
+    rows = (await db.execute(stmt)).all()
+
+    # Преобразуем в словарь {дата: количество}
+    counts = {str(r.reg_date): r.cnt for r in rows}
+
+    # Генерируем все даты и заполняем нулями
+    chart = []
+    for i in range(REGISTRATION_CHART_DAYS):
+        d = start_date + timedelta(days=i)
+        chart.append({
+            "date": d.isoformat(),
+            "label": d.strftime("%d.%m"),
+            "count": counts.get(d.isoformat(), 0),
+        })
+
+    return chart
+
+
+async def _get_levels_distribution(db: AsyncSession) -> dict:
+    """Распределение по уровням (только онборженные)."""
+    stmt = (
+        select(User.level, func.count(User.id))
+        .where(User.is_onboarded == True)  # noqa: E712
+        .group_by(User.level)
+    )
+    rows = (await db.execute(stmt)).all()
+
+    result = {}
+    level_order = ["A1", "A2", "B1", "B2", "C1", "C2"]
+    for lvl in level_order:
+        result[lvl] = 0
+    for lvl, cnt in rows:
+        if lvl in result:
+            result[lvl] = cnt
+        else:
+            result["—"] = result.get("—", 0) + cnt
+
+    return result
+
+
+async def _get_dictionaries_distribution(db: AsyncSession) -> dict:
+    """Распределение по словарям (только онборженные)."""
+    stmt = (
+        select(User.dictionary_code, func.count(User.id))
+        .where(User.is_onboarded == True)  # noqa: E712
+        .group_by(User.dictionary_code)
+    )
+    rows = (await db.execute(stmt)).all()
+
+    labels = {"general": "Общий", "it": "IT", "travel": "Путешествия"}
+    result = {}
+    for code, cnt in rows:
+        label = labels.get(code, code or "—")
+        result[label] = cnt
+
+    return result
+
+
+async def _get_activity(db: AsyncSession, today: date) -> dict:
+    """DAU / WAU / MAU / churn."""
+    week_ago_date = today - timedelta(days=7)
+    month_ago_date = today - timedelta(days=30)
+    churn_cutoff = today - timedelta(days=14)
+
+    # DAU / WAU / MAU
+    activity_stmt = select(
+        func.count(func.distinct(Lesson.user_id)).filter(
+            Lesson.started_local_date == today
+        ).label("dau"),
+        func.count(func.distinct(Lesson.user_id)).filter(
+            Lesson.started_local_date >= week_ago_date
+        ).label("wau"),
+        func.count(func.distinct(Lesson.user_id)).filter(
+            Lesson.started_local_date >= month_ago_date
+        ).label("mau"),
+    )
+    activity_row = (await db.execute(activity_stmt)).one()
+
+    # Churn risk: онборженные, но не было урока 14+ дней
+    churn_stmt = select(func.count(User.id)).where(
+        User.is_onboarded == True,  # noqa: E712
+        ~User.id.in_(
+            select(Lesson.user_id).where(
+                Lesson.started_local_date >= churn_cutoff
+            )
+        ),
+    )
+    churn_14d = (await db.execute(churn_stmt)).scalar() or 0
+
+    return {
+        "dau": activity_row.dau or 0,
+        "wau": activity_row.wau or 0,
+        "mau": activity_row.mau or 0,
+        "churn_14d": churn_14d,
+    }
+
+
+async def _get_cohorts(db: AsyncSession, today: date) -> list[dict]:
+    """
+    Когортный анализ (последние 6 месяцев).
+    Для каждой когорты (месяц регистрации):
+    - размер когорты
+    - % активных на неделе 1 (1-7 день после регистрации)
+    - % активных на неделе 2 (8-14 день)
+    - % активных на неделе 3 (15-21 день)
+    - % активных на неделе 4+ (22+ день)
+    """
+    # Определяем границы когорт
+    cohort_months = []
+    for i in range(COHORT_MONTHS - 1, -1, -1):
+        # Вычисляем месяц, отступая на i месяцев назад
+        year = today.year
+        month = today.month - i
+        while month <= 0:
+            month += 12
+            year -= 1
+        cohort_months.append((year, month))
+
+    # Загружаем юзеров за последние 6 месяцев
+    earliest_cohort = cohort_months[0]
+    earliest_dt = datetime(
+        earliest_cohort[0], earliest_cohort[1], 1, tzinfo=timezone.utc
+    )
+
+    users_stmt = select(User.id, User.created_at).where(
+        User.is_onboarded == True,  # noqa: E712
+        User.created_at >= earliest_dt,
+    )
+    users_rows = (await db.execute(users_stmt)).all()
+
+    if not users_rows:
+        return []
+
+    user_ids = [u.id for u in users_rows]
+    user_created = {u.id: u.created_at for u in users_rows}
+
+    # Загружаем уроки для этих юзеров
+    lessons_stmt = select(
+        Lesson.user_id,
+        Lesson.started_at,
+    ).where(
+        Lesson.user_id.in_(user_ids),
+        Lesson.started_at >= earliest_dt,
+    )
+    lessons_rows = (await db.execute(lessons_stmt)).all()
+
+    # Группируем уроки по юзерам
+    user_lessons: dict[int, list[datetime]] = {}
+    for user_id, started_at in lessons_rows:
+        if user_id not in user_lessons:
+            user_lessons[user_id] = []
+        user_lessons[user_id].append(started_at)
+
+    # Строим когорты
+    cohorts = []
+    for year, month in cohort_months:
+        cohort_label = f"{month:02d}.{year}"
+
+        # Юзеры этой когорты
+        cohort_user_ids = []
+        for uid, created_at in user_created.items():
+            if created_at.year == year and created_at.month == month:
+                cohort_user_ids.append(uid)
+
+        cohort_size = len(cohort_user_ids)
+        if cohort_size == 0:
+            cohorts.append({
+                "label": cohort_label,
+                "size": 0,
+                "weeks": [None, None, None, None],
+            })
+            continue
+
+        # Для каждой недели считаем, сколько юзеров были активны
+        week_counts = [0, 0, 0, 0]  # недели 1-4
+        for uid in cohort_user_ids:
+            created = user_created[uid]
+            lessons = user_lessons.get(uid, [])
+            weeks_hit = set()
+            for lesson_at in lessons:
+                delta_days = (lesson_at - created).days
+                if delta_days < 0:
+                    continue
+                if delta_days < 7:
+                    weeks_hit.add(0)
+                elif delta_days < 14:
+                    weeks_hit.add(1)
+                elif delta_days < 21:
+                    weeks_hit.add(2)
+                else:
+                    weeks_hit.add(3)
+            for w in weeks_hit:
+                week_counts[w] += 1
+
+        # Проверяем, какие недели прошли для этой когорты
+        # Последняя дата когорты: конец месяца
+        if month == 12:
+            cohort_end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            cohort_end = datetime(year, month + 1, 1, tzinfo=timezone.utc)
+
+        days_since_cohort_end = (datetime.now(timezone.utc) - cohort_end).days
+
+        weeks = []
+        for w in range(4):
+            # Неделя w доступна, если прошло >= (w+1)*7 дней с конца когорты
+            required_days = (w + 1) * 7
+            if days_since_cohort_end >= required_days:
+                pct = round(week_counts[w] / cohort_size * 100, 1)
+                weeks.append(pct)
+            else:
+                weeks.append(None)  # данные ещё не полные
+
+        cohorts.append({
+            "label": cohort_label,
+            "size": cohort_size,
+            "weeks": weeks,
+        })
+
+    return cohorts
+
+
+async def _get_top_lessons_week(db: AsyncSession, today: date) -> list[dict]:
+    """Топ-10 по урокам за последние 7 дней."""
+    week_ago_date = today - timedelta(days=7)
+
+    stmt = (
+        select(
+            User.email,
+            func.count(Lesson.id).label("cnt"),
+        )
+        .join(Lesson, Lesson.user_id == User.id)
+        .where(Lesson.started_local_date >= week_ago_date)
+        .group_by(User.id, User.email)
+        .order_by(func.count(Lesson.id).desc())
+        .limit(TOP_LIMIT)
+    )
+    rows = (await db.execute(stmt)).all()
+
+    return [
+        {"email": _mask_email(r.email), "value": r.cnt}
+        for r in rows
+    ]
+
+
+async def _get_top_streaks(db: AsyncSession, today: date) -> list[dict]:
+    """Топ-10 по текущему стрику."""
+    cutoff_date = today - timedelta(days=STREAK_ACTIVITY_DAYS)
+
+    # Берём юзеров, активных за последние 60 дней
+    active_stmt = (
+        select(Lesson.user_id)
+        .where(Lesson.started_local_date >= cutoff_date)
+        .group_by(Lesson.user_id)
+        .order_by(func.count(Lesson.id).desc())
+        .limit(100)
+    )
+    active_user_ids = (await db.execute(active_stmt)).scalars().all()
+
+    if not active_user_ids:
+        return []
+
+    # Загружаем даты завершённых уроков для этих юзеров
+    dates_stmt = (
+        select(
+            Lesson.user_id,
+            Lesson.started_local_date,
+        )
+        .where(
+            Lesson.user_id.in_(active_user_ids),
+            Lesson.completed_local_date.isnot(None),
+        )
+    )
+    dates_rows = (await db.execute(dates_stmt)).all()
+
+    # Группируем по юзерам
+    user_dates: dict[int, list[date]] = {}
+    for user_id, d in dates_rows:
+        if user_id not in user_dates:
+            user_dates[user_id] = []
+        user_dates[user_id].append(d)
+
+    # Считаем стрики
+    streaks = []
+    for uid, dates in user_dates.items():
+        result = calculate_streak(dates, today)
+        if result["current"] > 0:
+            streaks.append({"user_id": uid, "streak": result["current"]})
+
+    # Сортируем и берём топ
+    streaks.sort(key=lambda x: x["streak"], reverse=True)
+    top_streaks = streaks[:TOP_LIMIT]
+
+    # Загружаем email для топ юзеров
+    if not top_streaks:
+        return []
+
+    top_ids = [s["user_id"] for s in top_streaks]
+    emails_stmt = select(User.id, User.email).where(User.id.in_(top_ids))
+    emails_rows = (await db.execute(emails_stmt)).all()
+    email_map = {r.id: r.email for r in emails_rows}
+
+    return [
+        {"email": _mask_email(email_map.get(s["user_id"], "—")), "value": s["streak"]}
+        for s in top_streaks
+    ]
+
+
+async def _get_top_words(db: AsyncSession) -> list[dict]:
+    """Топ-10 по количеству активных слов."""
+    stmt = (
+        select(
+            User.email,
+            func.count(UserWord.id).label("cnt"),
+        )
+        .join(UserWord, UserWord.user_id == User.id)
+        .where(UserWord.status == "active")
+        .group_by(User.id, User.email)
+        .order_by(func.count(UserWord.id).desc())
+        .limit(TOP_LIMIT)
+    )
+    rows = (await db.execute(stmt)).all()
+
+    return [
+        {"email": _mask_email(r.email), "value": r.cnt}
+        for r in rows
+    ]
+
+
+def _mask_email(email: str) -> str:
+    """Маскирует email для отображения."""
+    if not email or "@" not in email:
+        return email or "—"
+    local, domain = email.split("@", 1)
+    if len(local) <= 1:
+        masked_local = local + "***"
+    else:
+        masked_local = local[0] + "***"
+    return f"{masked_local}@{domain}"
+### end of app/services/admin_user_stats.py ########################################################################
 
 ### app/services/auth.py ########################################################################
 from datetime import datetime, timedelta, timezone
@@ -6442,12 +7533,13 @@ from app.models.event import Event
 logger = logging.getLogger(__name__)
 
 # Длительность подписок в днях
-# ВАЖНО: для "referral_bonus" базовых дней = 0,
+# ВАЖНО: для "referral_bonus" и "admin_bonus" базовых дней = 0,
 # добавляются только extra_days. Иначе бонус будет 30 + extra.
 PLAN_DAYS = {
     "monthly": 30,
     "six_months": 180,
     "referral_bonus": 0,
+    "admin_bonus": 0,
 }
 
 
@@ -6477,7 +7569,6 @@ async def is_premium(db: AsyncSession, user_id: int) -> bool:
 async def get_subscription_status(db: AsyncSession, user_id: int) -> dict:
     """
     Возвращает полную информацию о подписке для шаблонов.
-
     Returns:
         {
             "is_premium": bool,
@@ -6496,10 +7587,8 @@ async def get_subscription_status(db: AsyncSession, user_id: int) -> dict:
             "days_left": 0,
             "source": None,
         }
-
     now = datetime.now(timezone.utc)
     days_left = max((sub.expires_at - now).days, 0)
-
     return {
         "is_premium": True,
         "plan": sub.plan,
@@ -6520,19 +7609,19 @@ async def activate_subscription(
     """
     Активирует подписку.
     Если уже есть активная — продлевает её.
-
     Для реферальных бонусов (plan="referral_bonus", source="referral")
+    и админских бонусов (plan="admin_bonus", source="admin")
     базовых дней 0 — добавляются только extra_days.
 
     Args:
-        plan: "monthly" | "six_months" | "referral_bonus"
-        source: "payment" | "referral"
+        plan: "monthly" | "six_months" | "referral_bonus" | "admin_bonus"
+        source: "payment" | "referral" | "admin"
         payment_id: ID платежа (для оплаты)
-        extra_days: дополнительные дни (для рефералки)
+        extra_days: дополнительные дни (для рефералки / админа)
     """
     now = datetime.now(timezone.utc)
 
-    # Для referral_bonus базовых дней нет (0), только бонусные.
+    # Для referral_bonus и admin_bonus базовых дней нет (0), только бонусные.
     # Для остальных планов берём из PLAN_DAYS.
     base_days = PLAN_DAYS.get(plan, 0)
     total_days = base_days + extra_days
@@ -6550,10 +7639,12 @@ async def activate_subscription(
     if existing:
         # Продлеваем: добавляем дни к текущему expires_at
         existing.expires_at = existing.expires_at + timedelta(days=total_days)
+
         # Обновляем план только если это НЕ реферальный бонус
-        # (чтобы не перезаписать "monthly" на "referral_bonus")
-        if source != "referral":
+        # и НЕ админский бонус (чтобы не перезаписать "monthly" на "referral_bonus" / "admin_bonus")
+        if source not in ("referral", "admin"):
             existing.plan = plan
+
         if payment_id:
             existing.payment_id = payment_id
 
@@ -6581,7 +7672,6 @@ async def activate_subscription(
 
     # Создаём новую подписку
     expires_at = now + timedelta(days=total_days)
-
     sub = Subscription(
         user_id=user_id,
         plan=plan,
@@ -6644,7 +7734,6 @@ async def expire_subscriptions(db: AsyncSession) -> int:
     """
     Фоновая задача: переводит истёкшие подписки в статус 'expired'.
     Вызывается периодически (например, каждый час).
-
     Returns:
         Количество переведённых подписок.
     """
@@ -6659,11 +7748,39 @@ async def expire_subscriptions(db: AsyncSession) -> int:
     )
     result = await db.execute(stmt)
     count = result.rowcount
-
     if count > 0:
         logger.info(f"[SUBSCRIPTION] Expired {count} subscriptions")
-
     return count
+
+
+async def get_admin_bonus_notification(db: AsyncSession, user_id: int) -> dict | None:
+    """
+    Проверяет, есть ли недавнее начисление дней от администратора.
+    Используется для показа баннера на дашборде.
+    Показывает уведомление в течение 30 дней после начисления.
+
+    Returns:
+        {"days": int, "granted_at": datetime} или None
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    stmt = (
+        select(Event)
+        .where(
+            Event.user_id == user_id,
+            Event.type == "admin_days_granted",
+            Event.created_at >= cutoff,
+        )
+        .order_by(Event.created_at.desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    event = result.scalar_one_or_none()
+    if not event:
+        return None
+    return {
+        "days": event.payload.get("days", 0),
+        "granted_at": event.created_at,
+    }
 
 
 def get_plan_price_kop(plan: str) -> int:
@@ -6681,9 +7798,493 @@ def get_plan_label(plan: str) -> str:
         "monthly": "Месячная подписка",
         "six_months": "Подписка на 6 месяцев",
         "referral_bonus": "Бонус по реферальной программе",
+        "admin_bonus": "Бонус от администратора",
     }
     return labels.get(plan, plan)
 ### end of app/services/subscription.py ########################################################################
+
+### app/services/support.py ########################################################################
+# app/services/support.py
+"""Сервис работы с обращениями в поддержку."""
+import logging
+from datetime import datetime, timezone
+from sqlalchemy import select, func, case, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.user import User
+from app.models.support_ticket import SupportTicket
+from app.models.support_message import SupportMessage
+from app.models.partner import Partner
+
+logger = logging.getLogger(__name__)
+
+VALID_CATEGORIES = {"question", "suggestion", "problem", "other"}
+VALID_STATUSES = {"open", "in_progress", "resolved", "closed"}
+
+CATEGORY_LABELS = {
+    "question": "Вопрос",
+    "suggestion": "Предложение",
+    "problem": "Проблема",
+    "other": "Другое",
+}
+
+STATUS_LABELS = {
+    "open": "Открыт",
+    "in_progress": "В работе",
+    "resolved": "Решён",
+    "closed": "Закрыт",
+}
+
+MAX_MESSAGE_LENGTH = 5000
+MAX_SUBJECT_LENGTH = 200
+
+
+# ============================================================
+# ВАЛИДАЦИЯ
+# ============================================================
+def validate_ticket_input(category: str, subject: str, content: str) -> list[str]:
+    """Валидирует данные для создания тикета."""
+    errors: list[str] = []
+    if category not in VALID_CATEGORIES:
+        errors.append("Некорректная категория")
+    subject = (subject or "").strip()
+    if not subject:
+        errors.append("Укажите тему обращения")
+    elif len(subject) > MAX_SUBJECT_LENGTH:
+        errors.append(f"Тема слишком длинная (максимум {MAX_SUBJECT_LENGTH} символов)")
+    content = (content or "").strip()
+    if not content:
+        errors.append("Напишите сообщение")
+    elif len(content) > MAX_MESSAGE_LENGTH:
+        errors.append(f"Сообщение слишком длинное (максимум {MAX_MESSAGE_LENGTH} символов)")
+    return errors
+
+
+def validate_message_content(content: str) -> str | None:
+    """Валидирует текст сообщения. Возвращает ошибку или None."""
+    content = (content or "").strip()
+    if not content:
+        return "Сообщение не может быть пустым"
+    if len(content) > MAX_MESSAGE_LENGTH:
+        return f"Сообщение слишком длинное (максимум {MAX_MESSAGE_LENGTH} символов)"
+    return None
+
+
+# ============================================================
+# СОЗДАНИЕ ТИКЕТА
+# ============================================================
+async def create_ticket(
+    db: AsyncSession,
+    user: User,
+    *,
+    category: str,
+    subject: str,
+    content: str,
+) -> SupportTicket:
+    """Создаёт новый тикет с первым сообщением."""
+    errors = validate_ticket_input(category, subject, content)
+    if errors:
+        raise ValueError(" ".join(errors))
+
+    now = datetime.now(timezone.utc)
+    ticket = SupportTicket(
+        user_id=user.id,
+        category=category.strip(),
+        subject=subject.strip(),
+        status="open",
+        last_user_message_at=now,
+        user_last_viewed_at=now,
+    )
+    db.add(ticket)
+    await db.flush()
+
+    message = SupportMessage(
+        ticket_id=ticket.id,
+        author_id=user.id,
+        content=content.strip(),
+    )
+    db.add(message)
+    await db.flush()
+
+    logger.info(
+        f"[SUPPORT] Ticket #{ticket.id} created by user {user.id}, "
+        f"category={category}"
+    )
+    return ticket
+
+
+# ============================================================
+# ОТВЕТ В ТИКЕТЕ
+# ============================================================
+async def add_user_reply(
+    db: AsyncSession,
+    user: User,
+    ticket_id: int,
+    content: str,
+) -> SupportTicket:
+    """Пользователь пишет сообщение в свой тикет."""
+    error = validate_message_content(content)
+    if error:
+        raise ValueError(error)
+
+    ticket = await _get_user_ticket(db, user.id, ticket_id)
+    if not ticket:
+        raise ValueError("Тикет не найден")
+
+    now = datetime.now(timezone.utc)
+    message = SupportMessage(
+        ticket_id=ticket.id,
+        author_id=user.id,
+        content=content.strip(),
+    )
+    db.add(message)
+
+    ticket.last_user_message_at = now
+    ticket.user_last_viewed_at = now
+    # Если тикет был resolved/closed — возвращаем в open
+    if ticket.status in ("resolved", "closed"):
+        ticket.status = "open"
+        ticket.closed_at = None
+
+    await db.flush()
+    await db.refresh(ticket)
+    return ticket
+
+
+async def add_admin_reply(
+    db: AsyncSession,
+    admin: User,
+    ticket_id: int,
+    content: str,
+) -> SupportTicket:
+    """Админ пишет сообщение в тикет."""
+    error = validate_message_content(content)
+    if error:
+        raise ValueError(error)
+
+    ticket = await _get_ticket_by_id(db, ticket_id)
+    if not ticket:
+        raise ValueError("Тикет не найден")
+
+    now = datetime.now(timezone.utc)
+    message = SupportMessage(
+        ticket_id=ticket.id,
+        author_id=admin.id,
+        content=content.strip(),
+    )
+    db.add(message)
+
+    ticket.last_admin_message_at = now
+    ticket.admin_last_viewed_at = now
+    # Авто-перевод в in_progress если был open
+    if ticket.status == "open":
+        ticket.status = "in_progress"
+
+    await db.flush()
+    await db.refresh(ticket)
+    return ticket
+
+
+# ============================================================
+# ПРОСМОТР ТИКЕТА (отметка "прочитано")
+# ============================================================
+async def mark_ticket_viewed_by_user(
+    db: AsyncSession,
+    user: User,
+    ticket_id: int,
+) -> SupportTicket | None:
+    """Пользователь открыл тикет — обновляем user_last_viewed_at."""
+    ticket = await _get_user_ticket(db, user.id, ticket_id)
+    if not ticket:
+        return None
+    ticket.user_last_viewed_at = datetime.now(timezone.utc)
+    await db.flush()
+    await db.refresh(ticket)
+    return ticket
+
+
+async def mark_ticket_viewed_by_admin(
+    db: AsyncSession,
+    ticket_id: int,
+) -> SupportTicket | None:
+    """Админ открыл тикет — обновляем admin_last_viewed_at."""
+    ticket = await _get_ticket_by_id(db, ticket_id)
+    if not ticket:
+        return None
+    ticket.admin_last_viewed_at = datetime.now(timezone.utc)
+    await db.flush()
+    await db.refresh(ticket)
+    return ticket
+
+
+# ============================================================
+# СМЕНА СТАТУСА (только админ)
+# ============================================================
+async def change_ticket_status(
+    db: AsyncSession,
+    admin: User,
+    ticket_id: int,
+    new_status: str,
+) -> SupportTicket:
+    """Админ меняет статус тикета."""
+    if new_status not in VALID_STATUSES:
+        raise ValueError("Некорректный статус")
+
+    ticket = await _get_ticket_by_id(db, ticket_id)
+    if not ticket:
+        raise ValueError("Тикет не найден")
+
+    ticket.status = new_status
+    if new_status == "closed":
+        ticket.closed_at = datetime.now(timezone.utc)
+    else:
+        ticket.closed_at = None
+
+    await db.flush()
+    await db.refresh(ticket)
+    logger.info(
+        f"[SUPPORT] Ticket #{ticket.id} status changed to {new_status} "
+        f"by admin {admin.id}"
+    )
+    return ticket
+
+
+# ============================================================
+# УДАЛЕНИЕ СООБЩЕНИЯ (только админ, soft delete)
+# ============================================================
+async def delete_message(
+    db: AsyncSession,
+    admin: User,
+    message_id: int,
+) -> SupportMessage:
+    """Админ удаляет сообщение (soft delete)."""
+    stmt = select(SupportMessage).where(SupportMessage.id == message_id)
+    result = await db.execute(stmt)
+    message = result.scalar_one_or_none()
+    if not message:
+        raise ValueError("Сообщение не найдено")
+    if message.is_deleted:
+        raise ValueError("Сообщение уже удалено")
+
+    message.is_deleted = True
+    message.deleted_at = datetime.now(timezone.utc)
+    message.deleted_by_admin_id = admin.id
+    await db.flush()
+    await db.refresh(message)
+    logger.info(
+        f"[SUPPORT] Message #{message.id} deleted by admin {admin.id}"
+    )
+    return message
+
+
+# ============================================================
+# СПИСКИ ТИКЕТОВ
+# ============================================================
+async def get_user_tickets(
+    db: AsyncSession,
+    user: User,
+) -> list[dict]:
+    """Возвращает список тикетов пользователя с метаданными."""
+    stmt = (
+        select(SupportTicket)
+        .where(SupportTicket.user_id == user.id)
+        .order_by(SupportTicket.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    tickets = result.scalars().all()
+
+    items = []
+    for t in tickets:
+        msg_count_stmt = select(func.count(SupportMessage.id)).where(
+            SupportMessage.ticket_id == t.id,
+            SupportMessage.is_deleted == False,  # noqa: E712
+        )
+        msg_count = (await db.execute(msg_count_stmt)).scalar_one() or 0
+
+        unread = False
+        if t.last_admin_message_at and (
+            t.user_last_viewed_at is None
+            or t.last_admin_message_at > t.user_last_viewed_at
+        ):
+            unread = True
+
+        items.append({
+            "ticket": t,
+            "messages_count": msg_count,
+            "unread": unread,
+            "category_label": CATEGORY_LABELS.get(t.category, t.category),
+            "status_label": STATUS_LABELS.get(t.status, t.status),
+        })
+    return items
+
+
+async def get_admin_tickets(
+    db: AsyncSession,
+    *,
+    status_filter: str | None = None,
+    category_filter: str | None = None,
+) -> list[dict]:
+    """Возвращает список всех тикетов для админа."""
+    stmt = select(SupportTicket, User.email, User.id.label("author_id"))
+    stmt = stmt.join(User, SupportTicket.user_id == User.id)
+
+    if status_filter and status_filter in VALID_STATUSES:
+        stmt = stmt.where(SupportTicket.status == status_filter)
+    if category_filter and category_filter in VALID_CATEGORIES:
+        stmt = stmt.where(SupportTicket.category == category_filter)
+
+    sort_expr = case(
+        (SupportTicket.status == "open", 0),
+        (SupportTicket.status == "in_progress", 1),
+        (SupportTicket.status == "resolved", 2),
+        (SupportTicket.status == "closed", 3),
+        else_=4,
+    )
+    stmt = stmt.order_by(
+        sort_expr,
+        func.coalesce(SupportTicket.last_user_message_at, SupportTicket.created_at).desc(),
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    # Получаем ID всех пользователей для проверки партнёрства
+    user_ids = [r.author_id for r in rows]
+    partner_user_ids: set[int] = set()
+    if user_ids:
+        partner_stmt = select(Partner.user_id).where(
+            Partner.user_id.in_(user_ids),
+            Partner.is_active == True,  # noqa: E712
+        )
+        partner_result = await db.execute(partner_stmt)
+        partner_user_ids = set(partner_result.scalars().all())
+
+    items = []
+    for ticket, email, author_id in rows:
+        unread = False
+        if ticket.last_user_message_at and (
+            ticket.admin_last_viewed_at is None
+            or ticket.last_user_message_at > ticket.admin_last_viewed_at
+        ):
+            unread = True
+
+        items.append({
+            "ticket": ticket,
+            "user_email": email,
+            "is_partner": author_id in partner_user_ids,
+            "unread": unread,
+            "category_label": CATEGORY_LABELS.get(ticket.category, ticket.category),
+            "status_label": STATUS_LABELS.get(ticket.status, ticket.status),
+        })
+    return items
+
+
+# ============================================================
+# ПРОСМОТР ОДНОГО ТИКЕТА С СООБЩЕНИЯМИ
+# ============================================================
+async def get_ticket_with_messages(
+    db: AsyncSession,
+    ticket_id: int,
+) -> dict | None:
+    """Возвращает тикет со всеми сообщениями и авторами."""
+    ticket = await _get_ticket_by_id(db, ticket_id)
+    if not ticket:
+        return None
+
+    user_stmt = select(User).where(User.id == ticket.user_id)
+    user_result = await db.execute(user_stmt)
+    ticket_user = user_result.scalar_one_or_none()
+
+    is_partner = False
+    if ticket_user:
+        partner_stmt = select(Partner.id).where(
+            Partner.user_id == ticket_user.id,
+            Partner.is_active == True,  # noqa: E712
+        )
+        partner_result = await db.execute(partner_stmt)
+        is_partner = partner_result.scalar_one_or_none() is not None
+
+    msg_stmt = (
+        select(SupportMessage, User.email, User.is_admin)
+        .join(User, SupportMessage.author_id == User.id)
+        .where(SupportMessage.ticket_id == ticket_id)
+        .order_by(SupportMessage.created_at.asc())
+    )
+    msg_result = await db.execute(msg_stmt)
+    messages = []
+    for message, author_email, author_is_admin in msg_result.all():
+        messages.append({
+            "message": message,
+            "author_email": author_email,
+            "is_admin": author_is_admin,
+        })
+
+    return {
+        "ticket": ticket,
+        "ticket_user": ticket_user,
+        "is_partner": is_partner,
+        "messages": messages,
+        "category_label": CATEGORY_LABELS.get(ticket.category, ticket.category),
+        "status_label": STATUS_LABELS.get(ticket.status, ticket.status),
+    }
+
+
+# ============================================================
+# СЧЁТЧИКИ НЕПРОЧИТАННЫХ
+# ============================================================
+async def get_user_unread_count(db: AsyncSession, user_id: int) -> int:
+    """Количество тикетов пользователя с непрочитанными ответами админа."""
+    stmt = select(func.count(SupportTicket.id)).where(
+        SupportTicket.user_id == user_id,
+        SupportTicket.last_admin_message_at.isnot(None),
+        or_(
+            SupportTicket.user_last_viewed_at.is_(None),
+            SupportTicket.last_admin_message_at > SupportTicket.user_last_viewed_at,
+        ),
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one() or 0
+
+
+async def get_admin_unread_count(db: AsyncSession) -> int:
+    """Количество тикетов с непрочитанными сообщениями от пользователей."""
+    stmt = select(func.count(SupportTicket.id)).where(
+        SupportTicket.status.in_(("open", "in_progress")),
+        SupportTicket.last_user_message_at.isnot(None),
+        or_(
+            SupportTicket.admin_last_viewed_at.is_(None),
+            SupportTicket.last_user_message_at > SupportTicket.admin_last_viewed_at,
+        ),
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one() or 0
+
+
+# ============================================================
+# ВНУТРЕННИЕ ХЕЛПЕРЫ
+# ============================================================
+async def _get_user_ticket(
+    db: AsyncSession,
+    user_id: int,
+    ticket_id: int,
+) -> SupportTicket | None:
+    """Получает тикет, принадлежащий пользователю."""
+    stmt = select(SupportTicket).where(
+        SupportTicket.id == ticket_id,
+        SupportTicket.user_id == user_id,
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def _get_ticket_by_id(
+    db: AsyncSession,
+    ticket_id: int,
+) -> SupportTicket | None:
+    """Получает тикет по ID (для админа)."""
+    stmt = select(SupportTicket).where(SupportTicket.id == ticket_id)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+### end of app/services/support.py ########################################################################
 
 ### app/services/vocabulary.py ########################################################################
 """Сервис для работы со словарём пользователя."""
@@ -8756,6 +10357,120 @@ tbody tr:last-child td { border-bottom: none; }
   .pagination a { min-width: 32px; height: 32px; font-size: 0.875rem; }
   .grid-3--compact { gap: 0.375rem; }
 }
+
+/* ============================================
+SUPPORT TICKETS (обращения в поддержку)
+============================================ */
+.support-ticket-card {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.125rem;
+    background: var(--surface-0);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: inherit;
+    transition: all var(--transition-fast);
+}
+.support-ticket-card:hover {
+    border-color: var(--brand-primary-light);
+    box-shadow: var(--shadow-sm);
+    transform: translateX(2px);
+}
+.support-ticket-card--unread {
+    border-left: 3px solid var(--brand-primary);
+    background: rgba(99, 102, 241, 0.03);
+}
+
+.support-message {
+    padding: 0.875rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-light);
+    background: var(--surface-0);
+    position: relative;
+    margin-bottom: 0.75rem;
+}
+.support-message--own {
+    background: rgba(99, 102, 241, 0.04);
+    border-color: rgba(99, 102, 241, 0.2);
+    margin-left: 1.5rem;
+}
+.support-message--user {
+    background: var(--surface-50);
+    margin-right: 1.5rem;
+}
+.support-message--admin {
+    background: rgba(236, 72, 153, 0.04);
+    border-color: rgba(236, 72, 153, 0.2);
+    margin-right: 1.5rem;
+}
+.support-message--deleted {
+    background: var(--surface-50);
+    border: 1px dashed var(--border-medium);
+    padding: 0.625rem 1rem;
+    opacity: 0.7;
+}
+.support-message__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.375rem;
+    font-size: 0.8125rem;
+}
+.support-message__body {
+    color: var(--text-primary);
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.9375rem;
+}
+.support-message__admin-actions {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+.support-message:hover .support-message__admin-actions {
+    opacity: 1;
+}
+.support-message__delete-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-error-strong);
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: none;
+}
+.support-message__delete-btn:hover {
+    background: var(--bg-error);
+    transform: none;
+}
+
+.nav-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1;
+    color: white;
+    background: var(--brand-primary);
+    border-radius: var(--radius-full);
+    margin-left: 0.25rem;
+}
+.nav-badge--admin {
+    background: var(--brand-secondary);
+}
 ### end of app/static/css/custom.css ########################################################################
 
 ### app/static/favicon/site.webmanifest ########################################################################
@@ -9179,6 +10894,699 @@ async function copyToClipboard(text) {
 {% endblock %}
 ### end of app/templates/admin/stats.html ########################################################################
 
+### app/templates/admin/support_list.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Админ — Обращения в поддержку{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+    <div class="section-header">
+        <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="message-circle" style="width: 24px; height: 24px; color: var(--brand-primary);" aria-hidden="true"></i>
+            Обращения в поддержку
+        </h1>
+    </div>
+
+    {# Фильтры #}
+    <form method="GET" action="/admin/support" class="card mb-3" style="padding: 0.875rem 1rem;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.75rem; align-items: end;">
+            <div>
+                <label for="status" style="margin-bottom: 0.25rem; font-size: 0.75rem;">Статус</label>
+                <select id="status" name="status" style="min-width: 150px;">
+                    <option value="">Все</option>
+                    {% for s in valid_statuses %}
+                        <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>
+                            {{ status_labels[s] }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="category" style="margin-bottom: 0.25rem; font-size: 0.75rem;">Категория</label>
+                <select id="category" name="category" style="min-width: 150px;">
+                    <option value="">Все</option>
+                    {% for c in valid_categories %}
+                        <option value="{{ c }}" {% if category_filter == c %}selected{% endif %}>
+                            {{ category_labels[c] }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit">Применить</button>
+        </div>
+    </form>
+
+    {% if not tickets %}
+        <div class="card text-center" style="padding: 3rem;">
+            <p style="color: var(--text-muted);">Обращений не найдено</p>
+        </div>
+    {% else %}
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Тема</th>
+                        <th>Пользователь</th>
+                        <th>Категория</th>
+                        <th>Статус</th>
+                        <th>Обновлено</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in tickets %}
+                        {% set t = item.ticket %}
+                        {% set status_class = 'badge-mastered' if t.status == 'resolved' else ('badge-ignored' if t.status == 'closed' else ('badge-active' if t.status == 'in_progress' else 'badge-new')) %}
+                        <tr style="{% if item.unread %}background: rgba(99, 102, 241, 0.04); font-weight: 500;{% endif %}">
+                            <td>
+                                <a href="/admin/support/{{ t.id }}" style="font-weight: 600; color: var(--text-primary); text-decoration: none;">
+                                    {% if item.unread %}
+                                        <span style="display: inline-block; width: 6px; height: 6px; background: var(--brand-primary); border-radius: 50%; margin-right: 0.375rem; vertical-align: middle;" title="Непрочитано"></span>
+                                    {% endif %}
+                                    {{ t.subject }}
+                                </a>
+                                {% if item.is_partner %}
+                                    <span class="badge badge-review" style="margin-left: 0.375rem; font-size: 0.625rem;">Партнёр</span>
+                                {% endif %}
+                            </td>
+                            <td style="font-size: 0.8125rem; color: var(--text-secondary);">{{ item.user_email }}</td>
+                            <td><span class="badge badge-review">{{ item.category_label }}</span></td>
+                            <td><span class="badge {{ status_class }}">{{ item.status_label }}</span></td>
+                            <td style="font-size: 0.8125rem; color: var(--text-muted);">
+                                {{ (t.last_user_message_at or t.created_at).strftime('%d.%m %H:%M') }}
+                            </td>
+                            <td>
+                                <a href="/admin/support/{{ t.id }}" class="secondary btn--sm">Открыть</a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.75rem;">
+            Всего обращений: {{ tickets|length }}
+        </p>
+    {% endif %}
+</div>
+{% endblock %}
+### end of app/templates/admin/support_list.html ########################################################################
+
+### app/templates/admin/support_ticket.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Обращение #{{ ticket.id }} — Админ{% endblock %}
+{% block content %}
+{% set is_admin_view = true %}
+<div class="container--narrow" style="margin: 2rem auto;">
+    <p style="margin-bottom: 1rem;">
+        <a href="/admin/support" style="display: inline-flex; align-items: center; gap: 0.375rem; color: var(--text-secondary);">
+            <i data-lucide="arrow-left" class="icon-sm" aria-hidden="true"></i>
+            К списку обращений
+        </a>
+    </p>
+
+    {# Шапка с информацией о тикете #}
+    <div class="card mb-3">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+            <div style="flex: 1; min-width: 0;">
+                <h2 style="margin: 0 0 0.5rem 0; font-size: 1.25rem; word-break: break-word;">
+                    {{ ticket.subject }}
+                </h2>
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; color: var(--text-muted); font-size: 0.8125rem;">
+                    {% set status_class = 'badge-mastered' if ticket.status == 'resolved' else ('badge-ignored' if ticket.status == 'closed' else ('badge-active' if ticket.status == 'in_progress' else 'badge-new')) %}
+                    <span class="badge {{ status_class }}">{{ status_label }}</span>
+                    <span class="badge badge-review">{{ category_label }}</span>
+                    <span>·</span>
+                    <span>
+                        <i data-lucide="user" class="icon-xs" style="vertical-align: middle;" aria-hidden="true"></i>
+                        {{ ticket_user.email if ticket_user else '—' }}
+                    </span>
+                    {% if is_partner %}
+                        <span class="badge badge-review">Партнёр</span>
+                    {% endif %}
+                    <span>·</span>
+                    <span>{{ ticket.created_at.strftime('%d.%m.%Y в %H:%M') }}</span>
+                </div>
+            </div>
+        </div>
+
+        {# Смена статуса #}
+        <form method="POST" action="/admin/support/{{ ticket.id }}/status"
+              style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding-top: 0.75rem; border-top: 1px solid var(--border-light);">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <label for="new_status" style="margin: 0; font-size: 0.8125rem; color: var(--text-secondary);">Статус:</label>
+            <select id="new_status" name="new_status" style="min-width: 160px;">
+                {% for s in valid_statuses %}
+                    <option value="{{ s }}" {% if ticket.status == s %}selected{% endif %}>
+                        {{ status_labels[s] }}
+                    </option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="secondary btn--sm">
+                <i data-lucide="save" class="icon-xs" aria-hidden="true"></i>
+                Сохранить
+            </button>
+        </form>
+    </div>
+
+    {# Переписка #}
+    <div id="support-messages">
+        {% include "support/_messages.html" %}
+    </div>
+
+    {# Форма ответа админа #}
+    <div class="card mt-3">
+        <form hx-post="/admin/support/{{ ticket.id }}/reply"
+              hx-target="#support-messages"
+              hx-swap="innerHTML"
+              hx-indicator="#admin-reply-spinner">
+            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+            <label for="admin-reply-content" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                <i data-lucide="shield-check" class="icon-md" style="color: var(--brand-secondary);" aria-hidden="true"></i>
+                <strong>Ответ поддержки</strong>
+            </label>
+            <textarea id="admin-reply-content"
+                      name="content"
+                      rows="4"
+                      required
+                      maxlength="{{ max_message_length }}"
+                      placeholder="Напишите ответ пользователю..."
+                      style="margin-bottom: 0.75rem;"></textarea>
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;">
+                <div style="color: var(--text-muted); font-size: 0.75rem;">
+                    Макс. {{ max_message_length }} симв.
+                </div>
+                <button type="submit" hx-disabled-elt="this">
+                    <i data-lucide="send" class="icon-sm" aria-hidden="true"></i>
+                    Отправить
+                </button>
+            </div>
+            <span class="htmx-indicator" id="admin-reply-spinner" style="margin-top: 0.5rem;">
+                <span class="spinner"></span>
+                <span>Отправка...</span>
+            </span>
+        </form>
+    </div>
+</div>
+
+<script>
+document.body.addEventListener('supportReplySent', function() {
+    var ta = document.getElementById('admin-reply-content');
+    if (ta) { ta.value = ''; }
+});
+</script>
+{% endblock %}
+### end of app/templates/admin/support_ticket.html ########################################################################
+
+### app/templates/admin/user_stats.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Админ — Статистика пользователей{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+
+    <div class="section-header">
+        <h1 style="margin: 0;">📊 Статистика пользователей</h1>
+        <a href="/admin/prompts" class="secondary">
+            <i data-lucide="shield" class="icon-md" aria-hidden="true"></i> Промпты
+        </a>
+    </div>
+
+    <!-- Вкладки -->
+    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 2px solid var(--border-light); padding-bottom: 0;">
+        <a href="/admin/users"
+           style="padding: 0.625rem 1.25rem; text-decoration: none; font-weight: 600; border-radius: var(--radius-md) var(--radius-md) 0 0;
+                  {% if active_tab == 'search' %}
+                  background: var(--brand-primary); color: white;
+                  {% else %}
+                  background: transparent; color: var(--text-secondary);
+                  {% endif %}">
+            <i data-lucide="search" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
+            Поиск
+        </a>
+        <a href="/admin/users/stats"
+           style="padding: 0.625rem 1.25rem; text-decoration: none; font-weight: 600; border-radius: var(--radius-md) var(--radius-md) 0 0;
+                  {% if active_tab == 'stats' %}
+                  background: var(--brand-primary); color: white;
+                  {% else %}
+                  background: transparent; color: var(--text-secondary);
+                  {% endif %}">
+            <i data-lucide="bar-chart-3" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
+            Статистика
+        </a>
+    </div>
+
+    <!-- ==================== СВОДКА ==================== -->
+    <div class="grid grid-4" style="margin-bottom: 1.5rem;">
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.total }}</div>
+            <div class="stat-card__label">Всего пользователей</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.onboarded }}</div>
+            <div class="stat-card__label">Прошли онбординг</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.premium }}</div>
+            <div class="stat-card__label">Premium активных</div>
+            <div class="stat-card__sublabel">Конверсия: {{ stats.summary.conversion_pct }}%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.partners }}</div>
+            <div class="stat-card__label">Партнёров активных</div>
+        </div>
+    </div>
+
+    <div class="grid grid-4" style="margin-bottom: 2rem;">
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.new_today }}</div>
+            <div class="stat-card__label">Новых сегодня</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.new_7d }}</div>
+            <div class="stat-card__label">Новых за 7 дней</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.summary.new_30d }}</div>
+            <div class="stat-card__label">Новых за 30 дней</div>
+        </div>
+        <div class="stat-card" style="border-color: {% if stats.activity.churn_14d > 0 %}var(--bg-warning-border){% endif %};">
+            <div class="stat-card__value" style="color: {% if stats.activity.churn_14d > 0 %}var(--text-warning-strong){% endif %};">
+                {{ stats.activity.churn_14d }}
+            </div>
+            <div class="stat-card__label">Churn risk (14+ дней)</div>
+        </div>
+    </div>
+
+    <!-- ==================== АКТИВНОСТЬ ==================== -->
+    <div class="grid grid-3" style="margin-bottom: 2rem;">
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.activity.dau }}</div>
+            <div class="stat-card__label">DAU (сегодня)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.activity.wau }}</div>
+            <div class="stat-card__label">WAU (7 дней)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-card__value">{{ stats.activity.mau }}</div>
+            <div class="stat-card__label">MAU (30 дней)</div>
+        </div>
+    </div>
+
+    <!-- ==================== ГРАФИК РЕГИСТРАЦИЙ ==================== -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0;">Регистрации за последние 30 дней</h3>
+        {% set chart = stats.registrations_chart %}
+        {% set max_count = chart | map(attribute='count') | max %}
+        {% set chart_height = 120 %}
+        {% set chart_width = 600 %}
+        {% set bar_gap = 2 %}
+        {% set bar_width = (chart_width - (chart | length - 1) * bar_gap) / (chart | length) %}
+
+        <svg viewBox="0 0 {{ chart_width }} {{ chart_height + 30 }}" style="width: 100%; height: auto;" role="img" aria-label="График регистраций за последние 30 дней">
+            <!-- Горизонтальная линия основания -->
+            <line x1="0" y1="{{ chart_height }}" x2="{{ chart_width }}" y2="{{ chart_height }}" stroke="var(--border-light)" stroke-width="1"/>
+
+            {% for item in chart %}
+            {% set bar_height = (item.count / max_count * (chart_height - 10)) | int if max_count > 0 else 0 %}
+            {% set x = loop.index0 * (bar_width + bar_gap) %}
+            {% set y = chart_height - bar_height %}
+
+            {% if item.count > 0 %}
+            <rect x="{{ x }}" y="{{ y }}" width="{{ bar_width }}" height="{{ bar_height }}"
+                  fill="var(--brand-primary)" rx="1" opacity="0.8">
+                <title>{{ item.label }}: {{ item.count }}</title>
+            </rect>
+            {% endif %}
+
+            <!-- Подпись каждой 5-й даты -->
+            {% if loop.index0 % 5 == 0 %}
+            <text x="{{ x + bar_width / 2 }}" y="{{ chart_height + 15 }}"
+                  font-size="8" fill="var(--text-muted)" text-anchor="middle">
+                {{ item.label }}
+            </text>
+            {% endif %}
+            {% endfor %}
+        </svg>
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.5rem;">
+            Максимум за день: {{ max_count }}
+        </p>
+    </div>
+
+    <!-- ==================== РАСПРЕДЕЛЕНИЯ ==================== -->
+    <div class="grid grid-2" style="margin-bottom: 2rem;">
+        <!-- Уровни -->
+        <div class="card">
+            <h3 style="margin-top: 0;">Уровни</h3>
+            {% set levels = stats.levels %}
+            {% set total_levels = levels.values() | sum %}
+            <table>
+                <thead>
+                    <tr><th>Уровень</th><th style="text-align: right;">Кол-во</th><th>Доля</th></tr>
+                </thead>
+                <tbody>
+                    {% for lvl, cnt in levels.items() %}
+                    {% if cnt > 0 %}
+                    <tr>
+                        <td><strong>{{ lvl }}</strong></td>
+                        <td style="text-align: right;">{{ cnt }}</td>
+                        <td>
+                            <div style="background: var(--surface-100); border-radius: var(--radius-full); height: 8px; width: 100%;">
+                                <div style="background: var(--brand-primary); border-radius: var(--radius-full); height: 8px; width: {{ (cnt / total_levels * 100) | int }}%;"></div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Словари -->
+        <div class="card">
+            <h3 style="margin-top: 0;">Словари</h3>
+            {% set dicts = stats.dictionaries %}
+            {% set total_dicts = dicts.values() | sum %}
+            <table>
+                <thead>
+                    <tr><th>Словарь</th><th style="text-align: right;">Кол-во</th><th>Доля</th></tr>
+                </thead>
+                <tbody>
+                    {% for name, cnt in dicts.items() %}
+                    {% if cnt > 0 %}
+                    <tr>
+                        <td><strong>{{ name }}</strong></td>
+                        <td style="text-align: right;">{{ cnt }}</td>
+                        <td>
+                            <div style="background: var(--surface-100); border-radius: var(--radius-full); height: 8px; width: 100%;">
+                                <div style="background: var(--brand-secondary); border-radius: var(--radius-full); height: 8px; width: {{ (cnt / total_dicts * 100) | int }}%;"></div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ==================== КОГОРТЫ / RETENTION ==================== -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0;">Когортный анализ (удержание по неделям)</h3>
+        <p style="color: var(--text-muted); font-size: 0.8125rem; margin-top: 0;">
+            Процент пользователей, которые были активны на каждой неделе после регистрации.
+        </p>
+        {% if stats.cohorts %}
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Когорта</th>
+                        <th style="text-align: right;">Размер</th>
+                        <th style="text-align: right;">Неделя 1</th>
+                        <th style="text-align: right;">Неделя 2</th>
+                        <th style="text-align: right;">Неделя 3</th>
+                        <th style="text-align: right;">Неделя 4+</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cohort in stats.cohorts %}
+                    <tr>
+                        <td><strong>{{ cohort.label }}</strong></td>
+                        <td style="text-align: right;">{{ cohort.size }}</td>
+                        {% for pct in cohort.weeks %}
+                        <td style="text-align: right;">
+                            {% if pct is none %}
+                            <span style="color: var(--text-muted);">—</span>
+                            {% else %}
+                            {% set color = 'var(--text-success-strong)' if pct >= 50 else ('var(--text-warning-strong)' if pct >= 25 else 'var(--text-error-strong)') %}
+                            <span style="color: {{ color }}; font-weight: 600;">{{ pct }}%</span>
+                            {% endif %}
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color: var(--text-muted); text-align: center; padding: 2rem 0;">
+            Нет данных для когортного анализа
+        </p>
+        {% endif %}
+    </div>
+
+    <!-- ==================== ТОП-ТАБЛИЦЫ ==================== -->
+    <div class="grid grid-3" style="margin-bottom: 2rem;">
+        <!-- Топ по урокам за неделю -->
+        <div class="card">
+            <h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="book-open" style="width: 16px; height: 16px; color: var(--brand-primary);" aria-hidden="true"></i>
+                Топ по урокам (7 дней)
+            </h4>
+            {% if stats.top_lessons_week %}
+            <table>
+                <thead>
+                    <tr><th>#</th><th>Пользователь</th><th style="text-align: right;">Уроков</th></tr>
+                </thead>
+                <tbody>
+                    {% for item in stats.top_lessons_week %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td style="font-size: 0.8125rem;">{{ item.email }}</td>
+                        <td style="text-align: right; font-weight: 600;">{{ item.value }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: var(--text-muted); text-align: center;">Нет данных</p>
+            {% endif %}
+        </div>
+
+        <!-- Топ по стрикам -->
+        <div class="card">
+            <h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="flame" style="width: 16px; height: 16px; color: var(--text-warning-strong);" aria-hidden="true"></i>
+                Топ по стрикам
+            </h4>
+            {% if stats.top_streaks %}
+            <table>
+                <thead>
+                    <tr><th>#</th><th>Пользователь</th><th style="text-align: right;">Дней</th></tr>
+                </thead>
+                <tbody>
+                    {% for item in stats.top_streaks %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td style="font-size: 0.8125rem;">{{ item.email }}</td>
+                        <td style="text-align: right; font-weight: 600;">🔥 {{ item.value }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: var(--text-muted); text-align: center;">Нет данных</p>
+            {% endif %}
+        </div>
+
+        <!-- Топ по словам -->
+        <div class="card">
+            <h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="book" style="width: 16px; height: 16px; color: var(--color-success);" aria-hidden="true"></i>
+                Топ по активным словам
+            </h4>
+            {% if stats.top_words %}
+            <table>
+                <thead>
+                    <tr><th>#</th><th>Пользователь</th><th style="text-align: right;">Слов</th></tr>
+                </thead>
+                <tbody>
+                    {% for item in stats.top_words %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td style="font-size: 0.8125rem;">{{ item.email }}</td>
+                        <td style="text-align: right; font-weight: 600;">{{ item.value }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: var(--text-muted); text-align: center;">Нет данных</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Примечание -->
+    <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 1rem;">
+        💡 Статистика обновляется при каждом открытии страницы.
+        Для когорт «—» означает, что данные за эту неделю ещё не полные.
+    </p>
+
+</div>
+{% endblock %}
+### end of app/templates/admin/user_stats.html ########################################################################
+
+### app/templates/admin/users.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Админ — Пользователи{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+
+    <div class="section-header">
+        <h1 style="margin: 0;">👤 Пользователи</h1>
+        <a href="/admin/prompts" class="secondary">
+            <i data-lucide="shield" class="icon-md" aria-hidden="true"></i> Промпты
+        </a>
+    </div>
+
+    <!-- Вкладки -->
+    <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem; border-bottom: 2px solid var(--border-light); padding-bottom: 0;">
+        <a href="/admin/users"
+           style="padding: 0.625rem 1.25rem; text-decoration: none; font-weight: 600; border-radius: var(--radius-md) var(--radius-md) 0 0;
+                  {% if active_tab == 'search' %}
+                  background: var(--brand-primary); color: white;
+                  {% else %}
+                  background: transparent; color: var(--text-secondary);
+                  {% endif %}">
+            <i data-lucide="search" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
+            Поиск
+        </a>
+        <a href="/admin/users/stats"
+           style="padding: 0.625rem 1.25rem; text-decoration: none; font-weight: 600; border-radius: var(--radius-md) var(--radius-md) 0 0;
+                  {% if active_tab == 'stats' %}
+                  background: var(--brand-primary); color: white;
+                  {% else %}
+                  background: transparent; color: var(--text-secondary);
+                  {% endif %}">
+            <i data-lucide="bar-chart-3" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
+            Статистика
+        </a>
+    </div>
+
+    <!-- Поиск по email -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0;">Поиск пользователя</h3>
+        <form method="GET" action="/admin/users" style="display: flex; gap: 0.75rem;">
+            <input type="email"
+                   name="email"
+                   value="{{ search_email }}"
+                   placeholder="user@example.com"
+                   required
+                   style="flex: 1;">
+            <button type="submit">
+                <i data-lucide="search" class="icon-sm" aria-hidden="true"></i>
+                Найти
+            </button>
+        </form>
+    </div>
+
+    {% if search_error %}
+    <div class="flash-error">
+        <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
+        {{ search_error }}
+    </div>
+    {% endif %}
+
+    {% if found_user %}
+    <!-- Карточка найденного пользователя -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="user" class="icon-lg" style="color: var(--brand-primary);" aria-hidden="true"></i>
+            {{ found_user.email }}
+        </h3>
+
+        <div class="grid grid-3" style="margin-bottom: 1rem;">
+            <div>
+                <div class="stat-row">ID</div>
+                <div class="stat-row__value">{{ found_user.id }}</div>
+            </div>
+            <div>
+                <div class="stat-row">Регистрация</div>
+                <div class="stat-row__value">{{ found_user.created_at.strftime('%d.%m.%Y') }}</div>
+            </div>
+            <div>
+                <div class="stat-row">Онбординг</div>
+                <div class="stat-row__value">
+                    {% if found_user.is_onboarded %}
+                    <span class="badge badge-mastered">Пройден</span>
+                    {% else %}
+                    <span class="badge badge-ignored">Не пройден</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Подписка -->
+        <div style="padding: 1rem; background: var(--surface-50); border-radius: var(--radius-md); margin-bottom: 1rem;">
+            {% if sub_status.is_premium %}
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                <span class="badge badge-mastered badge--md">
+                    <i data-lucide="crown" class="icon-xs" aria-hidden="true"></i>
+                    Premium активна
+                </span>
+            </div>
+            <div class="grid grid-3">
+                <div>
+                    <div class="stat-row">План</div>
+                    <div class="stat-row__value">{{ sub_status.plan }}</div>
+                </div>
+                <div>
+                    <div class="stat-row">Действует до</div>
+                    <div class="stat-row__value">{{ sub_status.expires_at.strftime('%d.%m.%Y') }}</div>
+                </div>
+                <div>
+                    <div class="stat-row">Осталось дней</div>
+                    <div class="stat-row__value">{{ sub_status.days_left }}</div>
+                </div>
+            </div>
+            <p style="margin: 0.5rem 0 0 0; font-size: 0.75rem; color: var(--text-muted);">
+                Источник: {{ sub_status.source }}
+            </p>
+            {% else %}
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <span class="badge badge-active badge--md">Free</span>
+                <span style="color: var(--text-muted); font-size: 0.875rem;">Подписка не активна</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Форма начисления дней -->
+        <div style="padding: 1rem; border: 2px dashed var(--brand-primary); border-radius: var(--radius-md);">
+            <h4 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="gift" class="icon-lg" style="color: var(--brand-secondary);" aria-hidden="true"></i>
+                Начислить дни Premium
+            </h4>
+            <form method="POST" action="/admin/users/grant-days"
+                  style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <input type="hidden" name="user_id" value="{{ found_user.id }}">
+                <div style="flex: 1; min-width: 120px;">
+                    <label for="days">Количество дней</label>
+                    <input type="number"
+                           id="days"
+                           name="days"
+                           min="1"
+                           required
+                           placeholder="30"
+                           style="width: 100%;">
+                </div>
+                <button type="submit"
+                        onclick="return confirm('Начислить ' + document.getElementById('days').value + ' дн. Premium пользователю {{ found_user.email }}?');">
+                    <i data-lucide="plus" class="icon-sm" aria-hidden="true"></i>
+                    Начислить
+                </button>
+            </form>
+            <p style="margin: 0.5rem 0 0 0; font-size: 0.75rem; color: var(--text-muted);">
+                Дни будут добавлены к текущей подписке или создана новая.
+                План пользователя не изменится.
+            </p>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}
+### end of app/templates/admin/users.html ########################################################################
+
 ### app/templates/auth/login.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Вход — 101slovo{% endblock %}
@@ -9584,27 +11992,56 @@ async function handleCopyPromo(button, code) {
         <h1 class="hero__title">Готов к уроку?</h1>
     </div>
 
+    <!-- Баннер: бонус от администратора -->
+    {% if admin_bonus %}
+        <div class="flash-success mb-3" role="status" style="border-left: 4px solid var(--color-success);">
+            <i data-lucide="gift" class="icon-md" style="color: var(--color-success); flex-shrink: 0;" aria-hidden="true"></i>
+            <span>
+                🎉 Вам начислено <strong>+{{ admin_bonus.days }} дн. Premium</strong>
+                ({{ admin_bonus.granted_at.strftime('%d.%m.%Y') }})
+            </span>
+        </div>
+    {% endif %}
+
+    <!-- Баннер: непрочитанные ответы поддержки -->
+    {% if request.state.unread_support_count > 0 %}
+        <div class="flash-info mb-3" role="status" style="border-left: 4px solid var(--brand-primary);">
+            <i data-lucide="message-circle" class="icon-md" style="color: var(--brand-primary); flex-shrink: 0;" aria-hidden="true"></i>
+            <span>
+                💬 У вас
+                <strong>
+                    {{ request.state.unread_support_count }}
+                    {{ 'новый ответ' if request.state.unread_support_count == 1 else 'новых ответа' if request.state.unread_support_count in [2,3,4] else 'новых ответов' }}
+                    от поддержки
+                </strong>
+            </span>
+            <a href="/support" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">
+                Открыть обращения →
+            </a>
+        </div>
+    {% endif %}
+
     <!-- Subscription banner -->
     {% if subscription.is_premium %}
-    <div class="flash-info mb-3" role="status">
-        <i data-lucide="crown" class="icon-md" style="color: var(--brand-primary);" aria-hidden="true"></i>
-        <span>
-            <strong>Premium</strong> активна до {{ subscription.expires_at.strftime('%d.%m.%Y') }}
-            ({{ subscription.days_left }} дн.)
-        </span>
-        <a href="/billing" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Управление →</a>
-    </div>
+        <div class="flash-info mb-3" role="status">
+            <i data-lucide="crown" class="icon-md" style="color: var(--brand-primary);" aria-hidden="true"></i>
+            <span>
+                <strong>Premium</strong> активна до {{ subscription.expires_at.strftime('%d.%m.%Y') }}
+                ({{ subscription.days_left }} дн.)
+            </span>
+            <a href="/billing" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Управление →</a>
+        </div>
     {% elif paywall.paywall_triggered %}
-    <div class="flash-warning mb-3" role="alert">
-        <i data-lucide="alert-triangle" class="icon-md" aria-hidden="true"></i>
-        <span>Бесплатные уроки исчерпаны.</span>
-        <a href="/billing/plans" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Подключить Premium →</a>
-    </div>
+        <div class="flash-warning mb-3" role="alert">
+            <i data-lucide="alert-triangle" class="icon-md" aria-hidden="true"></i>
+            <span>Бесплатные уроки исчерпаны.</span>
+            <a href="/billing/plans" style="margin-left: auto; font-weight: 600; font-size: 0.8125rem;">Подключить Premium →</a>
+        </div>
     {% elif paywall.free_lessons_remaining is not none %}
-    <div class="flash-info mb-3" role="status">
-        <i data-lucide="info" class="icon-md" aria-hidden="true"></i>
-        <span>Осталось бесплатных уроков: <strong>{{ paywall.free_lessons_remaining }}</strong> из {{ paywall.free_lessons_total }}</span>
-    </div>
+        <div class="flash-info mb-3" role="status">
+            <i data-lucide="info" class="icon-md" aria-hidden="true"></i>
+            <span>Осталось бесплатных уроков: <strong>{{ paywall.free_lessons_remaining }}</strong> из {{ paywall.free_lessons_total }}</span>
+        </div>
     {% endif %}
 
     <!-- Stats Grid -->
@@ -9634,9 +12071,9 @@ async function handleCopyPromo(button, code) {
                 <div class="stat-card__label">Уроков сегодня</div>
                 <div class="stat-card__sublabel">
                     {% if lessons_today >= paywall.effective_daily_limit %}
-                    Лимит достигнут ✓
+                        Лимит достигнут ✓
                     {% else %}
-                    Осталось: {{ paywall.effective_daily_limit - lessons_today }}
+                        Осталось: {{ paywall.effective_daily_limit - lessons_today }}
                     {% endif %}
                 </div>
             </div>
@@ -9647,37 +12084,37 @@ async function handleCopyPromo(button, code) {
     {% if paywall.paywall_triggered %}
         {% include "partials/paywall.html" %}
     {% elif cta == 'resume' %}
-    <div class="cta-section" style="background: var(--gradient-warning);">
-        <h3>⏳ У вас есть незавершённый урок!</h3>
-        <p>Продолжайте с того места, где остановились</p>
-        <a href="/lesson/{{ cta_lesson_id }}" role="button">Продолжить урок →</a>
-    </div>
+        <div class="cta-section" style="background: var(--gradient-warning);">
+            <h3>⏳ У вас есть незавершённый урок!</h3>
+            <p>Продолжайте с того места, где остановились</p>
+            <a href="/lesson/{{ cta_lesson_id }}" role="button">Продолжить урок →</a>
+        </div>
     {% elif cta == 'limit_reached' %}
-    <div class="cta-section" style="background: var(--gradient-success);">
-        <h3>🎉 Отличная работа!</h3>
-        <p>Лимит уроков на сегодня исчерпан. Отдохните — завтра новые вызовы!</p>
-        <a href="/vocabulary" role="button">Повторить слова</a>
-    </div>
+        <div class="cta-section" style="background: var(--gradient-success);">
+            <h3>🎉 Отличная работа!</h3>
+            <p>Лимит уроков на сегодня исчерпан. Отдохните — завтра новые вызовы!</p>
+            <a href="/vocabulary" role="button">Повторить слова</a>
+        </div>
     {% else %}
-    <div class="cta-section">
-        <h3>🚀 Начнём новый урок?</h3>
-        <p>Подберём слова специально для вашего уровня</p>
-        <a href="/lesson/preview" role="button">Подготовиться к уроку</a>
-    </div>
+        <div class="cta-section">
+            <h3>🚀 Начнём новый урок?</h3>
+            <p>Подберём слова специально для вашего уровня</p>
+            <a href="/lesson/preview" role="button">Подготовиться к уроку</a>
+        </div>
     {% endif %}
 
     {% if in_progress_lesson %}
-    <div class="card mt-3">
-        <div class="section-header" style="margin-bottom: 0;">
-            <div>
-                <h4 style="margin: 0 0 0.25rem 0;">📝 Незавершённый урок #{{ in_progress_lesson.lesson_number }}</h4>
-                <p style="margin: 0; color: var(--text-muted); font-size: 0.8125rem;">
-                    Начат {{ in_progress_lesson.started_at.strftime('%d.%m.%Y в %H:%M') }}
-                </p>
+        <div class="card mt-3">
+            <div class="section-header" style="margin-bottom: 0;">
+                <div>
+                    <h4 style="margin: 0 0 0.25rem 0;">📝 Незавершённый урок #{{ in_progress_lesson.lesson_number }}</h4>
+                    <p style="margin: 0; color: var(--text-muted); font-size: 0.8125rem;">
+                        Начат {{ in_progress_lesson.started_at.strftime('%d.%m.%Y в %H:%M') }}
+                    </p>
+                </div>
+                <a href="/lesson/{{ in_progress_lesson.id }}" role="button" class="secondary">Продолжить</a>
             </div>
-            <a href="/lesson/{{ in_progress_lesson.id }}" role="button" class="secondary">Продолжить</a>
         </div>
-    </div>
     {% endif %}
 </div>
 {% endblock %}
@@ -11392,53 +13829,70 @@ button[type="submit"] {
 
 ### app/templates/partials/nav.html ########################################################################
 <nav class="navbar" x-data="{ mobileMenuOpen: false }" aria-label="Основная навигация">
-    <div class="navbar-inner">
-        <a href="/" class="navbar-brand" aria-label="101slovo — на главную">
-            <i data-lucide="book-open" style="width: 20px; height: 20px;" aria-hidden="true"></i>
-            101slovo
-        </a>
-        <button class="navbar-burger"
-                type="button"
-                @click.stop="mobileMenuOpen = !mobileMenuOpen"
-                :aria-expanded="mobileMenuOpen.toString()"
-                aria-controls="mobile-menu"
-                aria-label="Открыть меню навигации">
-            <i data-lucide="menu" x-show="!mobileMenuOpen" style="width: 22px; height: 22px;" aria-hidden="true"></i>
-            <i data-lucide="x" x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
-        </button>
+<div class="navbar-inner">
+    <a href="/" class="navbar-brand" aria-label="101slovo — на главную">
+        <i data-lucide="book-open" style="width: 20px; height: 20px;" aria-hidden="true"></i>
+        101slovo
+    </a>
+    <button class="navbar-burger"
+            type="button"
+            @click.stop="mobileMenuOpen = !mobileMenuOpen"
+            :aria-expanded="mobileMenuOpen.toString()"
+            aria-controls="mobile-menu"
+            aria-label="Открыть меню навигации">
+        <i data-lucide="menu" x-show="!mobileMenuOpen" style="width: 22px; height: 22px;" aria-hidden="true"></i>
+        <i data-lucide="x" x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
+    </button>
 
-        <!-- ===== ДЕСКТОПНОЕ МЕНЮ ===== -->
-        <div class="navbar-menu--desktop">
-            {% if request.state.user %}
+    <!-- ===== ДЕСКТОПНОЕ МЕНЮ ===== -->
+    <div class="navbar-menu--desktop">
+        {% if request.state.user %}
             {% if request.state.user.is_onboarded %}
-            <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
-                <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
-            </a>
-            <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
-                <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
-            </a>
-            <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
-                <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
-            </a>
-            <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
-                <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
-            </a>
+                <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
+                    <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
+                </a>
+                <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
+                    <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+                </a>
+                <a href="/support" class="nav-link {% if '/support' in request.url.path %}active{% endif %}">
+                    <i data-lucide="message-circle" style="width:16px;height:16px" aria-hidden="true"></i>
+                    Поддержка
+                    {% if request.state.unread_support_count > 0 %}
+                        <span class="nav-badge">{{ request.state.unread_support_count }}</span>
+                    {% endif %}
+                </a>
+                <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
+                    <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
+                </a>
+                <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
+                    <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
+                </a>
             {% endif %}
             {% if request.state.is_partner %}
-            <a href="/partner/dashboard" class="nav-link {% if '/partner' in request.url.path %}active{% endif %}">
-                <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Кабинет партнёра
-            </a>
+                <a href="/partner/dashboard" class="nav-link {% if '/partner' in request.url.path %}active{% endif %}">
+                    <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Кабинет партнёра
+                </a>
             {% endif %}
             {% if request.state.user.is_admin %}
-            <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
-                <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
-            </a>
-            <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
-                <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
-            </a>
-            <a href="/admin/partners" class="nav-link nav-link--admin {% if '/admin/partners' in request.url.path %}active{% endif %}">
-                <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Партнёры
-            </a>
+                <a href="/admin/users" class="nav-link nav-link--admin {% if '/admin/users' in request.url.path %}active{% endif %}">
+                    <i data-lucide="users" style="width:16px;height:16px" aria-hidden="true"></i> Пользователи
+                </a>
+                <a href="/admin/support" class="nav-link nav-link--admin {% if '/admin/support' in request.url.path %}active{% endif %}">
+                    <i data-lucide="message-square" style="width:16px;height:16px" aria-hidden="true"></i>
+                    Обращения
+                    {% if request.state.admin_unread_support_count > 0 %}
+                        <span class="nav-badge nav-badge--admin">{{ request.state.admin_unread_support_count }}</span>
+                    {% endif %}
+                </a>
+                <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
+                    <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
+                </a>
+                <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
+                    <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
+                </a>
+                <a href="/admin/partners" class="nav-link nav-link--admin {% if '/admin/partners' in request.url.path %}active{% endif %}">
+                    <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Партнёры
+                </a>
             {% endif %}
             <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
                 <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
@@ -11450,52 +13904,69 @@ button[type="submit"] {
                     <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
                 </button>
             </form>
-            {% else %}
+        {% else %}
             <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
                 <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
                 <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
             </button>
             <a href="/login" class="nav-link">Войти</a>
             <a href="/register" class="nav-link nav-link--primary">Регистрация</a>
-            {% endif %}
-        </div>
+        {% endif %}
     </div>
+</div>
 
-    <!-- ===== МОБИЛЬНОЕ МЕНЮ ===== -->
-    <div class="navbar-mobile-menu"
-         id="mobile-menu"
-         :class="{ 'is-open': mobileMenuOpen }"
-         @click.outside="mobileMenuOpen = false">
-        {% if request.state.user %}
+<!-- ===== МОБИЛЬНОЕ МЕНЮ ===== -->
+<div class="navbar-mobile-menu"
+     id="mobile-menu"
+     :class="{ 'is-open': mobileMenuOpen }"
+     @click.outside="mobileMenuOpen = false">
+    {% if request.state.user %}
         {% if request.state.user.is_onboarded %}
-        <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" @click="mobileMenuOpen = false">
-            <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
-        </a>
-        <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-            <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
-        </a>
-        <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-            <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
-        </a>
-        <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" @click="mobileMenuOpen = false">
-            <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
-        </a>
+            <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" @click="mobileMenuOpen = false">
+                <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
+            </a>
+            <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+                <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+            </a>
+            <a href="/support" class="nav-link {% if '/support' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+                <i data-lucide="message-circle" style="width:16px;height:16px" aria-hidden="true"></i>
+                Поддержка
+                {% if request.state.unread_support_count > 0 %}
+                    <span class="nav-badge">{{ request.state.unread_support_count }}</span>
+                {% endif %}
+            </a>
+            <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+                <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
+            </a>
+            <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" @click="mobileMenuOpen = false">
+                <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
+            </a>
         {% endif %}
         {% if request.state.is_partner %}
-        <a href="/partner/dashboard" class="nav-link {% if '/partner' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-            <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Кабинет партнёра
-        </a>
+            <a href="/partner/dashboard" class="nav-link {% if '/partner' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+                <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Кабинет партнёра
+            </a>
         {% endif %}
         {% if request.state.user.is_admin %}
-        <a href="/admin/prompts" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-            <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
-        </a>
-        <a href="/admin/stats" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-            <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
-        </a>
-        <a href="/admin/partners" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-            <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Партнёры
-        </a>
+            <a href="/admin/users" class="nav-link nav-link--admin {% if '/admin/users' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+                <i data-lucide="users" style="width:16px;height:16px" aria-hidden="true"></i> Пользователи
+            </a>
+            <a href="/admin/support" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+                <i data-lucide="message-square" style="width:16px;height:16px" aria-hidden="true"></i>
+                Обращения
+                {% if request.state.admin_unread_support_count > 0 %}
+                    <span class="nav-badge nav-badge--admin">{{ request.state.admin_unread_support_count }}</span>
+                {% endif %}
+            </a>
+            <a href="/admin/prompts" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+                <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
+            </a>
+            <a href="/admin/stats" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+                <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
+            </a>
+            <a href="/admin/partners" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
+                <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Партнёры
+            </a>
         {% endif %}
         <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
             <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
@@ -11508,7 +13979,7 @@ button[type="submit"] {
                 <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
             </button>
         </form>
-        {% else %}
+    {% else %}
         <a href="/login" class="nav-link" @click="mobileMenuOpen = false">Войти</a>
         <a href="/register" class="nav-link nav-link--primary" @click="mobileMenuOpen = false">Регистрация</a>
         <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
@@ -11516,9 +13987,31 @@ button[type="submit"] {
             <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
             Сменить тему
         </button>
-        {% endif %}
-    </div>
+    {% endif %}
+</div>
 </nav>
+
+<style>
+.nav-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1;
+    color: white;
+    background: var(--brand-primary);
+    border-radius: var(--radius-full);
+    margin-left: 0.25rem;
+}
+.nav-badge--admin {
+    background: var(--brand-secondary);
+}
+</style>
+
 <script>
 function toggleTheme() {
     var html = document.documentElement;
@@ -12026,6 +14519,407 @@ async function handleCopy(button, text) {
 </div>
 {% endblock %}
 ### end of app/templates/settings.html ########################################################################
+
+### app/templates/support/_deleted_message.html ########################################################################
+<div class="support-message support-message--deleted">
+    <div style="color: var(--text-muted); font-size: 0.8125rem; font-style: italic;">
+        <i data-lucide="trash-2" class="icon-sm" style="vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
+        Сообщение удалено
+    </div>
+</div>
+### end of app/templates/support/_deleted_message.html ########################################################################
+
+### app/templates/support/_messages.html ########################################################################
+{# Список сообщений в треде. Используется и пользователем, и админом. #}
+{# Переменные: messages, user, is_admin_view (True/False) #}
+<div style="display: flex; flex-direction: column; gap: 0.75rem;">
+    {% for item in messages %}
+        {% set m = item.message %}
+        {% if m.is_deleted %}
+            <div class="support-message support-message--deleted">
+                <div style="color: var(--text-muted); font-size: 0.8125rem; font-style: italic;">
+                    <i data-lucide="trash-2" class="icon-sm" style="vertical-align: middle; margin-right: 0.25rem;" aria-hidden="true"></i>
+                    Сообщение удалено
+                </div>
+            </div>
+        {% else %}
+            {% set is_own = (m.author_id == user.id) %}
+            {% set is_admin_author = item.is_admin %}
+            {% set bubble_class = 'support-message--admin' if is_admin_author else ('support-message--own' if is_own else 'support-message--user') %}
+            <div class="support-message {{ bubble_class }}">
+                <div class="support-message__header">
+                    <strong>
+                        {% if is_admin_author %}
+                            <i data-lucide="shield-check" class="icon-xs" style="vertical-align: middle; color: var(--brand-secondary);" aria-hidden="true"></i>
+                            Поддержка
+                        {% elif is_own %}
+                            Вы
+                        {% else %}
+                            Пользователь
+                        {% endif %}
+                    </strong>
+                    <span style="color: var(--text-muted); font-size: 0.75rem;">
+                        {{ m.created_at.strftime('%d.%m.%Y в %H:%M') }}
+                    </span>
+                </div>
+                <div class="support-message__body">{{ m.content }}</div>
+                {% if is_admin_view and not is_admin_author %}
+                    <div class="support-message__admin-actions">
+                        <form hx-post="/admin/support/messages/{{ m.id }}/delete"
+                              hx-target="closest .support-message"
+                              hx-swap="outerHTML"
+                              hx-confirm="Удалить это сообщение? Пользователь больше его не увидит."
+                              style="display: inline;">
+                            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                            <button type="submit" class="support-message__delete-btn" title="Удалить сообщение">
+                                <i data-lucide="trash-2" class="icon-xs" aria-hidden="true"></i>
+                            </button>
+                        </form>
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+    {% endfor %}
+</div>
+
+<style>
+.support-message {
+    padding: 0.875rem 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-light);
+    background: var(--surface-0);
+    position: relative;
+}
+.support-message--own {
+    background: rgba(99, 102, 241, 0.04);
+    border-color: rgba(99, 102, 241, 0.2);
+    margin-left: 1.5rem;
+}
+.support-message--user {
+    background: var(--surface-50);
+    margin-right: 1.5rem;
+}
+.support-message--admin {
+    background: rgba(236, 72, 153, 0.04);
+    border-color: rgba(236, 72, 153, 0.2);
+    margin-right: 1.5rem;
+}
+.support-message--deleted {
+    background: var(--surface-50);
+    border: 1px dashed var(--border-medium);
+    padding: 0.625rem 1rem;
+    opacity: 0.7;
+}
+.support-message__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.375rem;
+    font-size: 0.8125rem;
+}
+.support-message__body {
+    color: var(--text-primary);
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.9375rem;
+}
+.support-message__admin-actions {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+.support-message:hover .support-message__admin-actions {
+    opacity: 1;
+}
+.support-message__delete-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-error-strong);
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: none;
+}
+.support-message__delete-btn:hover {
+    background: var(--bg-error);
+    transform: none;
+}
+</style>
+### end of app/templates/support/_messages.html ########################################################################
+
+### app/templates/support/_reply_error.html ########################################################################
+<div class="flash-error" role="alert" style="margin: 0;">
+    <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
+    <span>{{ error }}</span>
+</div>
+### end of app/templates/support/_reply_error.html ########################################################################
+
+### app/templates/support/list.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Мои обращения — 101slovo{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+    <div class="section-header">
+        <div>
+            <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="message-circle" style="width: 24px; height: 24px; color: var(--brand-primary);" aria-hidden="true"></i>
+                Мои обращения
+            </h1>
+            <p style="margin: 0.25rem 0 0 0; color: var(--text-muted); font-size: 0.875rem;">
+                Вопросы, предложения и сообщения о проблемах
+            </p>
+        </div>
+        <a href="/support/new" role="button">
+            <i data-lucide="plus" class="icon-sm" aria-hidden="true"></i>
+            Новое обращение
+        </a>
+    </div>
+
+    {% if not tickets %}
+        <div class="card text-center" style="padding: 3rem 2rem;">
+            <div style="font-size: 3rem; margin-bottom: 0.75rem; opacity: 0.4;">💬</div>
+            <h3 style="margin: 0 0 0.5rem 0;">Обращений пока нет</h3>
+            <p style="color: var(--text-muted); margin-bottom: 1.25rem;">
+                Напишите нам, если есть вопрос, предложение или вы столкнулись с проблемой
+            </p>
+            <a href="/support/new" role="button">Создать обращение</a>
+        </div>
+    {% else %}
+        <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+            {% for item in tickets %}
+                {% set t = item.ticket %}
+                {% set status_class = 'badge-mastered' if t.status == 'resolved' else ('badge-ignored' if t.status == 'closed' else ('badge-active' if t.status == 'in_progress' else 'badge-new')) %}
+                <a href="/support/{{ t.id }}" class="support-ticket-card {% if item.unread %}support-ticket-card--unread{% endif %}">
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.375rem; flex-wrap: wrap;">
+                            <span class="badge {{ status_class }}">{{ item.status_label }}</span>
+                            <span class="badge badge-review">{{ item.category_label }}</span>
+                            {% if item.unread %}
+                                <span class="badge badge-new">Новый ответ</span>
+                            {% endif %}
+                        </div>
+                        <div style="font-weight: 600; font-size: 1rem; color: var(--text-primary); margin-bottom: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            {{ t.subject }}
+                        </div>
+                        <div style="color: var(--text-muted); font-size: 0.8125rem;">
+                            {{ t.created_at.strftime('%d.%m.%Y в %H:%M') }}
+                            · {{ item.messages_count }} сообщ.
+                        </div>
+                    </div>
+                    <i data-lucide="chevron-right" style="width: 18px; height: 18px; color: var(--text-muted); flex-shrink: 0;"></i>
+                </a>
+            {% endfor %}
+        </div>
+    {% endif %}
+</div>
+
+<style>
+.support-ticket-card {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.125rem;
+    background: var(--surface-0);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    color: inherit;
+    transition: all var(--transition-fast);
+}
+.support-ticket-card:hover {
+    border-color: var(--brand-primary-light);
+    box-shadow: var(--shadow-sm);
+    transform: translateX(2px);
+}
+.support-ticket-card--unread {
+    border-left: 3px solid var(--brand-primary);
+    background: rgba(99, 102, 241, 0.03);
+}
+</style>
+{% endblock %}
+### end of app/templates/support/list.html ########################################################################
+
+### app/templates/support/new.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Новое обращение — 101slovo{% endblock %}
+{% block content %}
+<div class="container--narrow" style="margin: 0 auto;">
+    <p style="margin-bottom: 1rem;">
+        <a href="/support" style="display: inline-flex; align-items: center; gap: 0.375rem; color: var(--text-secondary);">
+            <i data-lucide="arrow-left" class="icon-sm" aria-hidden="true"></i>
+            К списку обращений
+        </a>
+    </p>
+
+    <div class="page-header" style="text-align: left; margin-bottom: 1.25rem;">
+        <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="message-square-plus" style="width: 24px; height: 24px; color: var(--brand-primary);" aria-hidden="true"></i>
+            Новое обращение
+        </h1>
+        <p class="page-header__subtitle" style="margin-top: 0.375rem;">
+            Опишите вопрос, предложение или проблему — мы ответим в этом треде
+        </p>
+    </div>
+
+    {% if errors %}
+        <div class="flash-error mb-3">
+            <i data-lucide="alert-circle" class="icon-md" aria-hidden="true"></i>
+            <ul style="margin: 0; padding-left: 1.25rem;">
+                {% for err in errors %}
+                    <li>{{ err }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+
+    <form method="POST" action="/support/new" class="card">
+        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+
+        <div class="form-group">
+            <label>Категория *</label>
+            <div class="grid grid-4" style="gap: 0.5rem;" x-data="{ selected: '{{ form.category }}' }">
+                {% for cat in categories %}
+                    <label class="option-card"
+                           :class="{ 'option-card--active': selected === '{{ cat.code }}' }"
+                           @click="selected = '{{ cat.code }}'">
+                        <input type="radio" name="category" value="{{ cat.code }}" required
+                               :checked="selected === '{{ cat.code }}'"
+                               style="position: absolute; opacity: 0; pointer-events: none;">
+                        <span style="font-weight: 600; font-size: 0.875rem;">{{ cat.label }}</span>
+                    </label>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="subject">Тема *</label>
+            <input type="text"
+                   id="subject"
+                   name="subject"
+                   value="{{ form.subject }}"
+                   required
+                   maxlength="{{ max_subject_length }}"
+                   placeholder="Кратко опишите суть обращения">
+        </div>
+
+        <div class="form-group--last">
+            <label for="content">Сообщение *</label>
+            <textarea id="content"
+                      name="content"
+                      rows="6"
+                      required
+                      maxlength="{{ max_message_length }}"
+                      placeholder="Опишите подробно: что произошло, что вы ожидали, какие шаги предпринимали...">{{ form.content }}</textarea>
+            <div style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.25rem;">
+                Максимум {{ max_message_length }} символов
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem;">
+            <a href="/support" class="secondary" style="flex: 0;">Отмена</a>
+            <button type="submit" style="flex: 1;">
+                <i data-lucide="send" class="icon-sm" aria-hidden="true"></i>
+                Отправить обращение
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+### end of app/templates/support/new.html ########################################################################
+
+### app/templates/support/ticket.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Обращение: {{ ticket.subject }} — 101slovo{% endblock %}
+{% block content %}
+{% set is_admin_view = false %}
+<div class="container--narrow" style="margin: 0 auto;">
+    <p style="margin-bottom: 1rem;">
+        <a href="/support" style="display: inline-flex; align-items: center; gap: 0.375rem; color: var(--text-secondary);">
+            <i data-lucide="arrow-left" class="icon-sm" aria-hidden="true"></i>
+            К списку обращений
+        </a>
+    </p>
+
+    {# Шапка тикета #}
+    <div class="card mb-3">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 0;">
+                <h2 style="margin: 0 0 0.5rem 0; font-size: 1.25rem; word-break: break-word;">
+                    {{ ticket.subject }}
+                </h2>
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; color: var(--text-muted); font-size: 0.8125rem;">
+                    {% set status_class = 'badge-mastered' if ticket.status == 'resolved' else ('badge-ignored' if ticket.status == 'closed' else ('badge-active' if ticket.status == 'in_progress' else 'badge-new')) %}
+                    <span class="badge {{ status_class }}">{{ status_label }}</span>
+                    <span class="badge badge-review">{{ category_label }}</span>
+                    <span>·</span>
+                    <span>{{ ticket.created_at.strftime('%d.%m.%Y в %H:%M') }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# Переписка #}
+    <div id="support-messages">
+        {% include "support/_messages.html" %}
+    </div>
+
+    {# Форма ответа (если тикет не закрыт) #}
+    {% if ticket.status != 'closed' %}
+        <div class="card mt-3">
+            <form hx-post="/support/{{ ticket.id }}/reply"
+                  hx-target="#support-messages"
+                  hx-swap="innerHTML"
+                  hx-indicator="#reply-spinner">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <label for="reply-content" style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                    <i data-lucide="message-square" class="icon-md" style="color: var(--brand-primary);" aria-hidden="true"></i>
+                    <strong>Ваш ответ</strong>
+                </label>
+                <textarea id="reply-content"
+                          name="content"
+                          rows="4"
+                          required
+                          maxlength="{{ max_message_length }}"
+                          placeholder="Напишите ответ..."
+                          style="margin-bottom: 0.75rem;"></textarea>
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;">
+                    <div style="color: var(--text-muted); font-size: 0.75rem;">
+                        Макс. {{ max_message_length }} симв.
+                    </div>
+                    <button type="submit" hx-disabled-elt="this">
+                        <i data-lucide="send" class="icon-sm" aria-hidden="true"></i>
+                        Отправить
+                    </button>
+                </div>
+                <span class="htmx-indicator" id="reply-spinner" style="margin-top: 0.5rem;">
+                    <span class="spinner"></span>
+                    <span>Отправка...</span>
+                </span>
+            </form>
+        </div>
+    {% else %}
+        <div class="flash-info mt-3">
+            <i data-lucide="lock" class="icon-md" aria-hidden="true"></i>
+            <span>Обращение закрыто. Ответы недоступны.</span>
+        </div>
+    {% endif %}
+</div>
+
+<script>
+document.body.addEventListener('supportReplySent', function() {
+    var ta = document.getElementById('reply-content');
+    if (ta) { ta.value = ''; }
+});
+</script>
+{% endblock %}
+### end of app/templates/support/ticket.html ########################################################################
 
 ### app/templates/vocabulary/_word_actions.html ########################################################################
 <div class="word-actions" style="display: flex; gap: 0.5rem;" aria-live="polite" aria-atomic="true">
@@ -13689,6 +16583,86 @@ def downgrade() -> None:
         type_=sa.String(length=6),
     )
 ### end of migrations/versions/add_partner_tables.py ########################################################################
+
+### migrations/versions/add_support_tables.py ########################################################################
+# migrations/versions/add_support_tables.py
+"""add support tables
+Revision ID: d1e2f3a4b5c6
+Revises: c2d3e4f5a6b7
+Create Date: 2026-10-12 10:00:00.000000
+"""
+from alembic import op
+import sqlalchemy as sa
+
+revision = 'd1e2f3a4b5c6'
+down_revision = 'c2d3e4f5a6b7'
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    # === Таблица support_tickets ===
+    op.create_table(
+        'support_tickets',
+        sa.Column('id', sa.BigInteger(), sa.Identity(always=False), nullable=False),
+        sa.Column('user_id', sa.BigInteger(), nullable=False),
+        sa.Column('category', sa.String(length=16), nullable=False),
+        sa.Column('subject', sa.String(length=200), nullable=False),
+        sa.Column('status', sa.String(length=16), nullable=False, server_default='open'),
+        sa.Column('last_user_message_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('last_admin_message_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('user_last_viewed_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('admin_last_viewed_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('closed_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id'),
+    )
+    op.create_index('ix_support_tickets_user_status', 'support_tickets', ['user_id', 'status'], unique=False)
+    op.create_index(
+        'ix_support_tickets_admin_queue',
+        'support_tickets',
+        ['status', 'last_user_message_at'],
+        unique=False,
+        postgresql_where=sa.text("status IN ('open', 'in_progress')"),
+    )
+    op.create_index('ix_support_tickets_created', 'support_tickets', ['created_at'], unique=False)
+
+    # === Таблица support_messages ===
+    op.create_table(
+        'support_messages',
+        sa.Column('id', sa.BigInteger(), sa.Identity(always=False), nullable=False),
+        sa.Column('ticket_id', sa.BigInteger(), nullable=False),
+        sa.Column('author_id', sa.BigInteger(), nullable=False),
+        sa.Column('content', sa.Text(), nullable=False),
+        sa.Column('is_deleted', sa.Boolean(), nullable=False, server_default='false'),
+        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('deleted_by_admin_id', sa.BigInteger(), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.ForeignKeyConstraint(['ticket_id'], ['support_tickets.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['author_id'], ['users.id'], ondelete='CASCADE'),
+        sa.ForeignKeyConstraint(['deleted_by_admin_id'], ['users.id'], ondelete='SET NULL'),
+        sa.PrimaryKeyConstraint('id'),
+    )
+    op.create_index('ix_support_messages_ticket', 'support_messages', ['ticket_id', 'created_at'], unique=False)
+    op.create_index(
+        'ix_support_messages_active',
+        'support_messages',
+        ['ticket_id', 'created_at'],
+        unique=False,
+        postgresql_where=sa.text('is_deleted = false'),
+    )
+
+
+def downgrade() -> None:
+    op.drop_index('ix_support_messages_active', table_name='support_messages', postgresql_where=sa.text('is_deleted = false'))
+    op.drop_index('ix_support_messages_ticket', table_name='support_messages')
+    op.drop_table('support_messages')
+    op.drop_index('ix_support_tickets_created', table_name='support_tickets')
+    op.drop_index('ix_support_tickets_admin_queue', table_name='support_tickets', postgresql_where=sa.text("status IN ('open', 'in_progress')"))
+    op.drop_index('ix_support_tickets_user_status', table_name='support_tickets')
+    op.drop_table('support_tickets')
+### end of migrations/versions/add_support_tables.py ########################################################################
 
 ### migrations/versions/add_total_tokens_fields.py ########################################################################
 """add total_tokens fields

@@ -1,3 +1,4 @@
+# app/middleware.py
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request, Response
 from sqlalchemy import select
@@ -20,6 +21,8 @@ class AppMiddleware(BaseHTTPMiddleware):
         # 3. Аутентификация
         request.state.user = None
         request.state.is_partner = False
+        request.state.unread_support_count = 0
+        request.state.admin_unread_support_count = 0
 
         session_token = request.cookies.get("session")
         if session_token:
@@ -31,6 +34,7 @@ class AppMiddleware(BaseHTTPMiddleware):
                 )
                 result = await db.execute(stmt)
                 auth_session = result.scalar_one_or_none()
+
                 if auth_session:
                     user_stmt = select(User).where(User.id == auth_session.user_id)
                     user_result = await db.execute(user_stmt)
@@ -47,12 +51,29 @@ class AppMiddleware(BaseHTTPMiddleware):
                             partner_result = await db.execute(partner_stmt)
                             request.state.is_partner = partner_result.scalar_one_or_none() is not None
                         except Exception:
-                            # Если таблица ещё не создана или другая ошибка — не падаем
                             request.state.is_partner = False
+
+                        # 5. Счётчики непрочитанных обращений
+                        try:
+                            from app.services.support import (
+                                get_user_unread_count,
+                                get_admin_unread_count,
+                            )
+                            request.state.unread_support_count = (
+                                await get_user_unread_count(db, request.state.user.id)
+                            )
+                            if request.state.user.is_admin:
+                                request.state.admin_unread_support_count = (
+                                    await get_admin_unread_count(db)
+                                )
+                        except Exception:
+                            # Не падаем, если таблицы ещё не созданы
+                            request.state.unread_support_count = 0
+                            request.state.admin_unread_support_count = 0
 
         response = await call_next(request)
 
-        # 5. Очистка flash после отдачи ответа
+        # 6. Очистка flash после отдачи ответа
         if request.state.flashes:
             clear_flashes(response)
 

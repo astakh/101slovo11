@@ -1,3 +1,4 @@
+# app/models/__init__.py
 from .base import Base
 from .user import User
 from .auth_session import AuthSession
@@ -15,10 +16,13 @@ from .referral import Referral
 from .partner import Partner
 from .partner_invite import PartnerInvite
 from .partner_earning import PartnerEarning
+from .support_ticket import SupportTicket
+from .support_message import SupportMessage
 
 __all__ = [
     "Base", "User", "AuthSession", "Word", "UserWord",
     "Lesson", "LessonExercise", "Prompt", "LlmCall", "Event",
     "Subscription", "Payment", "PromoCode", "Referral",
     "Partner", "PartnerInvite", "PartnerEarning",
+    "SupportTicket", "SupportMessage",
 ]
