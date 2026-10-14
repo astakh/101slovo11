@@ -25,9 +25,9 @@
                     <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
                         <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
                     </a>
-                    <!-- ✅ НОВОЕ: Публичный словарь слов -->
+                    <!-- ✅ НОВОЕ: Публичный Паутина слов -->
                     <a href="/words" class="nav-link {% if '/words' in request.url.path or '/word/' in request.url.path %}active{% endif %}">
-                        <i data-lucide="globe" style="width:16px;height:16px" aria-hidden="true"></i> Словарь слов
+                        <i data-lucide="globe" style="width:16px;height:16px" aria-hidden="true"></i> Паутина слов
                     </a>
                     <a href="/support" class="nav-link {% if '/support' in request.url.path %}active{% endif %}">
                         <i data-lucide="message-circle" style="width:16px;height:16px" aria-hidden="true"></i>
@@ -88,9 +88,9 @@
                     </button>
                 </form>
             {% else %}
-                <!-- ✅ НОВОЕ: Словарь слов для неавторизованных -->
+                <!-- ✅ НОВОЕ: Паутина слов для неавторизованных -->
                 <a href="/words" class="nav-link {% if '/words' in request.url.path or '/word/' in request.url.path %}active{% endif %}">
-                    <i data-lucide="globe" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+                    <i data-lucide="globe" style="width:16px;height:16px" aria-hidden="true"></i> Паутина слов
                 </a>
                 <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
                     <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
@@ -115,9 +115,9 @@
                 <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
                     <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
                 </a>
-                <!-- ✅ НОВОЕ: Публичный словарь слов -->
+                <!-- ✅ НОВОЕ: Публичный паутина слов -->
                 <a href="/words" class="nav-link {% if '/words' in request.url.path or '/word/' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-                    <i data-lucide="globe" style="width:16px;height:16px" aria-hidden="true"></i> Словарь слов
+                    <i data-lucide="globe" style="width:16px;height:16px" aria-hidden="true"></i> Паутина слов
                 </a>
                 <a href="/support" class="nav-link {% if '/support' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
                     <i data-lucide="message-circle" style="width:16px;height:16px" aria-hidden="true"></i>
