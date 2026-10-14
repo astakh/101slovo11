@@ -330,7 +330,9 @@ import json
 import time
 import uuid
 import logging
+
 import httpx
+
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -348,6 +350,7 @@ RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
 
 class GigaChatError(Exception):
     """Базовая ошибка GigaChat."""
+
     def __init__(self, message: str, code: str = "llm_error", http_status: int | None = None):
         super().__init__(message)
         self.code = code
@@ -356,6 +359,7 @@ class GigaChatError(Exception):
 
 class GigaTokenManager:
     """Управление OAuth-токеном GigaChat с ленивым обновлением."""
+
     def __init__(self):
         self._access_token: str | None = None
         self._expires_at: float = 0
@@ -370,6 +374,18 @@ class GigaTokenManager:
                 return self._access_token
             await self._refresh_token()
             return self._access_token  # type: ignore
+
+    def invalidate(self) -> None:
+        """
+        Принудительно помечает текущий токен как невалидный.
+        Вызывается при получении HTTP 401 от API, чтобы следующий
+        вызов get_token() гарантированно запросил новый токен.
+        Потокобезопасность: вызывается из того же event loop,
+        asyncio.Lock защищает только async-методы.
+        """
+        self._access_token = None
+        self._expires_at = 0
+        logger.info("🔄 OAuth токен помечен как невалидный (invalidate)")
 
     async def _refresh_token(self) -> None:
         """Обновляет токен через OAuth."""
@@ -409,7 +425,18 @@ class GigaTokenManager:
         try:
             data = resp.json()
             self._access_token = data["access_token"]
-            self._expires_at = float(data.get("expires_at", time.time() + 1800))
+
+            # Парсим expires_at с защитой от миллисекунд
+            expires_at_raw = float(data.get("expires_at", time.time() + 1800))
+            # GigaChat может возвращать в миллисекундах (> 1e12 = после 2001 в секундах)
+            if expires_at_raw > 1e12:
+                expires_at_raw /= 1000.0
+                logger.info(
+                    f"⚠️ expires_at получен в миллисекундах, "
+                    f"конвертирован: {expires_at_raw}"
+                )
+            self._expires_at = expires_at_raw
+
             logger.info("✅ OAuth токен GigaChat успешно получен.")
         except (KeyError, ValueError, json.JSONDecodeError) as e:
             logger.error(f"GigaChat OAuth: Не удалось распарсить ответ. Ответ: {resp.text[:200]}")
@@ -457,6 +484,7 @@ async def chat(
                     headers=headers,
                     timeout=deadline_seconds,
                 )
+
             latency_ms = int((time.time() - start_time) * 1000)
 
             if resp.status_code == 200:
@@ -470,12 +498,21 @@ async def chat(
                 delay = RETRY_DELAY_BASE * (2 ** (attempt - 1))
                 logger.warning(f"GigaChat API: {resp.status_code}, retry {attempt}/{MAX_RETRIES} in {delay}s")
                 await asyncio.sleep(delay)
-                if resp.status_code == 401:
-                    token = await _token_manager.get_token()
+                continue
+
+            if resp.status_code == 401:
+                # ✅ ФИКС: Принудительно сбрасываем токен, чтобы get_token()
+                # гарантированно запросил новый, а не вернул кэшированный.
+                _token_manager.invalidate()
+                token = await _token_manager.get_token()
                 last_error = GigaChatError(
                     f"HTTP {resp.status_code}",
                     code="llm_http_error",
                     http_status=resp.status_code,
+                )
+                logger.warning(
+                    f"GigaChat API: 401 Token expired, "
+                    f"token refreshed (attempt {attempt}/{MAX_RETRIES})"
                 )
                 continue
 
@@ -531,7 +568,7 @@ async def chat_json(
 ) -> tuple[dict | list, int, int, int, int]:
     """
     Вызов GigaChat с извлечением JSON из ответа.
-    
+
     Returns:
         (parsed, prompt_tokens, completion_tokens, total_tokens, latency_ms)
     """
@@ -542,14 +579,15 @@ async def chat_json(
             max_tokens=max_tokens,
             deadline_seconds=deadline_seconds,
         )
+
         choices = response.get("choices", [])
         if not choices:
             raise GigaChatError("No choices in response", code="llm_empty_response")
 
         content = choices[0].get("message", {}).get("content", "")
         finish_reason = choices[0].get("finish_reason", "")
-
         usage = response.get("usage", {})
+
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
         total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
@@ -1101,14 +1139,14 @@ async def log_llm_call(
 ### app/llm/validation.py ########################################################################
 # app/llm/validation.py
 """Pydantic-модели для валидации ответов LLM."""
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Any
 
 
 class TargetWordItem(BaseModel):
     lemma: str = Field(min_length=1, max_length=64)
     surface_form: str = Field(min_length=1, max_length=64)
-    pos: str = Field(min_length=1, max_length=10)
+    pos: str = Field(min_length=1, max_length=16)
 
 
 class GeneratedExercise(BaseModel):
@@ -1143,37 +1181,18 @@ class EvaluateResponse(BaseModel):
     @field_validator("translation_errors", mode="before")
     @classmethod
     def normalize_translation_errors(cls, v: Any) -> list[str]:
-        """
-        Нормализует translation_errors в список строк.
-        
-        GigaChat иногда возвращает:
-        - Список словарей (error objects) вместо списка строк
-        - Одну строку вместо списка
-        - None или пустое значение
-        
-        Этот валидатор преобразует все варианты в list[str].
-        """
         if v is None:
             return []
-        
-        # Если это не список — оборачиваем в список
         if not isinstance(v, list):
             if isinstance(v, str):
                 return [v] if v.strip() else []
-            # Неизвестный тип — возвращаем пустой список
             return []
-        
-        # Обрабатываем каждый элемент списка
         result = []
         for item in v:
             if isinstance(item, str):
-                # Уже строка — добавляем как есть
                 if item.strip():
                     result.append(item)
             elif isinstance(item, dict):
-                # Словарь — пытаемся извлечь полезную информацию
-                # Формат может быть: {"original_word": "...", "error_type": "..."}
-                # или другие варианты
                 parts = []
                 if "original_word" in item:
                     parts.append(str(item["original_word"]))
@@ -1183,16 +1202,12 @@ class EvaluateResponse(BaseModel):
                     parts.append(str(item["message"]))
                 if "description" in item:
                     parts.append(str(item["description"]))
-                
                 if parts:
                     result.append(": ".join(parts))
                 else:
-                    # Если не удалось извлечь — конвертируем dict в строку
                     result.append(str(item))
             else:
-                # Любой другой тип — конвертируем в строку
                 result.append(str(item))
-        
         return result
 
 
@@ -1203,7 +1218,6 @@ class LlmUsage(BaseModel):
 
 
 class EnrichedWordVariant(BaseModel):
-    """Вариант слова из LLM (разные части речи)."""
     lemma: str = Field(min_length=1, max_length=64)
     pos: str = Field(min_length=1, max_length=16)
     level: str = Field(pattern=r"^(A1|A2|B1|B2|C1|C2)$")
@@ -1212,8 +1226,90 @@ class EnrichedWordVariant(BaseModel):
 
 
 class EnrichWordResponse(BaseModel):
-    """Ответ LLM на запрос обогащения слова. Может быть пустым, если слово не существует."""
     variants: list[EnrichedWordVariant] = Field(default_factory=list, max_length=5)
+
+
+# ============================================================
+# WORD PAGE (SEO-страницы слов)
+# ============================================================
+
+class WordPageWord(BaseModel):
+    """Базовая информация о слове."""
+    lemma: str = Field(min_length=1, max_length=64)
+    transcription: str = Field(min_length=3, max_length=50)
+    part_of_speech: str = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_keys(cls, data: Any) -> Any:
+        """Исправляет опечатки LLM в ключах."""
+        if isinstance(data, dict):
+            for key in list(data.keys()):
+                nk = key.replace("_", "").replace(" ", "").replace("-", "").lower()
+                if nk == "partofspeech" and "part_of_speech" not in data:
+                    data["part_of_speech"] = data.pop(key)
+                elif nk == "transcription" and "transcription" not in data:
+                    data["transcription"] = data.pop(key)
+                elif nk == "lemma" and "lemma" not in data:
+                    data["lemma"] = data.pop(key)
+        return data
+
+
+class WordPageContextSentence(BaseModel):
+    english: str = Field(min_length=10, max_length=200)
+    russian: str = Field(min_length=10, max_length=300)
+
+
+class WordPageSynonym(BaseModel):
+    word: WordPageWord
+    nuance: str = Field(min_length=1, max_length=300)
+
+
+class WordPageCollocation(BaseModel):
+    phrase: str = Field(min_length=2, max_length=100)
+    translation: str = Field(min_length=2, max_length=200)
+
+
+class WordPageTrap(BaseModel):
+    word: WordPageWord
+    nuance: str = Field(min_length=10, max_length=500)
+
+
+class RelatedWord(BaseModel):
+    """Связанное слово с леммой и частью речи."""
+    lemma: str = Field(min_length=1, max_length=64)
+    pos: str = Field(default="", max_length=20)
+
+
+class WordPageContentResponse(BaseModel):
+    """Полный ответ LLM для страницы слова."""
+    word: WordPageWord
+    core_translation: str = Field(min_length=1, max_length=50)
+    other_translations: list[str] = Field(default_factory=list, max_length=5)
+    context_sentence: WordPageContextSentence
+    synonyms: list[WordPageSynonym] = Field(min_length=1, max_length=5)
+    antonyms: list[WordPageSynonym] = Field(default_factory=list, max_length=3)
+    collocations: list[WordPageCollocation] = Field(min_length=2, max_length=6)
+    level_b_trap: list[WordPageTrap] = Field(default_factory=list, max_length=3)
+    related_words: list[RelatedWord] = Field(default_factory=list, max_length=8)
+
+    @field_validator("related_words", mode="before")
+    @classmethod
+    def normalize_related_words(cls, v: Any) -> list:
+        """
+        Обратная совместимость: старый формат — список строк,
+        новый формат — список объектов {lemma, pos}.
+        """
+        if not isinstance(v, list):
+            return []
+        result = []
+        for item in v:
+            if isinstance(item, str):
+                if item.strip():
+                    result.append({"lemma": item.strip(), "pos": ""})
+            elif isinstance(item, dict):
+                result.append(item)
+        return result
 ### end of app/llm/validation.py ########################################################################
 
 ### app/main.py ########################################################################
@@ -1221,11 +1317,13 @@ class EnrichWordResponse(BaseModel):
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal, partner, support
+
+from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal, partner, support, word_pages
 from app.middleware import AppMiddleware
 from app.core.templates import templates
 from app.db import AsyncSessionLocal
@@ -1268,10 +1366,12 @@ app = FastAPI(title="101slovo", lifespan=lifespan)
 async def bot_protection_middleware(request: Request, call_next):
     if request.method == "OPTIONS":
         return Response(status_code=204, headers={"Allow": "GET, POST, HEAD, OPTIONS", "Cache-Control": "no-store"})
+
     if request.method == "HEAD":
         if request.url.path == "/health":
             return await call_next(request)
         return Response(status_code=200, headers={"Cache-Control": "no-store"})
+
     return await call_next(request)
 
 
@@ -1290,12 +1390,15 @@ app.include_router(legal.router)
 app.include_router(partner.router)
 app.include_router(support.router)
 app.include_router(admin.router)
+# ✅ НОВЫЙ роутер для Word Pages (SEO-страницы слов)
+app.include_router(word_pages.router)
 
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if request.headers.get("HX-Request") and exc.headers and "HX-Redirect" in exc.headers:
         return Response(status_code=200, headers=exc.headers)
+
     if exc.status_code == 404:
         return templates.TemplateResponse("errors/404.html", {"request": request}, status_code=404)
     if exc.status_code in [401, 403]:
@@ -1309,11 +1412,13 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def root(request: Request):
     if request.state.user:
         return Response(status_code=303, headers={"Location": "/dashboard"})
+
     monthly_price = app_settings.SUBSCRIPTION_MONTHLY_PRICE_KOP / 100
     six_month_price = app_settings.SUBSCRIPTION_6M_PRICE_KOP / 100
     six_month_per_month = six_month_price / 6
     six_month_full = monthly_price * 6
     six_month_saving = six_month_full - six_month_price
+
     return templates.TemplateResponse(
         "landing.html",
         {
@@ -1441,6 +1546,8 @@ from .partner_invite import PartnerInvite
 from .partner_earning import PartnerEarning
 from .support_ticket import SupportTicket
 from .support_message import SupportMessage
+from .word_page import WordPage
+from .word_page_queue import WordPageQueue
 
 __all__ = [
     "Base", "User", "AuthSession", "Word", "UserWord",
@@ -1448,6 +1555,7 @@ __all__ = [
     "Subscription", "Payment", "PromoCode", "Referral",
     "Partner", "PartnerInvite", "PartnerEarning",
     "SupportTicket", "SupportMessage",
+    "WordPage", "WordPageQueue",
 ]
 ### end of app/models/__init__.py ########################################################################
 
@@ -2052,9 +2160,118 @@ class Word(Base):
     )
 ### end of app/models/word.py ########################################################################
 
+### app/models/word_page.py ########################################################################
+# app/models/word_page.py
+"""Модель страницы слова (SEO-страница с разбором слова от LLM)."""
+from sqlalchemy import (
+    BigInteger, DateTime, ForeignKey, Identity, Index,
+    Integer, String, UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql import func
+from datetime import datetime
+from .base import Base
+
+
+class WordPage(Base):
+    __tablename__ = "word_pages"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    word_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("words.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    slug: Mapped[str] = mapped_column(String(128), nullable=False)
+    content: Mapped[dict] = mapped_column(JSON, nullable=False)
+    meta_title: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    meta_description: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="draft"
+    )
+    view_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    gen_prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gen_completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # Связь со словом
+    word = relationship("Word", foreign_keys=[word_id], lazy="joined")
+
+    __table_args__ = (
+        UniqueConstraint("word_id", name="uq_word_pages_word_id"),
+        UniqueConstraint("slug", name="uq_word_pages_slug"),
+        Index("ix_word_pages_slug", "slug"),
+        Index("ix_word_pages_status", "status"),
+        Index("ix_word_pages_status_published", "status", "published_at"),
+    )
+### end of app/models/word_page.py ########################################################################
+
+### app/models/word_page_queue.py ########################################################################
+# app/models/word_page_queue.py
+"""Модель очереди слов для генерации страниц."""
+from sqlalchemy import (
+    BigInteger, DateTime, ForeignKey, Identity, Index,
+    SmallInteger, String, Text, UniqueConstraint,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql import func
+from datetime import datetime
+from .base import Base
+
+
+class WordPageQueue(Base):
+    __tablename__ = "word_page_queue"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    word_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("words.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="queued"
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempt_count: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default="0"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    # Связь со словом
+    word = relationship("Word", foreign_keys=[word_id], lazy="joined")
+
+    __table_args__ = (
+        UniqueConstraint("word_id", name="uq_word_page_queue_word_id"),
+        Index("ix_word_page_queue_status", "status"),
+    )
+### end of app/models/word_page_queue.py ########################################################################
+
 ### app/routers/admin.py ########################################################################
 # app/routers/admin.py
 """Админские роуты."""
+import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, Depends, Form, HTTPException, status, Query
 from fastapi.responses import RedirectResponse
@@ -2096,11 +2313,25 @@ from app.services.support import (
     STATUS_LABELS,
     MAX_MESSAGE_LENGTH,
 )
+from app.services.word_page import (
+    get_word_pages_list,
+    get_queue_items,
+    add_words_to_queue,
+    delete_queue_item,
+    search_words_for_admin,
+    process_queue_batch,
+    regenerate_word_page,
+    publish_word_page,
+    archive_word_page,
+)
+from app.services.vocabulary_add import search_and_enrich, validate_lemma_input
+from app.llm.gigachat import GigaChatError
 from app.config import settings
 from app.utils.flash import add_flash
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+logger = logging.getLogger(__name__)
 
+router = APIRouter(prefix="/admin", tags=["admin"])
 
 @router.get("/prompts")
 async def admin_prompts_page(
@@ -2113,7 +2344,6 @@ async def admin_prompts_page(
         "admin/prompts.html",
         {"request": request, "user": admin, "prompts": prompts, "error": None, "edit_key": None, "edit_value": None},
     )
-
 
 @router.post("/prompts/{key}", dependencies=[Depends(require_csrf)])
 async def admin_prompt_update(
@@ -2139,7 +2369,6 @@ async def admin_prompt_update(
     add_flash(response, "success", f"Промпт '{key}' обновлён")
     return response
 
-
 @router.get("/stats")
 async def admin_stats_page(
     request: Request,
@@ -2149,10 +2378,10 @@ async def admin_stats_page(
     stats = await get_token_stats(db)
     return templates.TemplateResponse("admin/stats.html", {"request": request, "user": admin, "stats": stats})
 
-
 # ============================================================
 # USERS MANAGEMENT
 # ============================================================
+
 @router.get("/users")
 async def admin_users_page(
     request: Request,
@@ -2164,6 +2393,7 @@ async def admin_users_page(
     found_user = None
     sub_status = None
     search_error = None
+
     if email.strip():
         stmt = select(User).where(User.email == email.strip().lower())
         result = await db.execute(stmt)
@@ -2172,6 +2402,7 @@ async def admin_users_page(
             sub_status = await get_subscription_status(db, found_user.id)
         else:
             search_error = f"Пользователь с email '{email.strip()}' не найден"
+
     return templates.TemplateResponse(
         "admin/users.html",
         {
@@ -2184,7 +2415,6 @@ async def admin_users_page(
             "active_tab": "search",
         },
     )
-
 
 @router.get("/users/stats")
 async def admin_user_stats_page(
@@ -2204,7 +2434,6 @@ async def admin_user_stats_page(
         },
     )
 
-
 @router.post("/users/grant-days", dependencies=[Depends(require_csrf)])
 async def admin_grant_days(
     request: Request,
@@ -2216,11 +2445,13 @@ async def admin_grant_days(
     """Начисление дней Premium пользователю (без оплаты)."""
     if days < 1:
         raise HTTPException(status_code=400, detail="Количество дней должно быть не менее 1")
+
     stmt = select(User).where(User.id == user_id)
     result = await db.execute(stmt)
     target_user = result.scalar_one_or_none()
     if not target_user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
+
     await activate_subscription(
         db,
         user_id=target_user.id,
@@ -2228,6 +2459,7 @@ async def admin_grant_days(
         source="admin",
         extra_days=days,
     )
+
     event = Event(
         user_id=target_user.id,
         type="admin_days_granted",
@@ -2240,6 +2472,7 @@ async def admin_grant_days(
     )
     db.add(event)
     await db.flush()
+
     response = RedirectResponse(
         url=f"/admin/users?email={target_user.email}",
         status_code=status.HTTP_303_SEE_OTHER,
@@ -2247,10 +2480,10 @@ async def admin_grant_days(
     add_flash(response, "success", f"Пользователю {target_user.email} начислено {days} дн. Premium")
     return response
 
-
 # ============================================================
 # PARTNERS MANAGEMENT
 # ============================================================
+
 @router.get("/partners")
 async def admin_partners_page(
     request: Request,
@@ -2261,10 +2494,12 @@ async def admin_partners_page(
     invites = await get_all_invites(db)
     pending_promos = await get_pending_promo_codes(db)
     base_url = str(request.base_url).rstrip("/")
+
     invites_with_links = []
     for inv in invites:
         link = f"{base_url}/partner/register?invite={inv.token}" if not inv.is_used else None
         invites_with_links.append({"invite": inv, "link": link})
+
     return templates.TemplateResponse(
         "admin/partners.html",
         {
@@ -2277,7 +2512,6 @@ async def admin_partners_page(
         },
     )
 
-
 @router.post("/partners/create-invite", dependencies=[Depends(require_csrf)])
 async def admin_create_invite(
     request: Request,
@@ -2288,7 +2522,6 @@ async def admin_create_invite(
     response = RedirectResponse(url="/admin/partners", status_code=status.HTTP_303_SEE_OTHER)
     add_flash(response, "success", f"Инвайт создан: {invite.token[:16]}...")
     return response
-
 
 @router.post("/partners/approve-promo/{promo_id}", dependencies=[Depends(require_csrf)])
 async def admin_approve_promo(
@@ -2305,7 +2538,6 @@ async def admin_approve_promo(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
 @router.post("/partners/decline-promo/{promo_id}", dependencies=[Depends(require_csrf)])
 async def admin_decline_promo(
     request: Request,
@@ -2320,7 +2552,6 @@ async def admin_decline_promo(
         return response
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
 
 @router.post("/partners/deactivate/{partner_id}", dependencies=[Depends(require_csrf)])
 async def admin_deactivate_partner(
@@ -2337,7 +2568,6 @@ async def admin_deactivate_partner(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
 @router.get("/partners/{partner_user_id}/earnings")
 async def admin_partner_earnings_page(
     request: Request,
@@ -2350,7 +2580,6 @@ async def admin_partner_earnings_page(
         "admin/partner_earnings.html",
         {"request": request, "user": admin, "partner_user_id": partner_user_id, "earnings": earnings},
     )
-
 
 @router.post("/partners/mark-paid/{earning_id}", dependencies=[Depends(require_csrf)])
 async def admin_mark_paid(
@@ -2367,10 +2596,10 @@ async def admin_mark_paid(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
 # ============================================================
 # SUPPORT (обращения в поддержку)
 # ============================================================
+
 @router.get("/support")
 async def admin_support_list(
     request: Request,
@@ -2400,7 +2629,6 @@ async def admin_support_list(
         },
     )
 
-
 @router.get("/support/{ticket_id}")
 async def admin_support_ticket_view(
     request: Request,
@@ -2412,9 +2640,7 @@ async def admin_support_ticket_view(
     data = await get_ticket_with_messages(db, ticket_id)
     if not data:
         raise HTTPException(status_code=404, detail="Обращение не найдено")
-
     await mark_ticket_viewed_by_admin(db, ticket_id)
-
     return templates.TemplateResponse(
         "admin/support_ticket.html",
         {
@@ -2428,7 +2654,6 @@ async def admin_support_ticket_view(
         },
     )
 
-
 @router.post("/support/{ticket_id}/reply", dependencies=[Depends(require_csrf)])
 async def admin_support_reply(
     request: Request,
@@ -2439,7 +2664,6 @@ async def admin_support_reply(
 ):
     """Админ отвечает в тикете."""
     is_htmx = bool(request.headers.get("HX-Request"))
-
     try:
         await add_admin_reply(db, admin, ticket_id, content)
     except ValueError as e:
@@ -2474,7 +2698,6 @@ async def admin_support_reply(
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
-
 @router.post("/support/{ticket_id}/status", dependencies=[Depends(require_csrf)])
 async def admin_support_change_status(
     request: Request,
@@ -2488,14 +2711,12 @@ async def admin_support_change_status(
         await change_ticket_status(db, admin, ticket_id, new_status)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
     response = RedirectResponse(
         url=f"/admin/support/{ticket_id}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
     add_flash(response, "success", f"Статус изменён на «{STATUS_LABELS.get(new_status, new_status)}»")
     return response
-
 
 @router.post("/support/messages/{message_id}/delete", dependencies=[Depends(require_csrf)])
 async def admin_support_delete_message(
@@ -2511,8 +2732,8 @@ async def admin_support_delete_message(
         raise HTTPException(status_code=400, detail=str(e))
 
     ticket_id = message.ticket_id
-
     is_htmx = bool(request.headers.get("HX-Request"))
+
     if is_htmx:
         return templates.TemplateResponse(
             "support/_deleted_message.html",
@@ -2525,6 +2746,261 @@ async def admin_support_delete_message(
     )
     add_flash(response, "success", "Сообщение удалено")
     return response
+
+# ============================================================
+# WORD PAGES (SEO-страницы слов)
+# ============================================================
+
+@router.get("/word-pages")
+async def admin_word_pages_list(
+    request: Request,
+    status_filter: str | None = Query(default=None, alias="status"),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Список всех страниц слов."""
+    valid_statuses = {"draft", "published", "archived"}
+    if status_filter and status_filter not in valid_statuses:
+        status_filter = None
+    items = await get_word_pages_list(db, status_filter=status_filter)
+    return templates.TemplateResponse(
+        "admin/word_pages.html",
+        {
+            "request": request,
+            "user": admin,
+            "items": items,
+            "status_filter": status_filter,
+            "valid_statuses": valid_statuses,
+        },
+    )
+
+@router.get("/word-pages/queue")
+async def admin_word_pages_queue(
+    request: Request,
+    q: str = "",
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Очередь генерации страниц слов + поиск слов для добавления."""
+    queue_items = await get_queue_items(db)
+
+    # Поиск слов для автокомплита
+    search_results = []
+    if q.strip():
+        search_results = await search_words_for_admin(db, q)
+
+    # Проверяем, есть ли точное совпадение леммы
+    exact_match = any(
+        w.lemma.lower() == q.strip().lower()
+        for w in search_results
+    ) if q.strip() else False
+
+    return templates.TemplateResponse(
+        "admin/word_page_queue.html",
+        {
+            "request": request,
+            "user": admin,
+            "queue_items": queue_items,
+            "search_results": search_results,
+            "search_query": q.strip(),
+            "exact_match": exact_match,
+        },
+    )
+
+@router.post("/word-pages/queue/add", dependencies=[Depends(require_csrf)])
+async def admin_word_pages_queue_add(
+    request: Request,
+    word_ids: list[int] = Form(...),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Добавление слов в очередь генерации."""
+    if not word_ids:
+        response = RedirectResponse(
+            url="/admin/word-pages/queue",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+        add_flash(response, "warning", "Не выбрано ни одного слова")
+        return response
+
+    added, warnings = await add_words_to_queue(db, word_ids)
+
+    response = RedirectResponse(
+        url="/admin/word-pages/queue",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+    if added > 0:
+        add_flash(response, "success", f"Добавлено в очередь: {added} слов")
+    for warning in warnings:
+        add_flash(response, "info", warning)
+    return response
+
+@router.post("/word-pages/queue/generate-word", dependencies=[Depends(require_csrf)])
+async def admin_word_pages_generate_word(
+    request: Request,
+    lemma: str = Form(...),
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Генерация слова через LLM и добавление в таблицу words.
+    Использует существующую функцию search_and_enrich.
+    После генерации редирект на поиск — слово будет найдено.
+    """
+    lemma = lemma.strip()
+
+    # Валидация входного слова
+    error = validate_lemma_input(lemma)
+    if error:
+        response = RedirectResponse(
+            url="/admin/word-pages/queue",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+        add_flash(response, "error", error)
+        return response
+
+    try:
+        result = await search_and_enrich(db, admin, lemma)
+    except GigaChatError as e:
+        logger.error(f"[ADMIN] GigaChatError generating word '{lemma}': {e.code} - {e}")
+        response = RedirectResponse(
+            url=f"/admin/word-pages/queue?q={lemma}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+        add_flash(response, "error", f"Ошибка LLM при генерации '{lemma}': {str(e)[:200]}")
+        return response
+    except Exception as e:
+        logger.error(f"[ADMIN] Error generating word '{lemma}': {e}")
+        response = RedirectResponse(
+            url=f"/admin/word-pages/queue?q={lemma}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+        add_flash(response, "error", f"Ошибка генерации '{lemma}': {str(e)[:200]}")
+        return response
+
+    words = result.get("words", [])
+    source = result.get("source", "db")
+
+    response = RedirectResponse(
+        url=f"/admin/word-pages/queue?q={lemma}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+    if not words:
+        add_flash(response, "warning", f"Не удалось сгенерировать данные для '{lemma}'. Проверьте написание.")
+    elif source == "db":
+        add_flash(response, "info", f"Слово '{lemma}' уже есть в базе ({len(words)} вариант(ов))")
+    else:
+        added_lemmas = ", ".join(f"{w['lemma']} ({w['pos']})" for w in words)
+        add_flash(response, "success", f"Сгенерировано и добавлено в базу: {added_lemmas}")
+
+    return response
+
+@router.post("/word-pages/queue/{queue_id}/delete", dependencies=[Depends(require_csrf)])
+async def admin_word_pages_queue_delete(
+    request: Request,
+    queue_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Удаление элемента из очереди."""
+    success = await delete_queue_item(db, queue_id)
+    response = RedirectResponse(
+        url="/admin/word-pages/queue",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+    if success:
+        add_flash(response, "success", "Элемент удалён из очереди")
+    else:
+        add_flash(response, "error", "Не удалось удалить элемент (статус не позволяет)")
+    return response
+
+@router.post("/word-pages/generate-batch", dependencies=[Depends(require_csrf)])
+async def admin_word_pages_generate_batch(
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Запуск батч-генерации очереди."""
+    result = await process_queue_batch(db, admin.id)
+    response = RedirectResponse(
+        url="/admin/word-pages/queue",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+    if result["total"] == 0:
+        add_flash(response, "info", "Очередь пуста — нечего генерировать")
+    else:
+        msg = f"Сгенерировано: {result['generated']}, ошибок: {result['errors']}"
+        if result["errors"] > 0:
+            add_flash(response, "warning", msg)
+        else:
+            add_flash(response, "success", msg)
+    return response
+
+@router.post("/word-pages/{word_page_id}/publish", dependencies=[Depends(require_csrf)])
+async def admin_word_page_publish(
+    request: Request,
+    word_page_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Публикация страницы слова."""
+    try:
+        page = await publish_word_page(db, word_page_id, admin.id)
+        response = RedirectResponse(
+            url="/admin/word-pages",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+        add_flash(response, "success", f"Страница '{page.slug}' опубликована")
+        return response
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/word-pages/{word_page_id}/archive", dependencies=[Depends(require_csrf)])
+async def admin_word_page_archive(
+    request: Request,
+    word_page_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Архивация страницы слова."""
+    try:
+        page = await archive_word_page(db, word_page_id, admin.id)
+        response = RedirectResponse(
+            url="/admin/word-pages",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+        add_flash(response, "success", f"Страница '{page.slug}' архивирована")
+        return response
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/word-pages/{word_page_id}/regenerate", dependencies=[Depends(require_csrf)])
+async def admin_word_page_regenerate(
+    request: Request,
+    word_page_id: int,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Перегенерация контента страницы слова."""
+    try:
+        page = await regenerate_word_page(db, word_page_id, admin.id)
+        response = RedirectResponse(
+            url="/admin/word-pages",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+        add_flash(response, "success", f"Страница '{page.slug}' перегенерирована")
+        return response
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"[ADMIN] Error regenerating word_page {word_page_id}: {e}")
+        response = RedirectResponse(
+            url="/admin/word-pages",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+        add_flash(response, "error", f"Ошибка перегенерации: {str(e)[:200]}")
+        return response
 ### end of app/routers/admin.py ########################################################################
 
 ### app/routers/auth.py ########################################################################
@@ -4561,6 +5037,111 @@ async def vocabulary_status(
     return response
 ### end of app/routers/vocabulary.py ########################################################################
 
+### app/routers/word_pages.py ########################################################################
+# app/routers/word_pages.py
+"""Публичные роуты для функционала «Страница слова» (Word Pages)."""
+import hashlib
+import logging
+from fastapi import APIRouter, Request, Depends, HTTPException
+from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db import get_db
+from app.deps import get_current_user
+from app.models.user import User
+from app.core.templates import templates
+from app.services.word_page import (
+    get_published_word_page,
+    increment_view_count,
+    get_all_word_links,
+    build_meta_tags,
+    get_catalog,
+    get_sitemap_xml,
+    SITE_BASE_URL,
+)
+
+logger = logging.getLogger(__name__)
+router = APIRouter(tags=["word_pages"])
+
+
+@router.get("/word/{slug}")
+async def word_page(
+    request: Request,
+    slug: str,
+    preview: bool = False,
+    db: AsyncSession = Depends(get_db),
+    user: User | None = Depends(get_current_user),
+):
+    allow_draft = preview and user is not None and user.is_admin
+
+    page = await get_published_word_page(db, slug, allow_draft=allow_draft)
+    if not page:
+        raise HTTPException(status_code=404, detail="Страница не найдена")
+
+    # ETag ДО инкремента просмотров
+    etag_source = page.updated_at.isoformat() if page.updated_at else ""
+    etag = hashlib.md5(etag_source.encode()).hexdigest()
+    etag_quoted = f'"{etag}"'
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match == etag_quoted:
+        return Response(status_code=304, headers={"ETag": etag_quoted})
+
+    if not allow_draft:
+        await increment_view_count(db, page.id)
+
+    content = page.content or {}
+    meta = build_meta_tags(page)
+
+    # Единый запрос: все перекрёстные ссылки (синонимы, антонимы,
+    # ловушки, related_words) — поиск по lemma + pos
+    word_links = await get_all_word_links(db, content)
+
+    canonical_url = f"{SITE_BASE_URL}/word/{page.slug}"
+    word = page.word
+
+    response = templates.TemplateResponse(
+        "word_page/page.html",
+        {
+            "request": request,
+            "page": page,
+            "word": word,
+            "content": content,
+            "meta_title": meta["title"],
+            "meta_description": meta["description"],
+            "canonical_url": canonical_url,
+            "word_links": word_links,
+            "view_count": page.view_count,
+        },
+    )
+    response.headers["Cache-Control"] = "public, max-age=2592000"
+    response.headers["ETag"] = etag_quoted
+    return response
+
+
+@router.get("/words")
+async def words_catalog(
+    request: Request,
+    dict: str | None = None,
+    level: str | None = None,
+    page: int = 1,
+    db: AsyncSession = Depends(get_db),
+):
+    valid_dicts = {"general", "it", "travel"}
+    valid_levels = {"A1", "A2", "B1", "B2", "C1", "C2"}
+    dict_filter = dict if dict in valid_dicts else None
+    level_filter = level if level in valid_levels else None
+    page = max(1, page)
+    catalog = await get_catalog(db, dict_filter=dict_filter, level_filter=level_filter, page=page)
+    response = templates.TemplateResponse("word_page/catalog.html", {"request": request, **catalog})
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    return response
+
+
+@router.get("/sitemap.xml")
+async def sitemap(db: AsyncSession = Depends(get_db)):
+    xml_content = await get_sitemap_xml(db)
+    return Response(content=xml_content, media_type="application/xml", headers={"Cache-Control": "public, max-age=3600"})
+### end of app/routers/word_pages.py ########################################################################
+
 ### app/schemas/auth.py ########################################################################
 from pydantic import BaseModel, EmailStr, Field
 
@@ -4634,19 +5215,23 @@ def get_serializer() -> URLSafeTimedSerializer:
 ### end of app/security.py ########################################################################
 
 ### app/services/admin_prompts.py ########################################################################
+# app/services/admin_prompts.py
 """Сервис для управления промптами (админ)."""
 import re
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.prompt import Prompt
 from app.models.event import Event
 from app.models.user import User
 
-ALLOWED_KEYS = {"generate_sentences", "evaluate_translation", "enrich_word"}
+ALLOWED_KEYS = {"generate_sentences", "evaluate_translation", "enrich_word", "word_page"}
 
 # Обязательные плейсхолдеры для каждого ключа.
 # Для evaluate_translation плейсхолдеры требуются, т.к. они подставляются в helpers.py.
 # Для enrich_word плейсхолдер {word} подставляется в vocabulary_add.py.
+# Для word_page плейсхолдеры подставляются в app/services/word_page.py.
 REQUIRED_PLACEHOLDERS = {
     "generate_sentences": {"{level}"},
     "evaluate_translation": {
@@ -4656,6 +5241,7 @@ REQUIRED_PLACEHOLDERS = {
         "{uuid}",
     },
     "enrich_word": {"{word}"},
+    "word_page": {"{word}", "{pos}", "{dictionary}", "{level}"},
 }
 
 # Все допустимые плейсхолдеры (чтобы не было лишних).
@@ -4668,6 +5254,7 @@ ALLOWED_PLACEHOLDERS = {
         "{uuid}",
     },
     "enrich_word": {"{word}"},
+    "word_page": {"{word}", "{pos}", "{dictionary}", "{level}"},
 }
 
 
@@ -4700,6 +5287,7 @@ def validate_prompt_template(key: str, template: str) -> list[str]:
 
     # Поиск плейсхолдеров вида {something}
     found = set(re.findall(r"\{[a-zA-Z_]+\}", template))
+
     required = REQUIRED_PLACEHOLDERS.get(key, set())
     allowed = ALLOWED_PLACEHOLDERS.get(key, set())
 
@@ -4725,13 +5313,14 @@ def validate_prompt_template(key: str, template: str) -> list[str]:
         "target_words_json": "[]",
         "uuid": "testuuid123",
         "word": "run",
+        "pos": "verb",
+        "dictionary": "it",
     }
 
     try:
         rendered = template
         for k, v in test_values.items():
             rendered = rendered.replace("{" + k + "}", v)
-
         # После замены не должно остаться незаполненных плейсхолдеров
         remaining = re.findall(r"\{[a-zA-Z_]+\}", rendered)
         if remaining:
@@ -4774,7 +5363,6 @@ async def update_prompt(
     stmt = select(Prompt).where(Prompt.key == key)
     result = await db.execute(stmt)
     prompt = result.scalar_one_or_none()
-
     if not prompt:
         raise ValueError(f"Промпт '{key}' не найден")
 
@@ -4787,7 +5375,6 @@ async def update_prompt(
         payload={"key": key},
     )
     db.add(event)
-
     await db.flush()
     await db.refresh(prompt)
     return prompt
@@ -8769,6 +9356,707 @@ def _get_word_dictionaries(word: Word) -> list[str]:
     return dicts or ["general"]
 ### end of app/services/vocabulary_add.py ########################################################################
 
+### app/services/word_page.py ########################################################################
+# app/services/word_page.py
+"""Сервис для функционала «Страница слова» (Word Pages)."""
+import asyncio
+import json
+import logging
+from datetime import datetime, timezone
+from sqlalchemy import select, func, update, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from app.models.word import Word
+from app.models.word_page import WordPage
+from app.models.word_page_queue import WordPageQueue
+from app.models.prompt import Prompt
+from app.models.event import Event
+from app.db import AsyncSessionLocal
+from app.llm.gigachat import chat_json, GigaChatError
+from app.llm.validation import WordPageContentResponse
+from app.llm.llm_logger import log_llm_call
+
+logger = logging.getLogger(__name__)
+
+MAX_VALIDATION_RETRIES = 1
+CATALOG_PER_PAGE = 20
+SITE_BASE_URL = "https://101slovo.ru"
+
+_sitemap_cache: str | None = None
+_sitemap_cache_time: datetime | None = None
+SITEMAP_CACHE_TTL_SECONDS = 3600
+
+
+# ============================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ============================================================
+
+def generate_slug(lemma: str, pos: str) -> str:
+    normalized = lemma.lower().strip().replace(" ", "-")
+    return f"{normalized}-{pos}"
+
+
+async def _get_prompt_template(db: AsyncSession, key: str) -> str:
+    stmt = select(Prompt).where(Prompt.key == key)
+    result = await db.execute(stmt)
+    prompt = result.scalar_one_or_none()
+    if not prompt:
+        raise GigaChatError(f"Prompt '{key}' not found in DB", code="llm_config_error")
+    return prompt.system_template
+
+
+async def _log_llm_call_safe(
+    *, purpose: str = "word_page", user_id: int | None = None,
+    attempt: int = 1, request: dict | None = None,
+    response_raw: str | None = None, response_json: dict | None = None,
+    status: str = "ok", http_status: int | None = None,
+    latency_ms: int | None = None, prompt_tokens: int | None = None,
+    completion_tokens: int | None = None, error_code: str | None = None,
+) -> None:
+    try:
+        async with AsyncSessionLocal() as session:
+            await log_llm_call(
+                session, purpose=purpose, user_id=user_id, attempt=attempt,
+                request=request, response_raw=response_raw, response_json=response_json,
+                status=status, http_status=http_status, latency_ms=latency_ms,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+                error_code=error_code,
+            )
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"[WORD PAGE LOG] Failed to log LLM call: {e}")
+
+
+def _get_word_dictionary(word: Word) -> str:
+    if word.in_it:
+        return "it"
+    if word.in_travel:
+        return "travel"
+    return "general"
+
+
+def invalidate_sitemap_cache() -> None:
+    global _sitemap_cache, _sitemap_cache_time
+    _sitemap_cache = None
+    _sitemap_cache_time = None
+    logger.info("[WORD PAGE] Sitemap cache invalidated")
+
+
+def _normalize_pos(pos: str) -> list[str]:
+    """
+    Нормализует POS. Обрабатывает составные значения:
+    'noun/verb' → ['noun', 'verb']
+    'verb' → ['verb']
+    '' → []
+    """
+    if not pos or not pos.strip():
+        return []
+    parts = [p.strip().lower() for p in pos.replace("/", ",").replace("|", ",").split(",")]
+    return [p for p in parts if p]
+
+
+def _make_link_key(lemma: str, pos: str) -> str:
+    """Ключ для словаря ссылок: 'lemma|pos' или 'lemma'."""
+    lemma_l = lemma.strip().lower()
+    pos_l = pos.strip().lower()
+    if pos_l:
+        return f"{lemma_l}|{pos_l}"
+    return lemma_l
+
+
+# ============================================================
+# ГЕНЕРАЦИЯ КОНТЕНТА
+# ============================================================
+
+async def generate_word_page_content(
+    db: AsyncSession, word: Word, admin_user_id: int,
+) -> tuple[dict, int, int]:
+    system_template = await _get_prompt_template(db, "word_page")
+    dictionary = _get_word_dictionary(word)
+    level = word.level or "A1"
+    system_message = (
+        system_template
+        .replace("{word}", word.lemma)
+        .replace("{pos}", word.pos)
+        .replace("{dictionary}", dictionary)
+        .replace("{level}", level)
+    )
+    messages = [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": f"Сгенерируй разбор слова: {word.lemma}"},
+    ]
+
+    response: WordPageContentResponse | None = None
+    usage_data: tuple[int, int, int, int] | None = None
+    final_attempt = 1
+
+    for validation_attempt in range(MAX_VALIDATION_RETRIES + 1):
+        final_attempt = validation_attempt + 1
+        attempt_request_messages = list(messages)
+        parsed, prompt_tokens, completion_tokens, total_tokens, latency_ms = await chat_json(
+            messages, temperature=0.7, max_tokens=4096, deadline_seconds=60.0,
+        )
+        usage_data = (prompt_tokens, completion_tokens, total_tokens, latency_ms)
+
+        try:
+            response = WordPageContentResponse.model_validate(parsed)
+        except Exception as e:
+            error_msg = f"Pydantic validation failed: {e}"
+            logger.error(f"[WORD PAGE] {error_msg}")
+            await _log_llm_call_safe(
+                purpose="word_page", user_id=admin_user_id, attempt=final_attempt,
+                request={"messages": attempt_request_messages},
+                response_json=parsed if isinstance(parsed, dict) else None,
+                status="invalid_response", latency_ms=latency_ms,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+                error_code="llm_invalid_response",
+            )
+            if validation_attempt < MAX_VALIDATION_RETRIES:
+                messages = messages + [
+                    {"role": "assistant", "content": json.dumps(parsed, ensure_ascii=False)},
+                    {"role": "user", "content": f"Ответ не прошёл проверку структуры: {error_msg}. Исправь и верни ТОЛЬКО валидный JSON."},
+                ]
+                continue
+            raise GigaChatError(f"LLM response validation failed: {e}", code="llm_invalid_response")
+
+        if response.word.lemma.lower().strip() != word.lemma.lower().strip():
+            error_msg = f"Lemma mismatch: expected '{word.lemma}', got '{response.word.lemma}'"
+            logger.error(f"[WORD PAGE] {error_msg}")
+            await _log_llm_call_safe(
+                purpose="word_page", user_id=admin_user_id, attempt=final_attempt,
+                request={"messages": attempt_request_messages},
+                response_json=parsed if isinstance(parsed, dict) else None,
+                status="invalid_response", latency_ms=latency_ms,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+                error_code="llm_lemma_mismatch",
+            )
+            if validation_attempt < MAX_VALIDATION_RETRIES:
+                messages = messages + [
+                    {"role": "assistant", "content": json.dumps(parsed, ensure_ascii=False)},
+                    {"role": "user", "content": f"Ошибка: {error_msg}. Используй ровно слово '{word.lemma}'. Верни ТОЛЬКО валидный JSON."},
+                ]
+                continue
+            raise GigaChatError(f"LLM returned wrong lemma: {error_msg}", code="llm_invalid_response")
+
+        if response.word.part_of_speech.lower().strip() != word.pos.lower().strip():
+            error_msg = f"POS mismatch: expected '{word.pos}', got '{response.word.part_of_speech}'"
+            logger.error(f"[WORD PAGE] {error_msg}")
+            await _log_llm_call_safe(
+                purpose="word_page", user_id=admin_user_id, attempt=final_attempt,
+                request={"messages": attempt_request_messages},
+                response_json=parsed if isinstance(parsed, dict) else None,
+                status="invalid_response", latency_ms=latency_ms,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+                error_code="llm_pos_mismatch",
+            )
+            if validation_attempt < MAX_VALIDATION_RETRIES:
+                messages = messages + [
+                    {"role": "assistant", "content": json.dumps(parsed, ensure_ascii=False)},
+                    {"role": "user", "content": f"Ошибка: {error_msg}. Часть речи должна быть '{word.pos}'. Верни ТОЛЬКО валидный JSON."},
+                ]
+                continue
+            raise GigaChatError(f"LLM returned wrong POS: {error_msg}", code="llm_invalid_response")
+
+        break
+
+    if response is None:
+        raise GigaChatError("Max validation retries exceeded", code="llm_invalid_response")
+
+    await _log_llm_call_safe(
+        purpose="word_page", user_id=admin_user_id, attempt=final_attempt,
+        response_json=response.model_dump(), status="ok",
+        latency_ms=usage_data[3], prompt_tokens=usage_data[0],
+        completion_tokens=usage_data[1],
+    )
+    return response.model_dump(), usage_data[0], usage_data[1]
+
+
+async def create_or_update_word_page(
+    db: AsyncSession, word: Word, content: dict,
+    prompt_tokens: int, completion_tokens: int,
+) -> WordPage:
+    slug = generate_slug(word.lemma, word.pos)
+    now = datetime.now(timezone.utc)
+    stmt = select(WordPage).where(WordPage.word_id == word.id)
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        existing.content = content
+        existing.slug = slug
+        existing.generated_at = now
+        existing.gen_prompt_tokens = prompt_tokens
+        existing.gen_completion_tokens = completion_tokens
+        await db.flush()
+        await db.refresh(existing)
+        logger.info(f"[WORD PAGE] Updated word_page id={existing.id}, slug={slug}, status={existing.status}")
+        return existing
+    else:
+        page = WordPage(
+            word_id=word.id, slug=slug, content=content, status="draft",
+            generated_at=now, gen_prompt_tokens=prompt_tokens,
+            gen_completion_tokens=completion_tokens,
+        )
+        db.add(page)
+        await db.flush()
+        await db.refresh(page)
+        logger.info(f"[WORD PAGE] Created word_page id={page.id}, slug={slug}, status=draft")
+        return page
+
+
+# ============================================================
+# ОЧЕРЕДЬ ГЕНЕРАЦИИ
+# ============================================================
+
+async def add_words_to_queue(db: AsyncSession, word_ids: list[int]) -> tuple[int, list[str]]:
+    added = 0
+    warnings: list[str] = []
+    for word_id in word_ids:
+        stmt = select(Word).where(Word.id == word_id)
+        result = await db.execute(stmt)
+        word = result.scalar_one_or_none()
+        if not word:
+            warnings.append(f"Слово с id={word_id} не найдено")
+            continue
+        stmt_queue = select(WordPageQueue).where(WordPageQueue.word_id == word_id)
+        result_queue = await db.execute(stmt_queue)
+        existing_queue = result_queue.scalar_one_or_none()
+        if existing_queue:
+            if existing_queue.status in ("queued", "processing"):
+                warnings.append(f"'{word.lemma}' ({word.pos}) уже в очереди (статус: {existing_queue.status})")
+                continue
+            existing_queue.status = "queued"
+            existing_queue.error_message = None
+            existing_queue.attempt_count = 0
+            existing_queue.processed_at = None
+            added += 1
+        else:
+            queue_item = WordPageQueue(word_id=word_id, status="queued", attempt_count=0)
+            db.add(queue_item)
+            added += 1
+        stmt_page = select(WordPage).where(WordPage.word_id == word_id)
+        result_page = await db.execute(stmt_page)
+        existing_page = result_page.scalar_one_or_none()
+        if existing_page:
+            warnings.append(f"⚠️ '{word.lemma}' ({word.pos}): страница уже существует, будет перегенерация")
+    await db.flush()
+    return added, warnings
+
+
+async def get_queue_items(db: AsyncSession) -> list[dict]:
+    stmt = (
+        select(WordPageQueue, Word)
+        .join(Word, WordPageQueue.word_id == Word.id)
+        .order_by(WordPageQueue.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    return [{"queue_item": qi, "word": w} for qi, w in result.all()]
+
+
+async def delete_queue_item(db: AsyncSession, queue_id: int) -> bool:
+    stmt = select(WordPageQueue).where(WordPageQueue.id == queue_id)
+    result = await db.execute(stmt)
+    item = result.scalar_one_or_none()
+    if not item or item.status not in ("queued", "error"):
+        return False
+    await db.delete(item)
+    await db.flush()
+    return True
+
+
+async def search_words_for_admin(db: AsyncSession, query: str, limit: int = 20) -> list[Word]:
+    if not query.strip():
+        return []
+    like_pattern = f"%{query.strip().lower()}%"
+    stmt = (
+        select(Word)
+        .where(func.lower(Word.lemma).like(like_pattern))
+        .order_by(Word.lemma.asc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+# ============================================================
+# БАТЧ-ГЕНЕРАЦИЯ
+# ============================================================
+
+async def process_queue_batch(db: AsyncSession, admin_user_id: int) -> dict:
+    stmt = (
+        select(WordPageQueue)
+        .where(WordPageQueue.status == "queued")
+        .order_by(WordPageQueue.id.asc())
+    )
+    result = await db.execute(stmt)
+    queue_items = list(result.scalars().all())
+    if not queue_items:
+        return {"generated": 0, "errors": 0, "total": 0}
+
+    generated = 0
+    errors = 0
+    for queue_item in queue_items:
+        queue_item.status = "processing"
+        await db.flush()
+        try:
+            stmt_word = select(Word).where(Word.id == queue_item.word_id)
+            result_word = await db.execute(stmt_word)
+            word = result_word.scalar_one_or_none()
+            if not word:
+                raise ValueError(f"Word with id={queue_item.word_id} not found")
+            content, pt, ct = await generate_word_page_content(db, word, admin_user_id)
+            await create_or_update_word_page(db, word, content, pt, ct)
+            queue_item.status = "done"
+            queue_item.processed_at = datetime.now(timezone.utc)
+            queue_item.error_message = None
+            generated += 1
+        except Exception as e:
+            logger.error(f"[WORD PAGE] Error generating word_page for word_id={queue_item.word_id}: {e}")
+            queue_item.status = "error"
+            queue_item.error_message = str(e)[:1000]
+            queue_item.attempt_count += 1
+            queue_item.processed_at = datetime.now(timezone.utc)
+            errors += 1
+        await db.flush()
+        await asyncio.sleep(1)
+    return {"generated": generated, "errors": errors, "total": len(queue_items)}
+
+
+# ============================================================
+# ПЕРЕГЕНЕРАЦИЯ
+# ============================================================
+
+async def regenerate_word_page(db: AsyncSession, word_page_id: int, admin_user_id: int) -> WordPage:
+    stmt = select(WordPage).where(WordPage.id == word_page_id)
+    result = await db.execute(stmt)
+    page = result.scalar_one_or_none()
+    if not page:
+        raise ValueError("Страница слова не найдена")
+    stmt_word = select(Word).where(Word.id == page.word_id)
+    result_word = await db.execute(stmt_word)
+    word = result_word.scalar_one_or_none()
+    if not word:
+        raise ValueError("Слово не найдено")
+    content, pt, ct = await generate_word_page_content(db, word, admin_user_id)
+    page.content = content
+    page.generated_at = datetime.now(timezone.utc)
+    page.gen_prompt_tokens = pt
+    page.gen_completion_tokens = ct
+    await db.flush()
+    await db.refresh(page)
+    logger.info(f"[WORD PAGE] Regenerated word_page id={page.id}, slug={page.slug}, status={page.status}")
+    return page
+
+
+# ============================================================
+# ПУБЛИКАЦИЯ / АРХИВАЦИЯ
+# ============================================================
+
+async def publish_word_page(db: AsyncSession, word_page_id: int, admin_user_id: int) -> WordPage:
+    stmt = select(WordPage).where(WordPage.id == word_page_id)
+    result = await db.execute(stmt)
+    page = result.scalar_one_or_none()
+    if not page:
+        raise ValueError("Страница слова не найдена")
+    if page.status == "published":
+        raise ValueError("Страница уже опубликована")
+    page.status = "published"
+    if not page.published_at:
+        page.published_at = datetime.now(timezone.utc)
+    event = Event(user_id=admin_user_id, type="word_page_published", payload={"word_page_id": page.id, "slug": page.slug})
+    db.add(event)
+    await db.flush()
+    await db.refresh(page)
+    invalidate_sitemap_cache()
+    logger.info(f"[WORD PAGE] Published word_page id={page.id}, slug={page.slug}")
+    return page
+
+
+async def archive_word_page(db: AsyncSession, word_page_id: int, admin_user_id: int) -> WordPage:
+    stmt = select(WordPage).where(WordPage.id == word_page_id)
+    result = await db.execute(stmt)
+    page = result.scalar_one_or_none()
+    if not page:
+        raise ValueError("Страница слова не найдена")
+    page.status = "archived"
+    event = Event(user_id=admin_user_id, type="word_page_archived", payload={"word_page_id": page.id, "slug": page.slug})
+    db.add(event)
+    await db.flush()
+    await db.refresh(page)
+    invalidate_sitemap_cache()
+    logger.info(f"[WORD PAGE] Archived word_page id={page.id}, slug={page.slug}")
+    return page
+
+
+# ============================================================
+# ПУБЛИЧНЫЕ СТРАНИЦЫ
+# ============================================================
+
+async def get_published_word_page(db: AsyncSession, slug: str, allow_draft: bool = False) -> WordPage | None:
+    stmt = select(WordPage).where(WordPage.slug == slug)
+    if not allow_draft:
+        stmt = stmt.where(WordPage.status == "published")
+    stmt = stmt.options(selectinload(WordPage.word))
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def increment_view_count(db: AsyncSession, word_page_id: int) -> None:
+    stmt = (
+        update(WordPage)
+        .where(WordPage.id == word_page_id)
+        .values(view_count=WordPage.view_count + 1)
+    )
+    await db.execute(stmt)
+    await db.flush()
+
+
+# ============================================================
+# ПЕРЕКРЁСТНЫЕ ССЫЛКИ (по lemma + pos)
+# ============================================================
+
+def _extract_all_word_refs(content: dict) -> list[tuple[str, str]]:
+    """
+    Извлекает все пары (lemma, pos) из контента страницы.
+    Источники: synonyms, antonyms, level_b_trap, related_words.
+    Возвращает список кортежей (lowercase_lemma, lowercase_pos).
+    """
+    refs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _add(lemma: str, pos: str):
+        l = lemma.strip().lower()
+        if not l:
+            return
+        # Нормализуем составной POS: берём первую часть
+        pos_parts = _normalize_pos(pos)
+        p = pos_parts[0] if pos_parts else ""
+        key = (l, p)
+        if key not in seen:
+            seen.add(key)
+            refs.append(key)
+
+    # related_words — список объектов {lemma, pos} или строк (старый формат)
+    for rw in content.get("related_words", []):
+        if isinstance(rw, dict):
+            _add(rw.get("lemma", ""), rw.get("pos", ""))
+        elif isinstance(rw, str):
+            _add(rw, "")
+
+    # synonyms[].word
+    for syn in content.get("synonyms", []):
+        wd = syn.get("word", {})
+        if isinstance(wd, dict):
+            _add(wd.get("lemma", ""), wd.get("part_of_speech", ""))
+
+    # antonyms[].word
+    for ant in content.get("antonyms", []):
+        wd = ant.get("word", {})
+        if isinstance(wd, dict):
+            _add(wd.get("lemma", ""), wd.get("part_of_speech", ""))
+
+    # level_b_trap[].word
+    for trap in content.get("level_b_trap", []):
+        wd = trap.get("word", {})
+        if isinstance(wd, dict):
+            _add(wd.get("lemma", ""), wd.get("part_of_speech", ""))
+
+    return refs
+
+
+async def get_all_word_links(db: AsyncSession, content: dict) -> dict[str, str]:
+    """
+    Собирает ВСЕ перекрёстные ссылки из контента страницы.
+    Поиск по lemma + pos (если POS указан).
+
+    Возвращает словарь с двумя типами ключей:
+    - "lemma|pos" → slug  (точное совпадение по лемме и POS)
+    - "lemma"     → slug  (фолбэк: первое совпадение по лемме)
+
+    В шаблоне сначала ищем по "lemma|pos", потом по "lemma".
+    """
+    refs = _extract_all_word_refs(content)
+    if not refs:
+        return {}
+
+    # Собираем уникальные леммы для SQL-запроса
+    lemmas = list({r[0] for r in refs})
+
+    # Один SQL-запрос: ищем опубликованные страницы по всем леммам
+    stmt = (
+        select(WordPage, Word)
+        .join(Word, WordPage.word_id == Word.id)
+        .where(
+            WordPage.status == "published",
+            func.lower(Word.lemma).in_(lemmas),
+        )
+        .order_by(WordPage.published_at.desc())
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    # Строим индексы
+    # lemma_lower → список (pos, slug) для фолбэка
+    by_lemma: dict[str, list[tuple[str, str]]] = {}
+    for page, word in rows:
+        key = word.lemma.lower()
+        if key not in by_lemma:
+            by_lemma[key] = []
+        by_lemma[key].append((word.pos.lower(), page.slug))
+
+    # Строим результат
+    links: dict[str, str] = {}
+    for lemma_l, pos_l in refs:
+        candidates = by_lemma.get(lemma_l, [])
+        if not candidates:
+            continue
+
+        # Точное совпадение по lemma + pos
+        if pos_l:
+            for c_pos, c_slug in candidates:
+                if c_pos == pos_l:
+                    links[f"{lemma_l}|{pos_l}"] = c_slug
+                    break
+
+        # Фолбэк по лемме (первый найденный)
+        if lemma_l not in links and candidates:
+            links[lemma_l] = candidates[0][1]
+
+    logger.debug(
+        f"[WORD PAGE] get_all_word_links: "
+        f"requested {len(refs)} refs, found {len(links)} links"
+    )
+    return links
+
+
+def build_meta_tags(page: WordPage) -> dict:
+    content = page.content or {}
+    word_data = content.get("word", {})
+    lemma = word_data.get("lemma", "")
+    transcription = word_data.get("transcription", "")
+    core_translation = content.get("core_translation", "")
+    meta_title = page.meta_title
+    if not meta_title:
+        meta_title = f"{lemma} — {core_translation} | 101slovo"
+    meta_title = meta_title[:200]
+    meta_description = page.meta_description
+    if not meta_description:
+        meta_description = (
+            f"{lemma} {transcription} — {core_translation}. "
+            f"Примеры из IT, синонимы, устойчивые выражения "
+            f"и ловушки для русскоговорящих."
+        )
+    meta_description = meta_description[:300]
+    return {"title": meta_title, "description": meta_description}
+
+
+async def get_word_pages_list(db: AsyncSession, status_filter: str | None = None) -> list[dict]:
+    stmt = (
+        select(WordPage, Word)
+        .join(Word, WordPage.word_id == Word.id)
+        .order_by(WordPage.created_at.desc())
+    )
+    if status_filter:
+        stmt = stmt.where(WordPage.status == status_filter)
+    result = await db.execute(stmt)
+    return [{"page": p, "word": w} for p, w in result.all()]
+
+
+# ============================================================
+# КАТАЛОГ СЛОВ
+# ============================================================
+
+async def get_catalog(
+    db: AsyncSession, dict_filter: str | None = None,
+    level_filter: str | None = None, page: int = 1,
+    per_page: int = CATALOG_PER_PAGE,
+) -> dict:
+    base_query = (
+        select(WordPage, Word)
+        .join(Word, WordPage.word_id == Word.id)
+        .where(WordPage.status == "published")
+    )
+    if dict_filter == "general":
+        base_query = base_query.where(Word.in_general == True)  # noqa: E712
+    elif dict_filter == "it":
+        base_query = base_query.where(Word.in_it == True)  # noqa: E712
+    elif dict_filter == "travel":
+        base_query = base_query.where(Word.in_travel == True)  # noqa: E712
+    if level_filter:
+        base_query = base_query.where(Word.level == level_filter)
+
+    count_stmt = select(func.count()).select_from(base_query.subquery())
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = max(1, min(page, total_pages))
+
+    stmt = (
+        base_query
+        .order_by(WordPage.published_at.desc())
+        .limit(per_page)
+        .offset((page - 1) * per_page)
+    )
+    rows = (await db.execute(stmt)).all()
+    items = []
+    for wp, w in rows:
+        content = wp.content or {}
+        items.append({"page": wp, "word": w, "core_translation": content.get("core_translation", "")})
+    return {
+        "items": items, "page": page, "per_page": per_page,
+        "total": total, "total_pages": total_pages,
+        "dict_filter": dict_filter, "level_filter": level_filter,
+    }
+
+
+# ============================================================
+# SITEMAP
+# ============================================================
+
+async def get_sitemap_xml(db: AsyncSession) -> str:
+    global _sitemap_cache, _sitemap_cache_time
+    now = datetime.now(timezone.utc)
+    if _sitemap_cache is not None and _sitemap_cache_time is not None:
+        elapsed = (now - _sitemap_cache_time).total_seconds()
+        if elapsed < SITEMAP_CACHE_TTL_SECONDS:
+            return _sitemap_cache
+
+    stmt = (
+        select(WordPage)
+        .where(WordPage.status == "published")
+        .order_by(WordPage.published_at.desc())
+    )
+    result = await db.execute(stmt)
+    pages = list(result.scalars().all())
+
+    xml_parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+        "  <url>",
+        f"    <loc>{SITE_BASE_URL}/</loc>",
+        "    <priority>1.0</priority>",
+        "  </url>",
+        "  <url>",
+        f"    <loc>{SITE_BASE_URL}/words</loc>",
+        "    <priority>0.9</priority>",
+        "    <changefreq>daily</changefreq>",
+        "  </url>",
+    ]
+    for page in pages:
+        xml_parts.append("  <url>")
+        xml_parts.append(f"    <loc>{SITE_BASE_URL}/word/{page.slug}</loc>")
+        if page.updated_at:
+            xml_parts.append(f"    <lastmod>{page.updated_at.strftime('%Y-%m-%d')}</lastmod>")
+        xml_parts.append("    <priority>0.8</priority>")
+        xml_parts.append("    <changefreq>monthly</changefreq>")
+        xml_parts.append("  </url>")
+    xml_parts.append("</urlset>")
+    sitemap_xml = "\n".join(xml_parts)
+    _sitemap_cache = sitemap_xml
+    _sitemap_cache_time = now
+    logger.info(f"[WORD PAGE] Sitemap generated: {len(pages)} word pages")
+    return sitemap_xml
+### end of app/services/word_page.py ########################################################################
+
 ### app/services/yookassa_client.py ########################################################################
 """Клиент ЮKassa API для приёма платежей."""
 import logging
@@ -11587,6 +12875,435 @@ document.body.addEventListener('supportReplySent', function() {
 {% endblock %}
 ### end of app/templates/admin/users.html ########################################################################
 
+### app/templates/admin/word_page_queue.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Админ — Очередь генерации{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+    <!-- Заголовок и навигация -->
+    <div class="section-header">
+        <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="list-ordered" style="width: 24px; height: 24px; color: var(--brand-primary);" aria-hidden="true"></i>
+            Очередь генерации
+        </h1>
+        <div style="display: flex; gap: 0.5rem;">
+            <a href="/admin/word-pages" class="secondary">
+                <i data-lucide="book-open-text" class="icon-sm" aria-hidden="true"></i>
+                Страницы слов
+            </a>
+            <a href="/admin/prompts" class="secondary">
+                <i data-lucide="shield" class="icon-sm" aria-hidden="true"></i>
+                Промпты
+            </a>
+        </div>
+    </div>
+
+    <!-- Секция 1: Добавить в очередь -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="search" class="icon-lg" style="color: var(--brand-primary);" aria-hidden="true"></i>
+            Добавить слова в очередь
+        </h3>
+
+        <!-- Форма поиска -->
+        <form method="GET" action="/admin/word-pages/queue" style="display: flex; gap: 0.75rem; margin-bottom: 1rem;">
+            <input type="text"
+                   name="q"
+                   value="{{ search_query }}"
+                   placeholder="Поиск по лемме (например: deploy, run, cache)..."
+                   style="flex: 1;"
+                   autocomplete="off">
+            <button type="submit">
+                <i data-lucide="search" class="icon-sm" aria-hidden="true"></i>
+                Найти
+            </button>
+        </form>
+
+        {% if search_query %}
+        <div style="margin-bottom: 1rem;">
+            <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 0.5rem;">
+                Результаты поиска по запросу «<strong>{{ search_query }}</strong>»:
+                {% if search_results %}{{ search_results | length }} слов{% else %}ничего не найдено{% endif %}
+            </p>
+
+            {% if search_results %}
+            <form method="POST" action="/admin/word-pages/queue/add">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem;">
+                    {% for word in search_results %}
+                    <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 0.875rem; background: var(--surface-50); border: 1px solid var(--border-light); border-radius: var(--radius-md); cursor: pointer; transition: all var(--transition-fast);"
+                           onmouseover="this.style.borderColor='var(--brand-primary-light)'; this.style.background='var(--surface-0)';"
+                           onmouseout="this.style.borderColor='var(--border-light)'; this.style.background='var(--surface-50)';">
+                        <input type="checkbox" name="word_ids" value="{{ word.id }}" style="width: 18px; height: 18px; accent-color: var(--brand-primary); cursor: pointer;">
+                        <div style="flex: 1;">
+                            <strong>{{ word.lemma }}</strong>
+                            <span style="color: var(--text-muted); font-size: 0.75rem;">({{ word.pos }})</span>
+                            {% if word.level %}
+                                <span class="badge badge-active" style="margin-left: 0.375rem;">{{ word.level }}</span>
+                            {% endif %}
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">
+                            {{ word.translations | join(', ') | truncate(50) }}
+                        </div>
+                    </label>
+                    {% endfor %}
+                </div>
+                <button type="submit" style="width: 100%;">
+                    <i data-lucide="plus" class="icon-sm" aria-hidden="true"></i>
+                    Добавить выбранные в очередь
+                </button>
+            </form>
+            {% endif %}
+
+            {# ============================================================ #}
+            {# Блок генерации: если точное совпадение не найдено в базе #}
+            {# ============================================================ #}
+            {% if not exact_match %}
+            <div style="padding: 1rem; border: 2px dashed var(--brand-primary); border-radius: var(--radius-md); background: rgba(99, 102, 241, 0.03); margin-top: 0.75rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                    <i data-lucide="sparkles" style="width: 18px; height: 18px; color: var(--brand-secondary);" aria-hidden="true"></i>
+                    <span style="font-weight: 600; color: var(--text-primary);">
+                        Слово «{{ search_query }}» не найдено в базе
+                    </span>
+                </div>
+                <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 0.75rem;">
+                    Можно сгенерировать его через LLM (GigaChat) и автоматически добавить в словарь.
+                    После генерации слово появится в результатах поиска выше.
+                </p>
+                <form method="POST" action="/admin/word-pages/queue/generate-word">
+                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                    <input type="hidden" name="lemma" value="{{ search_query }}">
+                    <button type="submit"
+                            style="background: var(--gradient-primary); display: inline-flex; align-items: center; gap: 0.5rem;"
+                            onclick="this.disabled=true; this.innerHTML='<span class=\'spinner\'></span> Генерация...'; this.form.submit();">
+                        <i data-lucide="sparkles" class="icon-sm" aria-hidden="true"></i>
+                        Сгенерировать «{{ search_query }}» через LLM
+                    </button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin: 0;">
+            💡 Если слово уже имеет страницу, будет показан бейдж «⚠️ Будет перегенерация».
+            Слова, уже находящиеся в очереди (статусы «в очереди» или «обрабатывается»), не добавляются повторно.
+        </p>
+    </div>
+
+    <!-- Секция 2: Очередь -->
+    <div class="card">
+        <div class="section-header" style="margin-bottom: 1rem;">
+            <h3 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="clock" class="icon-lg" style="color: var(--text-warning-strong);" aria-hidden="true"></i>
+                Элементы очереди
+            </h3>
+            {# Кнопка запуска батча (через namespace) #}
+            {% set ns = namespace(queued_count=0) %}
+            {% for item in queue_items %}
+                {% if item.queue_item.status == 'queued' %}
+                    {% set ns.queued_count = ns.queued_count + 1 %}
+                {% endif %}
+            {% endfor %}
+            {% if ns.queued_count > 0 %}
+            <form method="POST" action="/admin/word-pages/generate-batch">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit"
+                        onclick="return confirm('Запустить генерацию для {{ ns.queued_count }} слов? Это займёт примерно {{ ns.queued_count * 5 }} сек.');">
+                    <i data-lucide="play" class="icon-sm" aria-hidden="true"></i>
+                    Сгенерировать очередь ({{ ns.queued_count }})
+                </button>
+            </form>
+            {% else %}
+            <span class="secondary btn--sm" style="opacity: 0.5; cursor: not-allowed;">
+                <i data-lucide="play" class="icon-xs" aria-hidden="true"></i>
+                Очередь пуста
+            </span>
+            {% endif %}
+        </div>
+
+        {% if not queue_items %}
+        <div class="text-center" style="padding: 2rem;">
+            <p style="color: var(--text-muted);">
+                Очередь пуста. Добавьте слова через форму выше.
+            </p>
+        </div>
+        {% else %}
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Слово</th>
+                        <th>Статус</th>
+                        <th style="text-align: right;">Попытки</th>
+                        <th>Ошибка</th>
+                        <th>Добавлено</th>
+                        <th>Обработано</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in queue_items %}
+                    {% set qi = item.queue_item %}
+                    {% set word = item.word %}
+                    <tr>
+                        <td>
+                            <strong>{{ word.lemma }}</strong>
+                            <span style="color: var(--text-muted); font-size: 0.75rem;">({{ word.pos }})</span>
+                            {% if word.level %}
+                                <span class="badge badge-active" style="margin-left: 0.25rem;">{{ word.level }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if qi.status == 'queued' %}
+                                <span class="badge badge-active">⏳ В очереди</span>
+                            {% elif qi.status == 'processing' %}
+                                <span class="badge badge-review">🔄 Обрабатывается</span>
+                            {% elif qi.status == 'done' %}
+                                <span class="badge badge-mastered">✅ Готово</span>
+                            {% elif qi.status == 'error' %}
+                                <span class="badge badge-ignored">❌ Ошибка</span>
+                            {% endif %}
+                        </td>
+                        <td style="text-align: right;">{{ qi.attempt_count }}</td>
+                        <td>
+                            {% if qi.error_message %}
+                                <span style="color: var(--text-error-strong); font-size: 0.75rem;" title="{{ qi.error_message }}">
+                                    {{ qi.error_message | truncate(60) }}
+                                </span>
+                            {% else %}
+                                <span style="color: var(--text-muted);">—</span>
+                            {% endif %}
+                        </td>
+                        <td style="font-size: 0.8125rem; color: var(--text-muted);">
+                            {{ qi.created_at.strftime('%d.%m.%Y %H:%M') }}
+                        </td>
+                        <td style="font-size: 0.8125rem; color: var(--text-muted);">
+                            {% if qi.processed_at %}
+                                {{ qi.processed_at.strftime('%d.%m.%Y %H:%M') }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if qi.status in ('queued', 'error') %}
+                            <form method="POST" action="/admin/word-pages/queue/{{ qi.id }}/delete" style="display: inline;">
+                                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                <button type="submit" class="secondary btn--sm" title="Удалить из очереди"
+                                        onclick="return confirm('Удалить {{ word.lemma }} из очереди?');">
+                                    <i data-lucide="trash-2" class="icon-xs" aria-hidden="true"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Подсказка -->
+    <div class="flash-info" style="margin-top: 1rem;">
+        <i data-lucide="info" class="icon-md" aria-hidden="true"></i>
+        <span style="font-size: 0.8125rem;">
+            <strong>Как работает генерация:</strong>
+            Батч обрабатывает все слова со статусом «⏳ В очереди» последовательно.
+            Между запросами — пауза 1 сек для защиты от рейт-лимита GigaChat.
+            Успешные слова получают страницу со статусом «📝 Черновик» (или обновляются, если страница уже была).
+        </span>
+    </div>
+</div>
+{% endblock %}
+### end of app/templates/admin/word_page_queue.html ########################################################################
+
+### app/templates/admin/word_pages.html ########################################################################
+{% extends "base.html" %}
+{% block title %}Админ — Страницы слов{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+    <!-- Заголовок и навигация -->
+    <div class="section-header">
+        <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="book-open-text" style="width: 24px; height: 24px; color: var(--brand-primary);" aria-hidden="true"></i>
+            Страницы слов
+        </h1>
+        <div style="display: flex; gap: 0.5rem;">
+            <a href="/admin/word-pages/queue" class="secondary">
+                <i data-lucide="list-ordered" class="icon-sm" aria-hidden="true"></i>
+                Очередь генерации
+            </a>
+            <a href="/admin/prompts" class="secondary">
+                <i data-lucide="shield" class="icon-sm" aria-hidden="true"></i>
+                Промпты
+            </a>
+        </div>
+    </div>
+
+    <!-- Фильтр по статусу -->
+    <div class="card mb-3" style="padding: 0.875rem 1rem;">
+        <form method="GET" action="/admin/word-pages" style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 150px;">
+                <label for="status" style="margin-bottom: 0.25rem; font-size: 0.75rem;">Статус</label>
+                <select id="status" name="status">
+                    <option value="">Все</option>
+                    <option value="draft" {% if status_filter == 'draft' %}selected{% endif %}>📝 Черновик</option>
+                    <option value="published" {% if status_filter == 'published' %}selected{% endif %}>🟢 Опубликовано</option>
+                    <option value="archived" {% if status_filter == 'archived' %}selected{% endif %}>📦 Архив</option>
+                </select>
+            </div>
+            <button type="submit">Применить</button>
+        </form>
+    </div>
+
+    {% if not items %}
+        <div class="card text-center" style="padding: 3rem;">
+            <div style="font-size: 3rem; margin-bottom: 0.75rem; opacity: 0.4;">📄</div>
+            <h3 style="margin: 0 0 0.5rem 0;">Страниц слов пока нет</h3>
+            <p style="color: var(--text-muted); margin-bottom: 1rem;">
+                Добавьте слова в очередь генерации и запустите батч.
+            </p>
+            <a href="/admin/word-pages/queue" role="button">
+                <i data-lucide="plus" class="icon-sm" aria-hidden="true"></i>
+                Перейти к очереди
+            </a>
+        </div>
+    {% else %}
+        <!-- Сводка (через namespace, т.к. вложенные атрибуты в фильтрах не работают) -->
+        {% set ns = namespace(published_count=0, total_views=0) %}
+        {% for item in items %}
+            {% if item.page.status == 'published' %}
+                {% set ns.published_count = ns.published_count + 1 %}
+            {% endif %}
+            {% set ns.total_views = ns.total_views + item.page.view_count %}
+        {% endfor %}
+
+        <div class="grid grid-3" style="gap: 0.75rem; margin-bottom: 1rem;">
+            <div class="stat-card stat-card--compact">
+                <div class="stat-card__body">
+                    <div class="stat-card__value" style="font-size: 1.5rem;">{{ items | length }}</div>
+                    <div class="stat-card__label">Всего страниц</div>
+                </div>
+            </div>
+            <div class="stat-card stat-card--compact">
+                <div class="stat-card__body">
+                    <div class="stat-card__value" style="font-size: 1.5rem; color: var(--text-success-strong);">
+                        {{ ns.published_count }}
+                    </div>
+                    <div class="stat-card__label">Опубликовано</div>
+                </div>
+            </div>
+            <div class="stat-card stat-card--compact">
+                <div class="stat-card__body">
+                    <div class="stat-card__value" style="font-size: 1.5rem; color: var(--text-warning-strong);">
+                        {{ ns.total_views }}
+                    </div>
+                    <div class="stat-card__label">Всего просмотров</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Таблица страниц -->
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Слово</th>
+                        <th>Slug</th>
+                        <th>Статус</th>
+                        <th style="text-align: right;">Просмотры</th>
+                        <th>Сгенерировано</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                        {% set page = item.page %}
+                        {% set word = item.word %}
+                        <tr>
+                            <td>
+                                <strong>{{ word.lemma }}</strong>
+                                <span style="color: var(--text-muted); font-size: 0.75rem;">({{ word.pos }})</span>
+                                {% if word.level %}
+                                    <span class="badge badge-active" style="margin-left: 0.25rem;">{{ word.level }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <code style="font-size: 0.75rem;">{{ page.slug }}</code>
+                            </td>
+                            <td>
+                                {% if page.status == 'published' %}
+                                    <span class="badge badge-mastered">🟢 Опубликовано</span>
+                                {% elif page.status == 'draft' %}
+                                    <span class="badge badge-active">📝 Черновик</span>
+                                {% elif page.status == 'archived' %}
+                                    <span class="badge badge-ignored">📦 Архив</span>
+                                {% endif %}
+                            </td>
+                            <td style="text-align: right;">{{ page.view_count }}</td>
+                            <td style="font-size: 0.8125rem; color: var(--text-muted);">
+                                {% if page.generated_at %}
+                                    {{ page.generated_at.strftime('%d.%m.%Y %H:%M') }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div style="display: flex; gap: 0.25rem; flex-wrap: wrap;">
+                                    {# Предпросмотр / Просмотр публичной страницы #}
+                                    {% if page.status == 'published' %}
+                                        <a href="/word/{{ page.slug }}" target="_blank" class="secondary btn--sm" title="Просмотр публичной страницы">
+                                            <i data-lucide="eye" class="icon-xs" aria-hidden="true"></i>
+                                        </a>
+                                    {% else %}
+                                        <a href="/word/{{ page.slug }}?preview=1" target="_blank" class="secondary btn--sm" title="Предпросмотр">
+                                            <i data-lucide="eye" class="icon-xs" aria-hidden="true"></i>
+                                        </a>
+                                    {% endif %}
+
+                                    {# Перегенерация #}
+                                    <form method="POST" action="/admin/word-pages/{{ page.id }}/regenerate" style="display: inline;">
+                                        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                        <button type="submit" class="secondary btn--sm" title="Перегенерировать"
+                                                onclick="return confirm('Перегенерировать контент для {{ word.lemma }}? Статус не изменится.');">
+                                            <i data-lucide="refresh-cw" class="icon-xs" aria-hidden="true"></i>
+                                        </button>
+                                    </form>
+
+                                    {# Публикация / Архивация #}
+                                    {% if page.status == 'draft' or page.status == 'archived' %}
+                                        <form method="POST" action="/admin/word-pages/{{ page.id }}/publish" style="display: inline;">
+                                            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                            <button type="submit" class="btn--sm btn--success" title="Опубликовать">
+                                                <i data-lucide="upload" class="icon-xs" aria-hidden="true"></i>
+                                            </button>
+                                        </form>
+                                    {% elif page.status == 'published' %}
+                                        <form method="POST" action="/admin/word-pages/{{ page.id }}/archive" style="display: inline;">
+                                            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                            <button type="submit" class="secondary btn--sm" title="Архивировать"
+                                                    onclick="return confirm('Архивировать страницу {{ page.slug }}?');">
+                                                <i data-lucide="archive" class="icon-xs" aria-hidden="true"></i>
+                                            </button>
+                                        </form>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.75rem;">
+            💡 <strong>Перегенерация</strong> обновляет контент «на лету» — статус страницы не меняется.
+            <strong>Публикация</strong> делает страницу доступной по адресу <code>/word/{slug}</code>.
+        </p>
+    {% endif %}
+</div>
+{% endblock %}
+### end of app/templates/admin/word_pages.html ########################################################################
+
 ### app/templates/auth/login.html ########################################################################
 {% extends "base.html" %}
 {% block title %}Вход — 101slovo{% endblock %}
@@ -11681,63 +13398,75 @@ document.body.addEventListener('supportReplySent', function() {
 <!DOCTYPE html>
 <html lang="ru" data-theme="light" class="notranslate" translate="no">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#6366f1">
-  <meta name="google" content="notranslate">
-  <title>{% block title %}101slovo{% endblock %}</title>
-  <script>
-    (function() {
-      const theme = localStorage.getItem('theme') || 'light';
-      document.documentElement.setAttribute('data-theme', theme);
-    })();
-  </script>
-  <link rel="preload" href="/static/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/static/fonts/inter-500.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/static/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/static/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/static/fonts/inter-800.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/static/css/custom.css">
-  <script src="/static/vendor/htmx.min.js"></script>
-  <script defer src="/static/js/app.js"></script>
-  <script defer src="/static/vendor/alpine.min.js"></script>
-  <script defer src="/static/vendor/lucide.min.js"></script>
-  <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
-  <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
-  <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
-  <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
-  <link rel="manifest" href="/static/favicon/site.webmanifest" />
-  {% block head %}{% endblock %}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="google" content="notranslate">
+
+    <!-- Title и Description -->
+    <title>{% block title %}101slovo — Английские слова в контексте с ИИ{% endblock %}</title>
+    <meta name="description" content="{% block description %}Изучайте английские слова в контексте с помощью ИИ. Интервальное повторение, умная проверка переводов и персонализированные уроки. 5 минут в день.{% endblock %}">
+
+    <script>
+        (function() {
+            const theme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
+
+    <link rel="preload" href="/static/fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-500.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-600.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-700.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/inter-800.woff2" as="font" type="font/woff2" crossorigin>
+
+    <link rel="stylesheet" href="/static/css/custom.css">
+    <script src="/static/vendor/htmx.min.js"></script>
+    <script defer src="/static/js/app.js"></script>
+    <script defer src="/static/vendor/alpine.min.js"></script>
+    <script defer src="/static/vendor/lucide.min.js"></script>
+
+    <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
+    <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
+    <link rel="manifest" href="/static/favicon/site.webmanifest" />
+
+    {% block head %}{% endblock %}
 </head>
 <body>
-  <a href="#main-content" class="visually-hidden">
-    Перейти к основному содержимому
-  </a>
+    <a href="#main-content" class="visually-hidden">
+        Перейти к основному содержимому
+    </a>
 
-  {% include "partials/nav.html" %}
-  {% include "partials/flash.html" %}
+    {% include "partials/nav.html" %}
 
-  <main class="container fade-in-up" id="main-content" style="padding-top: 1rem; padding-bottom: 2rem;" aria-label="Основное содержимое страницы">
-    {% block content %}{% endblock %}
-  </main>
+    {% include "partials/flash.html" %}
 
-  <footer class="container text-center" style="padding: 1.25rem 0; color: var(--text-muted); font-size: 0.8125rem; border-top: 1px solid var(--border-light); margin-top: auto;" aria-label="Информация о сайте">
-    <p style="margin-bottom: 0.5rem;">© 2026 101slovo • Изучай английский в контексте</p>
-    <nav aria-label="Юридические документы">
-      <p style="display: flex; justify-content: center; gap: 1.25rem; flex-wrap: wrap; font-size: 0.75rem;">
-        <a href="/legal/offer" style="color: var(--text-muted); text-decoration: none;">Оферта</a>
-        <a href="/legal/privacy" style="color: var(--text-muted); text-decoration: none;">Конфиденциальность</a>
-        <a href="/legal/terms" style="color: var(--text-muted); text-decoration: none;">Условия использования</a>
-        <a href="/legal/consent" style="color: var(--text-muted); text-decoration: none;">Согласие на обработку ПД</a>
-      </p>
-    </nav>
-  </footer>
+    <main class="container fade-in-up" id="main-content" style="padding-top: 1rem; padding-bottom: 2rem;" aria-label="Основное содержимое страницы">
+        {% block content %}{% endblock %}
+    </main>
 
-  <script>
-    document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
-    document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
-  </script>
-  {% block scripts %}{% endblock %}
+    <footer class="container text-center" style="padding: 1.25rem 0; color: var(--text-muted); font-size: 0.8125rem; border-top: 1px solid var(--border-light); margin-top: auto;" aria-label="Информация о сайте">
+        <p style="margin-bottom: 0.5rem;">© 2026 101slovo • Изучай английский в контексте</p>
+        <nav aria-label="Юридические документы">
+            <p style="display: flex; justify-content: center; gap: 1.25rem; flex-wrap: wrap; font-size: 0.75rem;">
+                <!-- ✅ НОВОЕ: Ссылка на словарь слов -->
+                <a href="/words" style="color: var(--text-muted); text-decoration: none;">Словарь слов</a>
+                <a href="/legal/offer" style="color: var(--text-muted); text-decoration: none;">Оферта</a>
+                <a href="/legal/privacy" style="color: var(--text-muted); text-decoration: none;">Конфиденциальность</a>
+                <a href="/legal/terms" style="color: var(--text-muted); text-decoration: none;">Условия использования</a>
+                <a href="/legal/consent" style="color: var(--text-muted); text-decoration: none;">Согласие на обработку ПД</a>
+            </p>
+        </nav>
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => { if (window.lucide) lucide.createIcons(); });
+        document.body.addEventListener('htmx:afterSwap', () => { if (window.lucide) lucide.createIcons(); });
+    </script>
+
+    {% block scripts %}{% endblock %}
 </body>
 </html>
 ### end of app/templates/base.html ########################################################################
@@ -13829,166 +15558,199 @@ button[type="submit"] {
 
 ### app/templates/partials/nav.html ########################################################################
 <nav class="navbar" x-data="{ mobileMenuOpen: false }" aria-label="Основная навигация">
-<div class="navbar-inner">
-    <a href="/" class="navbar-brand" aria-label="101slovo — на главную">
-        <i data-lucide="book-open" style="width: 20px; height: 20px;" aria-hidden="true"></i>
-        101slovo
-    </a>
-    <button class="navbar-burger"
-            type="button"
-            @click.stop="mobileMenuOpen = !mobileMenuOpen"
-            :aria-expanded="mobileMenuOpen.toString()"
-            aria-controls="mobile-menu"
-            aria-label="Открыть меню навигации">
-        <i data-lucide="menu" x-show="!mobileMenuOpen" style="width: 22px; height: 22px;" aria-hidden="true"></i>
-        <i data-lucide="x" x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
-    </button>
+    <div class="navbar-inner">
+        <a href="/" class="navbar-brand" aria-label="101slovo — на главную">
+            <i data-lucide="book-open" style="width: 20px; height: 20px;" aria-hidden="true"></i>
+            101slovo
+        </a>
 
-    <!-- ===== ДЕСКТОПНОЕ МЕНЮ ===== -->
-    <div class="navbar-menu--desktop">
+        <button class="navbar-burger"
+                type="button"
+                @click.stop="mobileMenuOpen = !mobileMenuOpen"
+                :aria-expanded="mobileMenuOpen.toString()"
+                aria-controls="mobile-menu"
+                aria-label="Открыть меню навигации">
+            <i data-lucide="menu" x-show="!mobileMenuOpen" style="width: 22px; height: 22px;" aria-hidden="true"></i>
+            <i data-lucide="x" x-show="mobileMenuOpen" x-cloak style="width: 22px; height: 22px;" aria-hidden="true"></i>
+        </button>
+
+        <!-- ===== ДЕСКТОПНОЕ МЕНЮ ===== -->
+        <div class="navbar-menu--desktop">
+            {% if request.state.user %}
+                {% if request.state.user.is_onboarded %}
+                    <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
+                        <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
+                    </a>
+                    <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
+                        <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+                    </a>
+                    <!-- ✅ НОВОЕ: Публичный словарь слов -->
+                    <a href="/words" class="nav-link {% if '/words' in request.url.path or '/word/' in request.url.path %}active{% endif %}">
+                        <i data-lucide="globe" style="width:16px;height:16px" aria-hidden="true"></i> Словарь слов
+                    </a>
+                    <a href="/support" class="nav-link {% if '/support' in request.url.path %}active{% endif %}">
+                        <i data-lucide="message-circle" style="width:16px;height:16px" aria-hidden="true"></i>
+                        Поддержка
+                        {% if request.state.unread_support_count > 0 %}
+                            <span class="nav-badge">{{ request.state.unread_support_count }}</span>
+                        {% endif %}
+                    </a>
+                    <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
+                        <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
+                    </a>
+                    <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
+                        <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
+                    </a>
+                {% endif %}
+
+                {% if request.state.is_partner %}
+                    <a href="/partner/dashboard" class="nav-link {% if '/partner' in request.url.path %}active{% endif %}">
+                        <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Кабинет партнёра
+                    </a>
+                {% endif %}
+
+                {% if request.state.user.is_admin %}
+                    <a href="/admin/users" class="nav-link nav-link--admin {% if '/admin/users' in request.url.path %}active{% endif %}">
+                        <i data-lucide="users" style="width:16px;height:16px" aria-hidden="true"></i> Пользователи
+                    </a>
+                    <a href="/admin/support" class="nav-link nav-link--admin {% if '/admin/support' in request.url.path %}active{% endif %}">
+                        <i data-lucide="message-square" style="width:16px;height:16px" aria-hidden="true"></i>
+                        Обращения
+                        {% if request.state.admin_unread_support_count > 0 %}
+                            <span class="nav-badge nav-badge--admin">{{ request.state.admin_unread_support_count }}</span>
+                        {% endif %}
+                    </a>
+                    <!-- ✅ НОВОЕ: Админка Word Pages -->
+                    <a href="/admin/word-pages" class="nav-link nav-link--admin {% if '/admin/word-pages' in request.url.path %}active{% endif %}">
+                        <i data-lucide="book-open-text" style="width:16px;height:16px" aria-hidden="true"></i> Страницы слов
+                    </a>
+                    <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
+                        <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
+                    </a>
+                    <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
+                        <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
+                    </a>
+                    <a href="/admin/partners" class="nav-link nav-link--admin {% if '/admin/partners' in request.url.path %}active{% endif %}">
+                        <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Партнёры
+                    </a>
+                {% endif %}
+
+                <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+                    <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+                    <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+                </button>
+
+                <form action="/logout" method="POST" style="display:inline;margin-left:0.5rem;">
+                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                    <button type="submit" class="navbar-logout" aria-label="Выйти из аккаунта">
+                        <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
+                    </button>
+                </form>
+            {% else %}
+                <!-- ✅ НОВОЕ: Словарь слов для неавторизованных -->
+                <a href="/words" class="nav-link {% if '/words' in request.url.path or '/word/' in request.url.path %}active{% endif %}">
+                    <i data-lucide="globe" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+                </a>
+                <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+                    <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
+                    <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+                </button>
+                <a href="/login" class="nav-link">Войти</a>
+                <a href="/register" class="nav-link nav-link--primary">Регистрация</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ===== МОБИЛЬНОЕ МЕНЮ ===== -->
+    <div class="navbar-mobile-menu"
+         id="mobile-menu"
+         :class="{ 'is-open': mobileMenuOpen }"
+         @click.outside="mobileMenuOpen = false">
         {% if request.state.user %}
             {% if request.state.user.is_onboarded %}
-                <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
+                <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" @click="mobileMenuOpen = false">
                     <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
                 </a>
-                <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}">
+                <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
                     <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
                 </a>
-                <a href="/support" class="nav-link {% if '/support' in request.url.path %}active{% endif %}">
+                <!-- ✅ НОВОЕ: Публичный словарь слов -->
+                <a href="/words" class="nav-link {% if '/words' in request.url.path or '/word/' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+                    <i data-lucide="globe" style="width:16px;height:16px" aria-hidden="true"></i> Словарь слов
+                </a>
+                <a href="/support" class="nav-link {% if '/support' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
                     <i data-lucide="message-circle" style="width:16px;height:16px" aria-hidden="true"></i>
                     Поддержка
                     {% if request.state.unread_support_count > 0 %}
                         <span class="nav-badge">{{ request.state.unread_support_count }}</span>
                     {% endif %}
                 </a>
-                <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}">
+                <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
                     <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
                 </a>
-                <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
+                <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" @click="mobileMenuOpen = false">
                     <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
                 </a>
             {% endif %}
+
             {% if request.state.is_partner %}
-                <a href="/partner/dashboard" class="nav-link {% if '/partner' in request.url.path %}active{% endif %}">
+                <a href="/partner/dashboard" class="nav-link {% if '/partner' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
                     <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Кабинет партнёра
                 </a>
             {% endif %}
+
             {% if request.state.user.is_admin %}
-                <a href="/admin/users" class="nav-link nav-link--admin {% if '/admin/users' in request.url.path %}active{% endif %}">
+                <a href="/admin/users" class="nav-link nav-link--admin {% if '/admin/users' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
                     <i data-lucide="users" style="width:16px;height:16px" aria-hidden="true"></i> Пользователи
                 </a>
-                <a href="/admin/support" class="nav-link nav-link--admin {% if '/admin/support' in request.url.path %}active{% endif %}">
+                <a href="/admin/support" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
                     <i data-lucide="message-square" style="width:16px;height:16px" aria-hidden="true"></i>
                     Обращения
                     {% if request.state.admin_unread_support_count > 0 %}
                         <span class="nav-badge nav-badge--admin">{{ request.state.admin_unread_support_count }}</span>
                     {% endif %}
                 </a>
-                <a href="/admin/prompts" class="nav-link nav-link--admin {% if request.url.path == '/admin/prompts' %}active{% endif %}">
+                <!-- ✅ НОВОЕ: Админка Word Pages -->
+                <a href="/admin/word-pages" class="nav-link nav-link--admin {% if '/admin/word-pages' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+                    <i data-lucide="book-open-text" style="width:16px;height:16px" aria-hidden="true"></i> Страницы слов
+                </a>
+                <a href="/admin/prompts" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
                     <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
                 </a>
-                <a href="/admin/stats" class="nav-link nav-link--admin {% if request.url.path == '/admin/stats' %}active{% endif %}">
+                <a href="/admin/stats" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
                     <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
                 </a>
-                <a href="/admin/partners" class="nav-link nav-link--admin {% if '/admin/partners' in request.url.path %}active{% endif %}">
+                <a href="/admin/partners" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
                     <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Партнёры
                 </a>
             {% endif %}
-            <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+
+            <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
                 <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
                 <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+                Сменить тему
             </button>
-            <form action="/logout" method="POST" style="display:inline;margin-left:0.5rem;">
+
+            <form action="/logout" method="POST" style="margin-top:0.5rem;">
                 <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-                <button type="submit" class="navbar-logout" aria-label="Выйти из аккаунта">
+                <button type="submit" class="navbar-logout" style="width:100%;" aria-label="Выйти">
                     <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
                 </button>
             </form>
         {% else %}
-            <button type="button" onclick="toggleTheme()" class="nav-link nav-link--icon" title="Сменить тему" aria-label="Сменить цветовую тему">
+            <!-- ✅ НОВОЕ: Словарь слов для неавторизованных -->
+            <a href="/words" class="nav-link {% if '/words' in request.url.path or '/word/' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
+                <i data-lucide="globe" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
+            </a>
+            <a href="/login" class="nav-link" @click="mobileMenuOpen = false">Войти</a>
+            <a href="/register" class="nav-link nav-link--primary" @click="mobileMenuOpen = false">Регистрация</a>
+            <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
                 <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
                 <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
+                Сменить тему
             </button>
-            <a href="/login" class="nav-link">Войти</a>
-            <a href="/register" class="nav-link nav-link--primary">Регистрация</a>
         {% endif %}
     </div>
-</div>
-
-<!-- ===== МОБИЛЬНОЕ МЕНЮ ===== -->
-<div class="navbar-mobile-menu"
-     id="mobile-menu"
-     :class="{ 'is-open': mobileMenuOpen }"
-     @click.outside="mobileMenuOpen = false">
-    {% if request.state.user %}
-        {% if request.state.user.is_onboarded %}
-            <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}" @click="mobileMenuOpen = false">
-                <i data-lucide="layout-dashboard" style="width:16px;height:16px" aria-hidden="true"></i> Дашборд
-            </a>
-            <a href="/vocabulary" class="nav-link {% if '/vocabulary' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-                <i data-lucide="book" style="width:16px;height:16px" aria-hidden="true"></i> Словарь
-            </a>
-            <a href="/support" class="nav-link {% if '/support' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-                <i data-lucide="message-circle" style="width:16px;height:16px" aria-hidden="true"></i>
-                Поддержка
-                {% if request.state.unread_support_count > 0 %}
-                    <span class="nav-badge">{{ request.state.unread_support_count }}</span>
-                {% endif %}
-            </a>
-            <a href="/billing" class="nav-link {% if '/billing' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-                <i data-lucide="crown" style="width:16px;height:16px" aria-hidden="true"></i> Подписка
-            </a>
-            <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}" @click="mobileMenuOpen = false">
-                <i data-lucide="settings" style="width:16px;height:16px" aria-hidden="true"></i> Настройки
-            </a>
-        {% endif %}
-        {% if request.state.is_partner %}
-            <a href="/partner/dashboard" class="nav-link {% if '/partner' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-                <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Кабинет партнёра
-            </a>
-        {% endif %}
-        {% if request.state.user.is_admin %}
-            <a href="/admin/users" class="nav-link nav-link--admin {% if '/admin/users' in request.url.path %}active{% endif %}" @click="mobileMenuOpen = false">
-                <i data-lucide="users" style="width:16px;height:16px" aria-hidden="true"></i> Пользователи
-            </a>
-            <a href="/admin/support" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-                <i data-lucide="message-square" style="width:16px;height:16px" aria-hidden="true"></i>
-                Обращения
-                {% if request.state.admin_unread_support_count > 0 %}
-                    <span class="nav-badge nav-badge--admin">{{ request.state.admin_unread_support_count }}</span>
-                {% endif %}
-            </a>
-            <a href="/admin/prompts" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-                <i data-lucide="shield" style="width:16px;height:16px" aria-hidden="true"></i> Промпты
-            </a>
-            <a href="/admin/stats" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-                <i data-lucide="bar-chart-3" style="width:16px;height:16px" aria-hidden="true"></i> Статистика
-            </a>
-            <a href="/admin/partners" class="nav-link nav-link--admin" @click="mobileMenuOpen = false">
-                <i data-lucide="handshake" style="width:16px;height:16px" aria-hidden="true"></i> Партнёры
-            </a>
-        {% endif %}
-        <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
-            <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-            <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-            Сменить тему
-        </button>
-        <form action="/logout" method="POST" style="margin-top:0.5rem;">
-            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
-            <button type="submit" class="navbar-logout" style="width:100%;" aria-label="Выйти">
-                <i data-lucide="log-out" style="width:14px;height:14px" aria-hidden="true"></i> Выйти
-            </button>
-        </form>
-    {% else %}
-        <a href="/login" class="nav-link" @click="mobileMenuOpen = false">Войти</a>
-        <a href="/register" class="nav-link nav-link--primary" @click="mobileMenuOpen = false">Регистрация</a>
-        <button type="button" onclick="toggleTheme()" class="nav-link" style="width:100%;text-align:left;" @click="mobileMenuOpen = false" aria-label="Сменить тему">
-            <i data-lucide="sun" class="theme-icon-sun" style="width:18px;height:18px;display:none;" aria-hidden="true"></i>
-            <i data-lucide="moon" class="theme-icon-moon" style="width:18px;height:18px;" aria-hidden="true"></i>
-            Сменить тему
-        </button>
-    {% endif %}
-</div>
 </nav>
 
 <style>
@@ -14020,6 +15782,7 @@ function toggleTheme() {
     localStorage.setItem('theme', next);
     updateThemeIcons(next);
 }
+
 function updateThemeIcons(theme) {
     document.querySelectorAll('.theme-icon-sun').forEach(function(el) {
         el.style.display = theme === 'dark' ? 'block' : 'none';
@@ -14028,6 +15791,7 @@ function updateThemeIcons(theme) {
         el.style.display = theme === 'dark' ? 'none' : 'block';
     });
 }
+
 document.addEventListener('DOMContentLoaded', function() {
     updateThemeIcons(document.documentElement.getAttribute('data-theme'));
 });
@@ -15321,6 +17085,455 @@ function vocabPage() {
 </div>
 {% endblock %}
 ### end of app/templates/vocabulary/word.html ########################################################################
+
+### app/templates/word_page/catalog.html ########################################################################
+{% extends "base.html" %}
+
+{% block title %}Словарь английских слов для IT и бизнеса — 101slovo{% endblock %}
+{% block description %}Каталог английских слов с глубоким разбором: перевод, примеры из IT, синонимы, устойчивые выражения. Уровни A1–C2.{% endblock %}
+
+{% block head %}
+<link rel="canonical" href="https://101slovo.ru/words">
+<style>
+.catalog-filters {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+  align-items: center;
+}
+.catalog-filters select {
+  min-width: 140px;
+}
+.word-card-catalog {
+  padding: 1rem;
+  background: var(--surface-0);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+.word-card-catalog:hover {
+  border-color: var(--brand-primary-light);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-2px);
+}
+.word-card-lemma {
+  font-weight: 700;
+  font-size: 1.125rem;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+.word-card-pos {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.word-card-translation {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin-top: 0.375rem;
+}
+.word-card-badges {
+  display: flex;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+.catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1rem;
+}
+@media (max-width: 768px) {
+  .catalog-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+
+  <div class="page-header">
+    <div class="page-header__emoji">📚</div>
+    <h1 class="page-header__title text-gradient">Словарь английских слов</h1>
+    <p class="page-header__subtitle">
+      Глубокий разбор слов для IT и бизнеса: перевод, контекст, синонимы, ловушки
+    </p>
+  </div>
+
+  <!-- Фильтры -->
+  <form method="GET" action="/words" class="card" style="margin-bottom: 1.5rem; padding: 1rem;">
+    <div class="catalog-filters">
+      <div>
+        <label for="dict" style="margin-bottom: 0.25rem; font-size: 0.75rem;">Словарь</label>
+        <select id="dict" name="dict">
+          <option value="">Все</option>
+          <option value="general" {% if dict_filter == 'general' %}selected{% endif %}>Общий</option>
+          <option value="it" {% if dict_filter == 'it' %}selected{% endif %}>IT</option>
+          <option value="travel" {% if dict_filter == 'travel' %}selected{% endif %}>Путешествия</option>
+        </select>
+      </div>
+      <div>
+        <label for="level" style="margin-bottom: 0.25rem; font-size: 0.75rem;">Уровень</label>
+        <select id="level" name="level">
+          <option value="">Все</option>
+          {% for lvl in ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] %}
+          <option value="{{ lvl }}" {% if level_filter == lvl %}selected{% endif %}>{{ lvl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" style="align-self: flex-end;">Применить</button>
+    </div>
+  </form>
+
+  <!-- Результаты -->
+  {% if items %}
+  <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1rem;">
+    Найдено слов: {{ total }}
+  </p>
+
+  <div class="catalog-grid">
+    {% for item in items %}
+    <a href="/word/{{ item.page.slug }}" class="word-card-catalog">
+      <div class="word-card-lemma">{{ item.word.lemma }}</div>
+      <div class="word-card-pos">{{ item.word.pos }}</div>
+      <div class="word-card-translation">{{ item.core_translation }}</div>
+      <div class="word-card-badges">
+        {% if item.word.level %}
+        <span class="badge badge-active">{{ item.word.level }}</span>
+        {% endif %}
+        {% if item.word.in_it %}
+        <span class="badge badge-review">IT</span>
+        {% elif item.word.in_travel %}
+        <span class="badge badge-review">Travel</span>
+        {% else %}
+        <span class="badge badge-review">Общий</span>
+        {% endif %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+
+  <!-- Пагинация -->
+  {% include "partials/pagination.html" %}
+
+  {% else %}
+  <div class="card text-center" style="padding: 3rem 2rem;">
+    <div style="font-size: 3rem; margin-bottom: 0.75rem; opacity: 0.4;">📭</div>
+    <h3 style="margin: 0 0 0.5rem 0;">Слова не найдены</h3>
+    <p style="color: var(--text-muted);">
+      {% if dict_filter or level_filter %}
+      Попробуйте изменить фильтры
+      {% else %}
+      Скоро здесь появятся слова!
+      {% endif %}
+    </p>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
+### end of app/templates/word_page/catalog.html ########################################################################
+
+### app/templates/word_page/page.html ########################################################################
+{% extends "base.html" %}
+{% block title %}{{ meta_title }}{% endblock %}
+{% block description %}{{ meta_description }}{% endblock %}
+{% block head %}
+<link rel="canonical" href="{{ canonical_url }}">
+<meta property="og:title" content="{{ meta_title }}">
+<meta property="og:description" content="{{ meta_description }}">
+<meta property="og:type" content="article">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:site_name" content="101slovo">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{{ meta_title }}">
+<meta name="twitter:description" content="{{ meta_description }}">
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "DefinedTerm",
+    "name": "{{ content.word.lemma }}",
+    "inDefinedTermSet": {"@type": "DefinedTermSet", "name": "101slovo IT Dictionary"},
+    "description": "{{ content.core_translation }}",
+    "termCode": "{{ content.word.lemma }}",
+    "inLanguage": "en",
+    "alternateName": {{ content.other_translations | tojson | safe }}
+}
+</script>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://101slovo.ru/"},
+        {"@type": "ListItem", "position": 2, "name": "Словарь", "item": "https://101slovo.ru/words"},
+        {"@type": "ListItem", "position": 3, "name": "{{ content.word.lemma }}", "item": "{{ canonical_url }}"}
+    ]
+}
+</script>
+<style>
+.word-page-header { text-align: center; padding: 1.5rem 0; margin-bottom: 1.5rem; }
+.word-page-lemma {
+    font-size: 2.5rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 0.25rem;
+    background: var(--gradient-primary); -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent; background-clip: text;
+}
+.word-page-transcription { font-size: 1.25rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+.word-page-core { font-size: 1.5rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem; }
+.word-page-other { color: var(--text-secondary); font-size: 0.9375rem; }
+.word-section { margin-bottom: 1.5rem; }
+.word-section-title {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-size: 1.125rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-primary);
+}
+.context-sentence { font-size: 1.125rem; font-style: italic; color: var(--text-primary); margin-bottom: 0.5rem; line-height: 1.6; }
+.context-translation { color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.5; }
+.synonym-item, .antonym-item, .trap-item {
+    padding: 0.75rem; background: var(--surface-50); border-radius: var(--radius-md);
+    margin-bottom: 0.5rem; border-left: 3px solid var(--brand-primary);
+}
+.synonym-word, .antonym-word, .trap-word { font-weight: 700; color: var(--text-primary); }
+.word-link {
+    color: var(--brand-primary); text-decoration: none; font-weight: 700;
+    border-bottom: 1px dashed var(--brand-primary-light); transition: all var(--transition-fast);
+}
+.word-link:hover { color: var(--brand-primary-dark); border-bottom-style: solid; }
+.synonym-nuance, .antonym-nuance, .trap-nuance { color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.25rem; }
+.collocation-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.625rem 0.75rem; background: var(--surface-50);
+    border-radius: var(--radius-md); margin-bottom: 0.375rem; flex-wrap: wrap; gap: 0.5rem;
+}
+.collocation-phrase { font-weight: 600; color: var(--text-primary); }
+.collocation-translation { color: var(--text-secondary); font-size: 0.875rem; }
+.trap-item { border-left-color: var(--text-error-strong); background: var(--bg-error); }
+.related-words { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.related-word-link {
+    display: inline-flex; align-items: center; padding: 0.375rem 0.75rem;
+    background: var(--surface-100); border-radius: var(--radius-full);
+    color: var(--brand-primary); text-decoration: none; font-weight: 500;
+    font-size: 0.875rem; transition: all var(--transition-fast);
+}
+.related-word-link:hover { background: var(--brand-primary); color: white; }
+.related-word-link--plain { color: var(--text-secondary); cursor: default; }
+.related-word-link--plain:hover { background: var(--surface-100); color: var(--text-secondary); }
+.breadcrumbs { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 1rem; }
+.breadcrumbs a { color: var(--text-secondary); text-decoration: none; }
+.breadcrumbs a:hover { color: var(--brand-primary); }
+.badge-level { background: rgba(99, 102, 241, 0.12); color: var(--text-brand); }
+.badge-dict { background: rgba(236, 72, 153, 0.12); color: var(--text-brand-secondary); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+    <nav class="breadcrumbs" aria-label="Хлебные крошки">
+        <a href="/">Главная</a><span>→</span>
+        <a href="/words">Словарь</a><span>→</span>
+        <span>{{ content.word.lemma }}</span>
+    </nav>
+
+    <div class="word-page-header">
+        <h1 class="word-page-lemma">{{ content.word.lemma }}</h1>
+        <div class="word-page-transcription">{{ content.word.transcription }}</div>
+        <div style="display: flex; justify-content: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+            <span class="badge badge-active">{{ content.word.part_of_speech }}</span>
+            {% if word.level %}<span class="badge badge-level">{{ word.level }}</span>{% endif %}
+            {% if word.in_it %}<span class="badge badge-dict">IT</span>
+            {% elif word.in_travel %}<span class="badge badge-dict">Путешествия</span>
+            {% else %}<span class="badge badge-dict">Общий</span>{% endif %}
+        </div>
+        <div class="word-page-core">{{ content.core_translation }}</div>
+        {% if content.other_translations %}
+        <div class="word-page-other">Также: {{ content.other_translations | join(', ') }}</div>
+        {% endif %}
+    </div>
+
+    <!-- В контексте -->
+    <div class="word-section">
+        <h2 class="word-section-title">
+            <i data-lucide="message-circle" style="width:18px;height:18px;color:var(--brand-primary);" aria-hidden="true"></i>
+            В контексте
+        </h2>
+        <div class="card">
+            <p class="context-sentence" lang="en">"{{ content.context_sentence.english }}"</p>
+            <p class="context-translation">→ {{ content.context_sentence.russian }}</p>
+        </div>
+    </div>
+
+    <!-- Синонимы -->
+    {% if content.synonyms %}
+    <div class="word-section">
+        <h2 class="word-section-title">
+            <i data-lucide="repeat" style="width:18px;height:18px;color:var(--color-success);" aria-hidden="true"></i>
+            Синонимы
+        </h2>
+        {% for syn in content.synonyms %}
+        {% set syn_ll = syn.word.lemma | lower %}
+        {% set syn_pos = syn.word.part_of_speech | lower %}
+        {% set syn_pos_first = syn_pos.split('/')[0] | trim if '/' in syn_pos else syn_pos %}
+        {% set syn_key_exact = syn_ll ~ '|' ~ syn_pos_first %}
+        <div class="synonym-item">
+            <div class="synonym-word">
+                {% if syn_key_exact in word_links %}
+                    <a href="/word/{{ word_links[syn_key_exact] }}" class="word-link" title="Разбор слова «{{ syn.word.lemma }}»">
+                        {{ syn.word.lemma }}
+                    </a>
+                {% elif syn_ll in word_links %}
+                    <a href="/word/{{ word_links[syn_ll] }}" class="word-link" title="Разбор слова «{{ syn.word.lemma }}»">
+                        {{ syn.word.lemma }}
+                    </a>
+                {% else %}
+                    {{ syn.word.lemma }}
+                {% endif %}
+                <span style="color:var(--text-muted);font-weight:400;">{{ syn.word.transcription }}</span>
+            </div>
+            <div class="synonym-nuance">{{ syn.nuance }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Антонимы -->
+    {% if content.antonyms %}
+    <div class="word-section">
+        <h2 class="word-section-title">
+            <i data-lucide="arrow-left-right" style="width:18px;height:18px;color:var(--text-warning-strong);" aria-hidden="true"></i>
+            Антонимы
+        </h2>
+        {% for ant in content.antonyms %}
+        {% set ant_ll = ant.word.lemma | lower %}
+        {% set ant_pos = ant.word.part_of_speech | lower %}
+        {% set ant_pos_first = ant_pos.split('/')[0] | trim if '/' in ant_pos else ant_pos %}
+        {% set ant_key_exact = ant_ll ~ '|' ~ ant_pos_first %}
+        <div class="antonym-item">
+            <div class="antonym-word">
+                {% if ant_key_exact in word_links %}
+                    <a href="/word/{{ word_links[ant_key_exact] }}" class="word-link" title="Разбор слова «{{ ant.word.lemma }}»">
+                        {{ ant.word.lemma }}
+                    </a>
+                {% elif ant_ll in word_links %}
+                    <a href="/word/{{ word_links[ant_ll] }}" class="word-link" title="Разбор слова «{{ ant.word.lemma }}»">
+                        {{ ant.word.lemma }}
+                    </a>
+                {% else %}
+                    {{ ant.word.lemma }}
+                {% endif %}
+                <span style="color:var(--text-muted);font-weight:400;">{{ ant.word.transcription }}</span>
+            </div>
+            <div class="antonym-nuance">{{ ant.nuance }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Устойчивые выражения -->
+    {% if content.collocations %}
+    <div class="word-section">
+        <h2 class="word-section-title">
+            <i data-lucide="link" style="width:18px;height:18px;color:var(--text-accent);" aria-hidden="true"></i>
+            Устойчивые выражения
+        </h2>
+        {% for col in content.collocations %}
+        <div class="collocation-item">
+            <span class="collocation-phrase" lang="en">{{ col.phrase }}</span>
+            <span class="collocation-translation">{{ col.translation }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Ловушки -->
+    {% if content.level_b_trap %}
+    <div class="word-section">
+        <h2 class="word-section-title">
+            <i data-lucide="alert-triangle" style="width:18px;height:18px;color:var(--text-error-strong);" aria-hidden="true"></i>
+            Ловушки для русскоговорящих
+        </h2>
+        {% for trap in content.level_b_trap %}
+        {% set tr_ll = trap.word.lemma | lower %}
+        {% set tr_pos = trap.word.part_of_speech | lower %}
+        {% set tr_pos_first = tr_pos.split('/')[0] | trim if '/' in tr_pos else tr_pos %}
+        {% set tr_key_exact = tr_ll ~ '|' ~ tr_pos_first %}
+        <div class="trap-item">
+            <div class="trap-word">
+                ⚠️
+                {% if tr_key_exact in word_links %}
+                    <a href="/word/{{ word_links[tr_key_exact] }}" class="word-link" style="color:var(--text-error-strong);border-bottom-color:var(--text-error-strong);" title="Разбор слова «{{ trap.word.lemma }}»">
+                        {{ trap.word.lemma }}
+                    </a>
+                {% elif tr_ll in word_links %}
+                    <a href="/word/{{ word_links[tr_ll] }}" class="word-link" style="color:var(--text-error-strong);border-bottom-color:var(--text-error-strong);" title="Разбор слова «{{ trap.word.lemma }}»">
+                        {{ trap.word.lemma }}
+                    </a>
+                {% else %}
+                    {{ trap.word.lemma }}
+                {% endif %}
+                ≠ {{ content.word.lemma }}
+            </div>
+            <div class="trap-nuance">{{ trap.nuance }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Похожие слова -->
+    {% if content.related_words %}
+    <div class="word-section">
+        <h2 class="word-section-title">
+            <i data-lucide="book-open" style="width:18px;height:18px;color:var(--brand-primary);" aria-hidden="true"></i>
+            Похожие слова
+        </h2>
+        <div class="related-words">
+            {% for rw in content.related_words %}
+                {% if rw is mapping %}
+                    {% set rw_lemma = rw.lemma %}
+                    {% set rw_pos = rw.pos | default('') %}
+                {% else %}
+                    {% set rw_lemma = rw %}
+                    {% set rw_pos = '' %}
+                {% endif %}
+                {% set rw_ll = rw_lemma | lower | trim %}
+                {% set rw_pos_l = rw_pos | lower | trim %}
+                {% set rw_key = rw_ll ~ '|' ~ rw_pos_l if rw_pos_l else rw_ll %}
+                {% if rw_key in word_links %}
+                    <a href="/word/{{ word_links[rw_key] }}" class="related-word-link">{{ rw_lemma }}</a>
+                {% elif rw_ll in word_links %}
+                    <a href="/word/{{ word_links[rw_ll] }}" class="related-word-link">{{ rw_lemma }}</a>
+                {% else %}
+                    <span class="related-word-link related-word-link--plain">{{ rw_lemma }}</span>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- CTA -->
+    <div class="cta-section" style="margin-top: 2rem;">
+        {% if request.state.user %}
+            <h3>Хотите запомнить это слово навсегда?</h3>
+            <p>Учите слова в предложениях с ИИ. Интервальное повторение закрепляет навсегда.</p>
+            <a href="/dashboard" role="button">Продолжить обучение</a>
+        {% else %}
+            <h3>Хотите запомнить это слово навсегда?</h3>
+            <p>Учите слова в предложениях с ИИ. Интервальное повторение закрепляет навсегда.</p>
+            <a href="/register" role="button">Начать бесплатно</a>
+        {% endif %}
+    </div>
+
+    <p style="text-align:center;color:var(--text-muted);font-size:0.75rem;margin-top:1rem;">
+        👁 {{ view_count }} просмотров
+    </p>
+</div>
+{% endblock %}
+### end of app/templates/word_page/page.html ########################################################################
 
 ### app/utils/__init__.py ########################################################################
 
@@ -16888,6 +19101,77 @@ def downgrade() -> None:
     # ### end Alembic commands ###
 ### end of migrations/versions/e415bc2a09fb_initial_schema.py ########################################################################
 
+### migrations/versions/f7a8b9c0d1e2_add_word_pages_tables.py ########################################################################
+"""add word pages tables
+
+Revision ID: f7a8b9c0d1e2
+Revises: d1e2f3a4b5c6
+Create Date: 2026-10-14 12:00:00.000000
+"""
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+# revision identifiers, used by Alembic.
+revision = 'f7a8b9c0d1e2'
+down_revision = 'd1e2f3a4b5c6'
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    # === Таблица word_pages ===
+    op.create_table(
+        'word_pages',
+        sa.Column('id', sa.BigInteger(), sa.Identity(always=False), nullable=False),
+        sa.Column('word_id', sa.BigInteger(), nullable=False),
+        sa.Column('slug', sa.String(length=128), nullable=False),
+        sa.Column('content', postgresql.JSON(astext_type=sa.Text()), nullable=False),
+        sa.Column('meta_title', sa.String(length=200), nullable=True),
+        sa.Column('meta_description', sa.String(length=300), nullable=True),
+        sa.Column('status', sa.String(length=16), nullable=False, server_default='draft'),
+        sa.Column('view_count', sa.Integer(), nullable=False, server_default='0'),
+        sa.Column('generated_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('gen_prompt_tokens', sa.Integer(), nullable=True),
+        sa.Column('gen_completion_tokens', sa.Integer(), nullable=True),
+        sa.Column('published_at', sa.DateTime(timezone=True), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.ForeignKeyConstraint(['word_id'], ['words.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('word_id', name='uq_word_pages_word_id'),
+        sa.UniqueConstraint('slug', name='uq_word_pages_slug'),
+    )
+    op.create_index('ix_word_pages_slug', 'word_pages', ['slug'], unique=False)
+    op.create_index('ix_word_pages_status', 'word_pages', ['status'], unique=False)
+    op.create_index('ix_word_pages_status_published', 'word_pages', ['status', 'published_at'], unique=False)
+
+    # === Таблица word_page_queue ===
+    op.create_table(
+        'word_page_queue',
+        sa.Column('id', sa.BigInteger(), sa.Identity(always=False), nullable=False),
+        sa.Column('word_id', sa.BigInteger(), nullable=False),
+        sa.Column('status', sa.String(length=16), nullable=False, server_default='queued'),
+        sa.Column('error_message', sa.Text(), nullable=True),
+        sa.Column('attempt_count', sa.SmallInteger(), nullable=False, server_default='0'),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('processed_at', sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(['word_id'], ['words.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('word_id', name='uq_word_page_queue_word_id'),
+    )
+    op.create_index('ix_word_page_queue_status', 'word_page_queue', ['status'], unique=False)
+
+
+def downgrade() -> None:
+    op.drop_index('ix_word_page_queue_status', table_name='word_page_queue')
+    op.drop_table('word_page_queue')
+    op.drop_index('ix_word_pages_status_published', table_name='word_pages')
+    op.drop_index('ix_word_pages_status', table_name='word_pages')
+    op.drop_index('ix_word_pages_slug', table_name='word_pages')
+    op.drop_table('word_pages')
+### end of migrations/versions/f7a8b9c0d1e2_add_word_pages_tables.py ########################################################################
+
 ### pytest.ini ########################################################################
 [pytest]
 testpaths = tests
@@ -17279,6 +19563,84 @@ from app.db import AsyncSessionLocal
 from app.models import Prompt
 
 PROMPTS = {
+    "word_page": """Ты — эксперт-лингвист, методист и создатель образовательного контента.
+Твоя специализация — современный английский язык для IT-специалистов
+(разработчики, продакты, QA, аналитики) и взрослых профессионалов.
+
+Твоя задача: создать глубокий, практичный и «вкусный» разбор английского
+слова по заданной JSON-структуре.
+
+СЛОВО: {word}
+ЧАСТЬ РЕЧИ: {pos}
+СЛОВАРЬ: {dictionary}
+УРОВЕНЬ: {level}
+
+КРИТИЧЕСКИ ВАЖНЫЕ ПРАВИЛА ДЛЯ КОНТЕНТА:
+1. НИКАКИХ ШКОЛЬНЫХ ПРИМЕРОВ. Забудь про "The cat is on the table".
+2. КОНТЕКСТ: Примеры и коллокации — из реальной жизни IT и бизнеса:
+   переписка в Slack/Jira, дейлики, ретроспективы, чтение технической
+   документации, общение с заказчиками, написание резюме.
+3. ТОН: Профессиональный, но не сухой. Как у крутого сеньора, который
+   объясняет джуну нюансы на кофе-брейке. Без занудства.
+4. НЮАНСЫ: В синонимах и антонимах объясняй РЕГИСТР (формально/неформально),
+   СФЕРУ (код/бизнес/общение) и ЭМОЦИОНАЛЬНУЮ ОКРАСКУ.
+5. ЛОВУШКИ: Ищи «ложных друзей переводчика», типичные кальки с русского,
+   или слова, которые носители НЕ используют в данном контексте.
+
+СТРУКТУРА И ТРЕБОВАНИЯ К ПОЛЯМ JSON:
+- word: Базовая форма, транскрипция (строго IPA), часть речи.
+- core_translation: Самый частый, «ударный» перевод (1-2 слова).
+- other_translations: Альтернативные переводы.
+- context_sentence: Одно ёмкое предложение на английском и его естественный
+  перевод на русский. Контекст: IT, бизнес, карьера, взрослая жизнь.
+- synonyms: 2-3 слова. В поле nuance: «Используй это, когда хочешь звучать
+  мягче/формальнее/конкретнее в Jira/на митинге».
+- antonyms: 1-2 слова. Краткий контекст использования.
+- collocations: 3-4 устойчивых выражения. Перевод естественный.
+- level_b_trap: 1-2 слова-ловушки. В поле nuance: чёткое предупреждение.
+- related_words: 3-5 связанных слов/терминов для перелинковки.
+
+ФОРМАТ ОТВЕТА:
+Сгенерируй ИСКЛЮЧИТЕЛЬНО валидный JSON-объект, строго соответствующий схеме.
+ЗАПРЕЩЕНО: приветствия, пояснения, markdown (```json). Только сырой JSON.
+
+СХЕМА JSON:
+{
+  "word": {
+    "lemma": "string",
+    "transcription": "string",
+    "part_of_speech": "string"
+  },
+  "core_translation": "string",
+  "other_translations": ["string"],
+  "context_sentence": {
+    "english": "string",
+    "russian": "string"
+  },
+  "synonyms": [
+    {
+      "word": {"lemma": "string", "transcription": "string", "part_of_speech": "string"},
+      "nuance": "string"
+    }
+  ],
+  "antonyms": [
+    {
+      "word": {"lemma": "string", "transcription": "string", "part_of_speech": "string"},
+      "nuance": "string"
+    }
+  ],
+  "collocations": [
+    {"phrase": "string", "translation": "string"}
+  ],
+  "level_b_trap": [
+    {
+      "word": {"lemma": "string", "transcription": "string", "part_of_speech": "string"},
+      "nuance": "string"
+    }
+  ],
+  "related_words": ["string"]
+}""",
+
     "generate_sentences": """Ты — эксперт-лингвист и методист. Твоя задача — генерировать короткие, естественные предложения на английском языке для уровня {level}.
 
 СТРОГИЕ ТРЕБОВАНИЯ:
@@ -17384,6 +19746,183 @@ async def seed_prompts():
 if __name__ == "__main__":
     asyncio.run(seed_prompts())
 ### end of scripts/seed.py ########################################################################
+
+### scripts/test_gigachat_multilang.py ########################################################################
+#!/usr/bin/env python3
+"""
+Тест качества GigaChat для 5 языковых пар.
+Проверяет генерацию предложений и оценку переводов.
+
+Запуск:
+    python scripts/test_gigachat_multilang.py
+"""
+
+import asyncio
+import sys
+import os
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.llm.gigachat import chat_json
+
+TEST_LANGUAGES = [
+    ("ru", "Русский", "Russian"),
+    ("uk", "Українська", "Ukrainian"),
+    ("de", "Deutsch", "German"),
+    ("es", "Español", "Spanish"),
+    ("pt", "Português", "Portuguese"),
+]
+
+USER_TRANSLATIONS = {
+    "ru": {
+        "correct": "Я бегаю каждый день в парке.",
+        "typo": "Я бегаю каджый день в парке.",
+        "incorrect": "Я читаю книгу.",
+    },
+    "uk": {
+        "correct": "Я бігаю щодня в парку.",
+        "typo": "Я бігаю щоденно в парку.",
+        "incorrect": "Я читаю книгу.",
+    },
+    "de": {
+        "correct": "Ich laufe jeden Tag im Park.",
+        "typo": "Ich laufe jeden Tag im Parck.",
+        "incorrect": "Ich lese ein Buch.",
+    },
+    "es": {
+        "correct": "Corro todos los días en el parque.",
+        "typo": "Corro todos los dias en el parque.",
+        "incorrect": "Leo un libro.",
+    },
+    "pt": {
+        "correct": "Eu corro todos os dias no parque.",
+        "typo": "Eu corro todos os dia no parque.",
+        "incorrect": "Eu leio um livro.",
+    },
+}
+
+
+async def test_generation(lang_code, lang_name_ru, lang_name_en):
+    print(f"\n{'='*60}")
+    print(f"🧪 ТЕСТ ГЕНЕРАЦИИ: {lang_name_ru} ({lang_code})")
+    print(f"{'='*60}\n")
+    
+    system_prompt = f"""Ты — эксперт-лингвист. Генерируй короткие предложения на английском (A1).
+
+ТРЕБОВАНИЯ:
+1. Используй ТОЛЬКО переданные слова.
+2. 3-15 слов в предложении.
+3. НЕ используй кириллицу в английском предложении.
+4. Перевод на {lang_name_en} должен быть точным.
+5. Только JSON.
+
+ФОРМАТ:
+{{
+  "exercises": [
+    {{
+      "target_sentence": "English sentence.",
+      "reference_translation": "{lang_name_ru} translation.",
+      "target_words": [{{"lemma": "word", "surface_form": "words", "pos": "noun"}}]
+    }}
+  ]
+}}"""
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "Сгенерируй предложение со словом: run (verb)"},
+    ]
+    
+    try:
+        parsed, pt, ct, tt, lat = await chat_json(messages, temperature=0.7, max_tokens=2048, deadline_seconds=30.0)
+        
+        if parsed and "exercises" in parsed:
+            ex = parsed["exercises"][0]
+            print(f"✅ Английское: {ex.get('target_sentence', 'N/A')}")
+            print(f"✅ Перевод: {ex.get('reference_translation', 'N/A')}")
+            print(f"📊 Токены: {pt}+{ct}={tt}, latency={lat}ms\n")
+            return ex.get('target_sentence', 'I run every day in the park.')
+        return "I run every day in the park."
+    except Exception as e:
+        print(f"❌ Ошибка: {e}\n")
+        return "I run every day in the park."
+
+
+async def test_evaluation(lang_code, lang_name_ru, lang_name_en, target_sentence):
+    print(f"\n{'='*60}")
+    print(f"🧪 ТЕСТ ОЦЕНКИ: {lang_name_ru} ({lang_code})")
+    print(f"{'='*60}\n")
+    
+    system_prompt = f"""Ты — экзаменатор. Оцени перевод на {lang_name_en}.
+
+ВХОД:
+- Англ: {target_sentence}
+- Эталон ({lang_name_ru}): {USER_TRANSLATIONS[lang_code]['correct']}
+- Целевые слова: [{{"lemma": "run", "pos": "verb"}}]
+
+ЗАДАЧА:
+1. Статус: "correct", "typo", "incorrect".
+2. Для каждого слова: "mastered", "learning", "failed".
+3. Комментарий на {lang_name_ru}.
+
+ФОРМАТ (JSON):
+{{
+  "status": "correct|typo|incorrect",
+  "feedback": "Комментарий",
+  "evaluations": [{{"lemma": "run", "status": "mastered|learning|failed", "comment": "..."}}]
+}}"""
+    
+    results = []
+    for test_type, user_translation in USER_TRANSLATIONS[lang_code].items():
+        print(f"📝 '{test_type}': {user_translation}")
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"<<<UT_123>>>{user_translation}<<<UT_123>>>"},
+        ]
+        
+        try:
+            parsed, _, _, _, _ = await chat_json(messages, temperature=0.2, max_tokens=1024, deadline_seconds=20.0)
+            status = parsed.get("status", "N/A") if parsed else "N/A"
+            feedback = parsed.get("feedback", "N/A")[:100] if parsed else "N/A"
+            match = "✅" if status == test_type else "⚠️"
+            print(f"   {match} {status} | {feedback}...\n")
+            results.append(match)
+        except Exception as e:
+            print(f"   ❌ {e}\n")
+            results.append("❌")
+    
+    return results
+
+
+async def main():
+    print("🚀 Тест GigaChat для 5 языков\n")
+    
+    all_results = {}
+    generated_sentences = {}
+    
+    for lang_code, lang_name_ru, lang_name_en in TEST_LANGUAGES:
+        sentence = await test_generation(lang_code, lang_name_ru, lang_name_en)
+        generated_sentences[lang_code] = sentence
+        await asyncio.sleep(1)
+    
+    for lang_code, lang_name_ru, lang_name_en in TEST_LANGUAGES:
+        results = await test_evaluation(lang_code, lang_name_ru, lang_name_en, generated_sentences[lang_code])
+        all_results[lang_code] = results
+        await asyncio.sleep(1)
+    
+    print("\n" + "="*60)
+    print("📊 ИТОГИ")
+    print("="*60 + "\n")
+    for lang, results in all_results.items():
+        correct = sum(1 for r in results if r == "✅")
+        print(f"{lang.upper()}: {correct}/{len(results)} ✅")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+### end of scripts/test_gigachat_multilang.py ########################################################################
 
 ### scripts/words_generation_prompt.txt ########################################################################
 Ты — эксперт-лексикограф и методист по обучению английскому языку. Твоя задача — составить список английских слов для приложения интервального повторения.

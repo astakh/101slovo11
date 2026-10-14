@@ -1,13 +1,13 @@
 # app/llm/validation.py
 """Pydantic-модели для валидации ответов LLM."""
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Any
 
 
 class TargetWordItem(BaseModel):
     lemma: str = Field(min_length=1, max_length=64)
     surface_form: str = Field(min_length=1, max_length=64)
-    pos: str = Field(min_length=1, max_length=10)
+    pos: str = Field(min_length=1, max_length=16)
 
 
 class GeneratedExercise(BaseModel):
@@ -42,37 +42,18 @@ class EvaluateResponse(BaseModel):
     @field_validator("translation_errors", mode="before")
     @classmethod
     def normalize_translation_errors(cls, v: Any) -> list[str]:
-        """
-        Нормализует translation_errors в список строк.
-        
-        GigaChat иногда возвращает:
-        - Список словарей (error objects) вместо списка строк
-        - Одну строку вместо списка
-        - None или пустое значение
-        
-        Этот валидатор преобразует все варианты в list[str].
-        """
         if v is None:
             return []
-        
-        # Если это не список — оборачиваем в список
         if not isinstance(v, list):
             if isinstance(v, str):
                 return [v] if v.strip() else []
-            # Неизвестный тип — возвращаем пустой список
             return []
-        
-        # Обрабатываем каждый элемент списка
         result = []
         for item in v:
             if isinstance(item, str):
-                # Уже строка — добавляем как есть
                 if item.strip():
                     result.append(item)
             elif isinstance(item, dict):
-                # Словарь — пытаемся извлечь полезную информацию
-                # Формат может быть: {"original_word": "...", "error_type": "..."}
-                # или другие варианты
                 parts = []
                 if "original_word" in item:
                     parts.append(str(item["original_word"]))
@@ -82,16 +63,12 @@ class EvaluateResponse(BaseModel):
                     parts.append(str(item["message"]))
                 if "description" in item:
                     parts.append(str(item["description"]))
-                
                 if parts:
                     result.append(": ".join(parts))
                 else:
-                    # Если не удалось извлечь — конвертируем dict в строку
                     result.append(str(item))
             else:
-                # Любой другой тип — конвертируем в строку
                 result.append(str(item))
-        
         return result
 
 
@@ -102,7 +79,6 @@ class LlmUsage(BaseModel):
 
 
 class EnrichedWordVariant(BaseModel):
-    """Вариант слова из LLM (разные части речи)."""
     lemma: str = Field(min_length=1, max_length=64)
     pos: str = Field(min_length=1, max_length=16)
     level: str = Field(pattern=r"^(A1|A2|B1|B2|C1|C2)$")
@@ -111,5 +87,87 @@ class EnrichedWordVariant(BaseModel):
 
 
 class EnrichWordResponse(BaseModel):
-    """Ответ LLM на запрос обогащения слова. Может быть пустым, если слово не существует."""
     variants: list[EnrichedWordVariant] = Field(default_factory=list, max_length=5)
+
+
+# ============================================================
+# WORD PAGE (SEO-страницы слов)
+# ============================================================
+
+class WordPageWord(BaseModel):
+    """Базовая информация о слове."""
+    lemma: str = Field(min_length=1, max_length=64)
+    transcription: str = Field(min_length=3, max_length=50)
+    part_of_speech: str = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_keys(cls, data: Any) -> Any:
+        """Исправляет опечатки LLM в ключах."""
+        if isinstance(data, dict):
+            for key in list(data.keys()):
+                nk = key.replace("_", "").replace(" ", "").replace("-", "").lower()
+                if nk == "partofspeech" and "part_of_speech" not in data:
+                    data["part_of_speech"] = data.pop(key)
+                elif nk == "transcription" and "transcription" not in data:
+                    data["transcription"] = data.pop(key)
+                elif nk == "lemma" and "lemma" not in data:
+                    data["lemma"] = data.pop(key)
+        return data
+
+
+class WordPageContextSentence(BaseModel):
+    english: str = Field(min_length=10, max_length=200)
+    russian: str = Field(min_length=10, max_length=300)
+
+
+class WordPageSynonym(BaseModel):
+    word: WordPageWord
+    nuance: str = Field(min_length=1, max_length=300)
+
+
+class WordPageCollocation(BaseModel):
+    phrase: str = Field(min_length=2, max_length=100)
+    translation: str = Field(min_length=2, max_length=200)
+
+
+class WordPageTrap(BaseModel):
+    word: WordPageWord
+    nuance: str = Field(min_length=10, max_length=500)
+
+
+class RelatedWord(BaseModel):
+    """Связанное слово с леммой и частью речи."""
+    lemma: str = Field(min_length=1, max_length=64)
+    pos: str = Field(default="", max_length=20)
+
+
+class WordPageContentResponse(BaseModel):
+    """Полный ответ LLM для страницы слова."""
+    word: WordPageWord
+    core_translation: str = Field(min_length=1, max_length=50)
+    other_translations: list[str] = Field(default_factory=list, max_length=5)
+    context_sentence: WordPageContextSentence
+    synonyms: list[WordPageSynonym] = Field(min_length=1, max_length=5)
+    antonyms: list[WordPageSynonym] = Field(default_factory=list, max_length=3)
+    collocations: list[WordPageCollocation] = Field(min_length=2, max_length=6)
+    level_b_trap: list[WordPageTrap] = Field(default_factory=list, max_length=3)
+    related_words: list[RelatedWord] = Field(default_factory=list, max_length=8)
+
+    @field_validator("related_words", mode="before")
+    @classmethod
+    def normalize_related_words(cls, v: Any) -> list:
+        """
+        Обратная совместимость: старый формат — список строк,
+        новый формат — список объектов {lemma, pos}.
+        """
+        if not isinstance(v, list):
+            return []
+        result = []
+        for item in v:
+            if isinstance(item, str):
+                if item.strip():
+                    result.append({"lemma": item.strip(), "pos": ""})
+            elif isinstance(item, dict):
+                result.append(item)
+        return result

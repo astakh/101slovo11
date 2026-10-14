@@ -18,6 +18,8 @@ from .partner_invite import PartnerInvite
 from .partner_earning import PartnerEarning
 from .support_ticket import SupportTicket
 from .support_message import SupportMessage
+from .word_page import WordPage
+from .word_page_queue import WordPageQueue
 
 __all__ = [
     "Base", "User", "AuthSession", "Word", "UserWord",
@@ -25,4 +27,5 @@ __all__ = [
     "Subscription", "Payment", "PromoCode", "Referral",
     "Partner", "PartnerInvite", "PartnerEarning",
     "SupportTicket", "SupportMessage",
+    "WordPage", "WordPageQueue",
 ]

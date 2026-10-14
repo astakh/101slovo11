@@ -1,16 +1,20 @@
+# app/services/admin_prompts.py
 """Сервис для управления промптами (админ)."""
 import re
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.models.prompt import Prompt
 from app.models.event import Event
 from app.models.user import User
 
-ALLOWED_KEYS = {"generate_sentences", "evaluate_translation", "enrich_word"}
+ALLOWED_KEYS = {"generate_sentences", "evaluate_translation", "enrich_word", "word_page"}
 
 # Обязательные плейсхолдеры для каждого ключа.
 # Для evaluate_translation плейсхолдеры требуются, т.к. они подставляются в helpers.py.
 # Для enrich_word плейсхолдер {word} подставляется в vocabulary_add.py.
+# Для word_page плейсхолдеры подставляются в app/services/word_page.py.
 REQUIRED_PLACEHOLDERS = {
     "generate_sentences": {"{level}"},
     "evaluate_translation": {
@@ -20,6 +24,7 @@ REQUIRED_PLACEHOLDERS = {
         "{uuid}",
     },
     "enrich_word": {"{word}"},
+    "word_page": {"{word}", "{pos}", "{dictionary}", "{level}"},
 }
 
 # Все допустимые плейсхолдеры (чтобы не было лишних).
@@ -32,6 +37,7 @@ ALLOWED_PLACEHOLDERS = {
         "{uuid}",
     },
     "enrich_word": {"{word}"},
+    "word_page": {"{word}", "{pos}", "{dictionary}", "{level}"},
 }
 
 
@@ -64,6 +70,7 @@ def validate_prompt_template(key: str, template: str) -> list[str]:
 
     # Поиск плейсхолдеров вида {something}
     found = set(re.findall(r"\{[a-zA-Z_]+\}", template))
+
     required = REQUIRED_PLACEHOLDERS.get(key, set())
     allowed = ALLOWED_PLACEHOLDERS.get(key, set())
 
@@ -89,13 +96,14 @@ def validate_prompt_template(key: str, template: str) -> list[str]:
         "target_words_json": "[]",
         "uuid": "testuuid123",
         "word": "run",
+        "pos": "verb",
+        "dictionary": "it",
     }
 
     try:
         rendered = template
         for k, v in test_values.items():
             rendered = rendered.replace("{" + k + "}", v)
-
         # После замены не должно остаться незаполненных плейсхолдеров
         remaining = re.findall(r"\{[a-zA-Z_]+\}", rendered)
         if remaining:
@@ -138,7 +146,6 @@ async def update_prompt(
     stmt = select(Prompt).where(Prompt.key == key)
     result = await db.execute(stmt)
     prompt = result.scalar_one_or_none()
-
     if not prompt:
         raise ValueError(f"Промпт '{key}' не найден")
 
@@ -151,7 +158,6 @@ async def update_prompt(
         payload={"key": key},
     )
     db.add(event)
-
     await db.flush()
     await db.refresh(prompt)
     return prompt

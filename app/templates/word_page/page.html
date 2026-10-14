@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+{% block title %}{{ meta_title }}{% endblock %}
+{% block description %}{{ meta_description }}{% endblock %}
+{% block head %}
+<link rel="canonical" href="{{ canonical_url }}">
+<meta property="og:title" content="{{ meta_title }}">
+<meta property="og:description" content="{{ meta_description }}">
+<meta property="og:type" content="article">
+<meta property="og:url" content="{{ canonical_url }}">
+<meta property="og:site_name" content="101slovo">
+<meta property="og:locale" content="ru_RU">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{{ meta_title }}">
+<meta name="twitter:description" content="{{ meta_description }}">
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "DefinedTerm",
+    "name": "{{ content.word.lemma }}",
+    "inDefinedTermSet": {"@type": "DefinedTermSet", "name": "101slovo IT Dictionary"},
+    "description": "{{ content.core_translation }}",
+    "termCode": "{{ content.word.lemma }}",
+    "inLanguage": "en",
+    "alternateName": {{ content.other_translations | tojson | safe }}
+}
+</script>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Главная", "item": "https://101slovo.ru/"},
+        {"@type": "ListItem", "position": 2, "name": "Словарь", "item": "https://101slovo.ru/words"},
+        {"@type": "ListItem", "position": 3, "name": "{{ content.word.lemma }}", "item": "{{ canonical_url }}"}
+    ]
+}
+</script>
+<style>
+.word-page-header { text-align: center; padding: 1.5rem 0; margin-bottom: 1.5rem; }
+.word-page-lemma {
+    font-size: 2.5rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 0.25rem;
+    background: var(--gradient-primary); -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent; background-clip: text;
+}
+.word-page-transcription { font-size: 1.25rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+.word-page-core { font-size: 1.5rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.5rem; }
+.word-page-other { color: var(--text-secondary); font-size: 0.9375rem; }
+.word-section { margin-bottom: 1.5rem; }
+.word-section-title {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-size: 1.125rem; font-weight: 700; margin-bottom: 0.75rem; color: var(--text-primary);
+}
+.context-sentence { font-size: 1.125rem; font-style: italic; color: var(--text-primary); margin-bottom: 0.5rem; line-height: 1.6; }
+.context-translation { color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.5; }
+.synonym-item, .antonym-item, .trap-item {
+    padding: 0.75rem; background: var(--surface-50); border-radius: var(--radius-md);
+    margin-bottom: 0.5rem; border-left: 3px solid var(--brand-primary);
+}
+.synonym-word, .antonym-word, .trap-word { font-weight: 700; color: var(--text-primary); }
+.word-link {
+    color: var(--brand-primary); text-decoration: none; font-weight: 700;
+    border-bottom: 1px dashed var(--brand-primary-light); transition: all var(--transition-fast);
+}
+.word-link:hover { color: var(--brand-primary-dark); border-bottom-style: solid; }
+.synonym-nuance, .antonym-nuance, .trap-nuance { color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.25rem; }
+.collocation-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.625rem 0.75rem; background: var(--surface-50);
+    border-radius: var(--radius-md); margin-bottom: 0.375rem; flex-wrap: wrap; gap: 0.5rem;
+}
+.collocation-phrase { font-weight: 600; color: var(--text-primary); }
+.collocation-translation { color: var(--text-secondary); font-size: 0.875rem; }
+.trap-item { border-left-color: var(--text-error-strong); background: var(--bg-error); }
+.related-words { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.related-word-link {
+    display: inline-flex; align-items: center; padding: 0.375rem 0.75rem;
+    background: var(--surface-100); border-radius: var(--radius-full);
+    color: var(--brand-primary); text-decoration: none; font-weight: 500;
+    font-size: 0.875rem; transition: all var(--transition-fast);
+}
+.related-word-link:hover { background: var(--brand-primary); color: white; }
+.related-word-link--plain { color: var(--text-secondary); cursor: default; }
+.related-word-link--plain:hover { background: var(--surface-100); color: var(--text-secondary); }
+.breadcrumbs { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; color: var(--text-muted); margin-bottom: 1rem; }
+.breadcrumbs a { color: var(--text-secondary); text-decoration: none; }
+.breadcrumbs a:hover { color: var(--brand-primary); }
+.badge-level { background: rgba(99, 102, 241, 0.12); color: var(--text-brand); }
+.badge-dict { background: rgba(236, 72, 153, 0.12); color: var(--text-brand-secondary); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 0 auto;">
+    <nav class="breadcrumbs" aria-label="Хлебные крошки">
+        <a href="/">Главная</a><span>→</span>
+        <a href="/words">Словарь</a><span>→</span>
+        <span>{{ content.word.lemma }}</span>
+    </nav>
+
+    <div class="word-page-header">
+        <h1 class="word-page-lemma">{{ content.word.lemma }}</h1>
+        <div class="word-page-transcription">{{ content.word.transcription }}</div>
+        <div style="display: flex; justify-content: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
+            <span class="badge badge-active">{{ content.word.part_of_speech }}</span>
+            {% if word.level %}<span class="badge badge-level">{{ word.level }}</span>{% endif %}
+            {% if word.in_it %}<span class="badge badge-dict">IT</span>
+            {% elif word.in_travel %}<span class="badge badge-dict">Путешествия</span>
+            {% else %}<span class="badge badge-dict">Общий</span>{% endif %}
+        </div>
+        <div class="word-page-core">{{ content.core_translation }}</div>
+        {% if content.other_translations %}
+        <div class="word-page-other">Также: {{ content.other_translations | join(', ') }}</div>
+        {% endif %}
+    </div>
+
+    <!-- В контексте -->
+    <div class="word-section">
+        <h2 class="word-section-title">
+            <i data-lucide="message-circle" style="width:18px;height:18px;color:var(--brand-primary);" aria-hidden="true"></i>
+            В контексте
+        </h2>
+        <div class="card">
+            <p class="context-sentence" lang="en">"{{ content.context_sentence.english }}"</p>
+            <p class="context-translation">→ {{ content.context_sentence.russian }}</p>
+        </div>
+    </div>
+
+    <!-- Синонимы -->
+    {% if content.synonyms %}
+    <div class="word-section">
+        <h2 class="word-section-title">
+            <i data-lucide="repeat" style="width:18px;height:18px;color:var(--color-success);" aria-hidden="true"></i>
+            Синонимы
+        </h2>
+        {% for syn in content.synonyms %}
+        {% set syn_ll = syn.word.lemma | lower %}
+        {% set syn_pos = syn.word.part_of_speech | lower %}
+        {% set syn_pos_first = syn_pos.split('/')[0] | trim if '/' in syn_pos else syn_pos %}
+        {% set syn_key_exact = syn_ll ~ '|' ~ syn_pos_first %}
+        <div class="synonym-item">
+            <div class="synonym-word">
+                {% if syn_key_exact in word_links %}
+                    <a href="/word/{{ word_links[syn_key_exact] }}" class="word-link" title="Разбор слова «{{ syn.word.lemma }}»">
+                        {{ syn.word.lemma }}
+                    </a>
+                {% elif syn_ll in word_links %}
+                    <a href="/word/{{ word_links[syn_ll] }}" class="word-link" title="Разбор слова «{{ syn.word.lemma }}»">
+                        {{ syn.word.lemma }}
+                    </a>
+                {% else %}
+                    {{ syn.word.lemma }}
+                {% endif %}
+                <span style="color:var(--text-muted);font-weight:400;">{{ syn.word.transcription }}</span>
+            </div>
+            <div class="synonym-nuance">{{ syn.nuance }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Антонимы -->
+    {% if content.antonyms %}
+    <div class="word-section">
+        <h2 class="word-section-title">
+            <i data-lucide="arrow-left-right" style="width:18px;height:18px;color:var(--text-warning-strong);" aria-hidden="true"></i>
+            Антонимы
+        </h2>
+        {% for ant in content.antonyms %}
+        {% set ant_ll = ant.word.lemma | lower %}
+        {% set ant_pos = ant.word.part_of_speech | lower %}
+        {% set ant_pos_first = ant_pos.split('/')[0] | trim if '/' in ant_pos else ant_pos %}
+        {% set ant_key_exact = ant_ll ~ '|' ~ ant_pos_first %}
+        <div class="antonym-item">
+            <div class="antonym-word">
+                {% if ant_key_exact in word_links %}
+                    <a href="/word/{{ word_links[ant_key_exact] }}" class="word-link" title="Разбор слова «{{ ant.word.lemma }}»">
+                        {{ ant.word.lemma }}
+                    </a>
+                {% elif ant_ll in word_links %}
+                    <a href="/word/{{ word_links[ant_ll] }}" class="word-link" title="Разбор слова «{{ ant.word.lemma }}»">
+                        {{ ant.word.lemma }}
+                    </a>
+                {% else %}
+                    {{ ant.word.lemma }}
+                {% endif %}
+                <span style="color:var(--text-muted);font-weight:400;">{{ ant.word.transcription }}</span>
+            </div>
+            <div class="antonym-nuance">{{ ant.nuance }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Устойчивые выражения -->
+    {% if content.collocations %}
+    <div class="word-section">
+        <h2 class="word-section-title">
+            <i data-lucide="link" style="width:18px;height:18px;color:var(--text-accent);" aria-hidden="true"></i>
+            Устойчивые выражения
+        </h2>
+        {% for col in content.collocations %}
+        <div class="collocation-item">
+            <span class="collocation-phrase" lang="en">{{ col.phrase }}</span>
+            <span class="collocation-translation">{{ col.translation }}</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Ловушки -->
+    {% if content.level_b_trap %}
+    <div class="word-section">
+        <h2 class="word-section-title">
+            <i data-lucide="alert-triangle" style="width:18px;height:18px;color:var(--text-error-strong);" aria-hidden="true"></i>
+            Ловушки для русскоговорящих
+        </h2>
+        {% for trap in content.level_b_trap %}
+        {% set tr_ll = trap.word.lemma | lower %}
+        {% set tr_pos = trap.word.part_of_speech | lower %}
+        {% set tr_pos_first = tr_pos.split('/')[0] | trim if '/' in tr_pos else tr_pos %}
+        {% set tr_key_exact = tr_ll ~ '|' ~ tr_pos_first %}
+        <div class="trap-item">
+            <div class="trap-word">
+                ⚠️
+                {% if tr_key_exact in word_links %}
+                    <a href="/word/{{ word_links[tr_key_exact] }}" class="word-link" style="color:var(--text-error-strong);border-bottom-color:var(--text-error-strong);" title="Разбор слова «{{ trap.word.lemma }}»">
+                        {{ trap.word.lemma }}
+                    </a>
+                {% elif tr_ll in word_links %}
+                    <a href="/word/{{ word_links[tr_ll] }}" class="word-link" style="color:var(--text-error-strong);border-bottom-color:var(--text-error-strong);" title="Разбор слова «{{ trap.word.lemma }}»">
+                        {{ trap.word.lemma }}
+                    </a>
+                {% else %}
+                    {{ trap.word.lemma }}
+                {% endif %}
+                ≠ {{ content.word.lemma }}
+            </div>
+            <div class="trap-nuance">{{ trap.nuance }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Похожие слова -->
+    {% if content.related_words %}
+    <div class="word-section">
+        <h2 class="word-section-title">
+            <i data-lucide="book-open" style="width:18px;height:18px;color:var(--brand-primary);" aria-hidden="true"></i>
+            Похожие слова
+        </h2>
+        <div class="related-words">
+            {% for rw in content.related_words %}
+                {% if rw is mapping %}
+                    {% set rw_lemma = rw.lemma %}
+                    {% set rw_pos = rw.pos | default('') %}
+                {% else %}
+                    {% set rw_lemma = rw %}
+                    {% set rw_pos = '' %}
+                {% endif %}
+                {% set rw_ll = rw_lemma | lower | trim %}
+                {% set rw_pos_l = rw_pos | lower | trim %}
+                {% set rw_key = rw_ll ~ '|' ~ rw_pos_l if rw_pos_l else rw_ll %}
+                {% if rw_key in word_links %}
+                    <a href="/word/{{ word_links[rw_key] }}" class="related-word-link">{{ rw_lemma }}</a>
+                {% elif rw_ll in word_links %}
+                    <a href="/word/{{ word_links[rw_ll] }}" class="related-word-link">{{ rw_lemma }}</a>
+                {% else %}
+                    <span class="related-word-link related-word-link--plain">{{ rw_lemma }}</span>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- CTA -->
+    <div class="cta-section" style="margin-top: 2rem;">
+        {% if request.state.user %}
+            <h3>Хотите запомнить это слово навсегда?</h3>
+            <p>Учите слова в предложениях с ИИ. Интервальное повторение закрепляет навсегда.</p>
+            <a href="/dashboard" role="button">Продолжить обучение</a>
+        {% else %}
+            <h3>Хотите запомнить это слово навсегда?</h3>
+            <p>Учите слова в предложениях с ИИ. Интервальное повторение закрепляет навсегда.</p>
+            <a href="/register" role="button">Начать бесплатно</a>
+        {% endif %}
+    </div>
+
+    <p style="text-align:center;color:var(--text-muted);font-size:0.75rem;margin-top:1rem;">
+        👁 {{ view_count }} просмотров
+    </p>
+</div>
+{% endblock %}

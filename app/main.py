@@ -2,11 +2,13 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal, partner, support
+
+from app.routers import auth, onboarding, pages, lesson, settings, vocabulary, admin, billing, legal, partner, support, word_pages
 from app.middleware import AppMiddleware
 from app.core.templates import templates
 from app.db import AsyncSessionLocal
@@ -49,10 +51,12 @@ app = FastAPI(title="101slovo", lifespan=lifespan)
 async def bot_protection_middleware(request: Request, call_next):
     if request.method == "OPTIONS":
         return Response(status_code=204, headers={"Allow": "GET, POST, HEAD, OPTIONS", "Cache-Control": "no-store"})
+
     if request.method == "HEAD":
         if request.url.path == "/health":
             return await call_next(request)
         return Response(status_code=200, headers={"Cache-Control": "no-store"})
+
     return await call_next(request)
 
 
@@ -71,12 +75,15 @@ app.include_router(legal.router)
 app.include_router(partner.router)
 app.include_router(support.router)
 app.include_router(admin.router)
+# ✅ НОВЫЙ роутер для Word Pages (SEO-страницы слов)
+app.include_router(word_pages.router)
 
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     if request.headers.get("HX-Request") and exc.headers and "HX-Redirect" in exc.headers:
         return Response(status_code=200, headers=exc.headers)
+
     if exc.status_code == 404:
         return templates.TemplateResponse("errors/404.html", {"request": request}, status_code=404)
     if exc.status_code in [401, 403]:
@@ -90,11 +97,13 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def root(request: Request):
     if request.state.user:
         return Response(status_code=303, headers={"Location": "/dashboard"})
+
     monthly_price = app_settings.SUBSCRIPTION_MONTHLY_PRICE_KOP / 100
     six_month_price = app_settings.SUBSCRIPTION_6M_PRICE_KOP / 100
     six_month_per_month = six_month_price / 6
     six_month_full = monthly_price * 6
     six_month_saving = six_month_full - six_month_price
+
     return templates.TemplateResponse(
         "landing.html",
         {

@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}Админ — Очередь генерации{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+    <!-- Заголовок и навигация -->
+    <div class="section-header">
+        <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="list-ordered" style="width: 24px; height: 24px; color: var(--brand-primary);" aria-hidden="true"></i>
+            Очередь генерации
+        </h1>
+        <div style="display: flex; gap: 0.5rem;">
+            <a href="/admin/word-pages" class="secondary">
+                <i data-lucide="book-open-text" class="icon-sm" aria-hidden="true"></i>
+                Страницы слов
+            </a>
+            <a href="/admin/prompts" class="secondary">
+                <i data-lucide="shield" class="icon-sm" aria-hidden="true"></i>
+                Промпты
+            </a>
+        </div>
+    </div>
+
+    <!-- Секция 1: Добавить в очередь -->
+    <div class="card mb-3">
+        <h3 style="margin-top: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="search" class="icon-lg" style="color: var(--brand-primary);" aria-hidden="true"></i>
+            Добавить слова в очередь
+        </h3>
+
+        <!-- Форма поиска -->
+        <form method="GET" action="/admin/word-pages/queue" style="display: flex; gap: 0.75rem; margin-bottom: 1rem;">
+            <input type="text"
+                   name="q"
+                   value="{{ search_query }}"
+                   placeholder="Поиск по лемме (например: deploy, run, cache)..."
+                   style="flex: 1;"
+                   autocomplete="off">
+            <button type="submit">
+                <i data-lucide="search" class="icon-sm" aria-hidden="true"></i>
+                Найти
+            </button>
+        </form>
+
+        {% if search_query %}
+        <div style="margin-bottom: 1rem;">
+            <p style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 0.5rem;">
+                Результаты поиска по запросу «<strong>{{ search_query }}</strong>»:
+                {% if search_results %}{{ search_results | length }} слов{% else %}ничего не найдено{% endif %}
+            </p>
+
+            {% if search_results %}
+            <form method="POST" action="/admin/word-pages/queue/add">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem;">
+                    {% for word in search_results %}
+                    <label style="display: flex; align-items: center; gap: 0.75rem; padding: 0.625rem 0.875rem; background: var(--surface-50); border: 1px solid var(--border-light); border-radius: var(--radius-md); cursor: pointer; transition: all var(--transition-fast);"
+                           onmouseover="this.style.borderColor='var(--brand-primary-light)'; this.style.background='var(--surface-0)';"
+                           onmouseout="this.style.borderColor='var(--border-light)'; this.style.background='var(--surface-50)';">
+                        <input type="checkbox" name="word_ids" value="{{ word.id }}" style="width: 18px; height: 18px; accent-color: var(--brand-primary); cursor: pointer;">
+                        <div style="flex: 1;">
+                            <strong>{{ word.lemma }}</strong>
+                            <span style="color: var(--text-muted); font-size: 0.75rem;">({{ word.pos }})</span>
+                            {% if word.level %}
+                                <span class="badge badge-active" style="margin-left: 0.375rem;">{{ word.level }}</span>
+                            {% endif %}
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">
+                            {{ word.translations | join(', ') | truncate(50) }}
+                        </div>
+                    </label>
+                    {% endfor %}
+                </div>
+                <button type="submit" style="width: 100%;">
+                    <i data-lucide="plus" class="icon-sm" aria-hidden="true"></i>
+                    Добавить выбранные в очередь
+                </button>
+            </form>
+            {% endif %}
+
+            {# ============================================================ #}
+            {# Блок генерации: если точное совпадение не найдено в базе #}
+            {# ============================================================ #}
+            {% if not exact_match %}
+            <div style="padding: 1rem; border: 2px dashed var(--brand-primary); border-radius: var(--radius-md); background: rgba(99, 102, 241, 0.03); margin-top: 0.75rem;">
+                <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+                    <i data-lucide="sparkles" style="width: 18px; height: 18px; color: var(--brand-secondary);" aria-hidden="true"></i>
+                    <span style="font-weight: 600; color: var(--text-primary);">
+                        Слово «{{ search_query }}» не найдено в базе
+                    </span>
+                </div>
+                <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 0.75rem;">
+                    Можно сгенерировать его через LLM (GigaChat) и автоматически добавить в словарь.
+                    После генерации слово появится в результатах поиска выше.
+                </p>
+                <form method="POST" action="/admin/word-pages/queue/generate-word">
+                    <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                    <input type="hidden" name="lemma" value="{{ search_query }}">
+                    <button type="submit"
+                            style="background: var(--gradient-primary); display: inline-flex; align-items: center; gap: 0.5rem;"
+                            onclick="this.disabled=true; this.innerHTML='<span class=\'spinner\'></span> Генерация...'; this.form.submit();">
+                        <i data-lucide="sparkles" class="icon-sm" aria-hidden="true"></i>
+                        Сгенерировать «{{ search_query }}» через LLM
+                    </button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin: 0;">
+            💡 Если слово уже имеет страницу, будет показан бейдж «⚠️ Будет перегенерация».
+            Слова, уже находящиеся в очереди (статусы «в очереди» или «обрабатывается»), не добавляются повторно.
+        </p>
+    </div>
+
+    <!-- Секция 2: Очередь -->
+    <div class="card">
+        <div class="section-header" style="margin-bottom: 1rem;">
+            <h3 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                <i data-lucide="clock" class="icon-lg" style="color: var(--text-warning-strong);" aria-hidden="true"></i>
+                Элементы очереди
+            </h3>
+            {# Кнопка запуска батча (через namespace) #}
+            {% set ns = namespace(queued_count=0) %}
+            {% for item in queue_items %}
+                {% if item.queue_item.status == 'queued' %}
+                    {% set ns.queued_count = ns.queued_count + 1 %}
+                {% endif %}
+            {% endfor %}
+            {% if ns.queued_count > 0 %}
+            <form method="POST" action="/admin/word-pages/generate-batch">
+                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                <button type="submit"
+                        onclick="return confirm('Запустить генерацию для {{ ns.queued_count }} слов? Это займёт примерно {{ ns.queued_count * 5 }} сек.');">
+                    <i data-lucide="play" class="icon-sm" aria-hidden="true"></i>
+                    Сгенерировать очередь ({{ ns.queued_count }})
+                </button>
+            </form>
+            {% else %}
+            <span class="secondary btn--sm" style="opacity: 0.5; cursor: not-allowed;">
+                <i data-lucide="play" class="icon-xs" aria-hidden="true"></i>
+                Очередь пуста
+            </span>
+            {% endif %}
+        </div>
+
+        {% if not queue_items %}
+        <div class="text-center" style="padding: 2rem;">
+            <p style="color: var(--text-muted);">
+                Очередь пуста. Добавьте слова через форму выше.
+            </p>
+        </div>
+        {% else %}
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Слово</th>
+                        <th>Статус</th>
+                        <th style="text-align: right;">Попытки</th>
+                        <th>Ошибка</th>
+                        <th>Добавлено</th>
+                        <th>Обработано</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in queue_items %}
+                    {% set qi = item.queue_item %}
+                    {% set word = item.word %}
+                    <tr>
+                        <td>
+                            <strong>{{ word.lemma }}</strong>
+                            <span style="color: var(--text-muted); font-size: 0.75rem;">({{ word.pos }})</span>
+                            {% if word.level %}
+                                <span class="badge badge-active" style="margin-left: 0.25rem;">{{ word.level }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if qi.status == 'queued' %}
+                                <span class="badge badge-active">⏳ В очереди</span>
+                            {% elif qi.status == 'processing' %}
+                                <span class="badge badge-review">🔄 Обрабатывается</span>
+                            {% elif qi.status == 'done' %}
+                                <span class="badge badge-mastered">✅ Готово</span>
+                            {% elif qi.status == 'error' %}
+                                <span class="badge badge-ignored">❌ Ошибка</span>
+                            {% endif %}
+                        </td>
+                        <td style="text-align: right;">{{ qi.attempt_count }}</td>
+                        <td>
+                            {% if qi.error_message %}
+                                <span style="color: var(--text-error-strong); font-size: 0.75rem;" title="{{ qi.error_message }}">
+                                    {{ qi.error_message | truncate(60) }}
+                                </span>
+                            {% else %}
+                                <span style="color: var(--text-muted);">—</span>
+                            {% endif %}
+                        </td>
+                        <td style="font-size: 0.8125rem; color: var(--text-muted);">
+                            {{ qi.created_at.strftime('%d.%m.%Y %H:%M') }}
+                        </td>
+                        <td style="font-size: 0.8125rem; color: var(--text-muted);">
+                            {% if qi.processed_at %}
+                                {{ qi.processed_at.strftime('%d.%m.%Y %H:%M') }}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if qi.status in ('queued', 'error') %}
+                            <form method="POST" action="/admin/word-pages/queue/{{ qi.id }}/delete" style="display: inline;">
+                                <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                <button type="submit" class="secondary btn--sm" title="Удалить из очереди"
+                                        onclick="return confirm('Удалить {{ word.lemma }} из очереди?');">
+                                    <i data-lucide="trash-2" class="icon-xs" aria-hidden="true"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Подсказка -->
+    <div class="flash-info" style="margin-top: 1rem;">
+        <i data-lucide="info" class="icon-md" aria-hidden="true"></i>
+        <span style="font-size: 0.8125rem;">
+            <strong>Как работает генерация:</strong>
+            Батч обрабатывает все слова со статусом «⏳ В очереди» последовательно.
+            Между запросами — пауза 1 сек для защиты от рейт-лимита GigaChat.
+            Успешные слова получают страницу со статусом «📝 Черновик» (или обновляются, если страница уже была).
+        </span>
+    </div>
+</div>
+{% endblock %}

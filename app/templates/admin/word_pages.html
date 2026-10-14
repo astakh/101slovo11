@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Админ — Страницы слов{% endblock %}
+{% block content %}
+<div class="container--medium" style="margin: 2rem auto;">
+    <!-- Заголовок и навигация -->
+    <div class="section-header">
+        <h1 style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+            <i data-lucide="book-open-text" style="width: 24px; height: 24px; color: var(--brand-primary);" aria-hidden="true"></i>
+            Страницы слов
+        </h1>
+        <div style="display: flex; gap: 0.5rem;">
+            <a href="/admin/word-pages/queue" class="secondary">
+                <i data-lucide="list-ordered" class="icon-sm" aria-hidden="true"></i>
+                Очередь генерации
+            </a>
+            <a href="/admin/prompts" class="secondary">
+                <i data-lucide="shield" class="icon-sm" aria-hidden="true"></i>
+                Промпты
+            </a>
+        </div>
+    </div>
+
+    <!-- Фильтр по статусу -->
+    <div class="card mb-3" style="padding: 0.875rem 1rem;">
+        <form method="GET" action="/admin/word-pages" style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 150px;">
+                <label for="status" style="margin-bottom: 0.25rem; font-size: 0.75rem;">Статус</label>
+                <select id="status" name="status">
+                    <option value="">Все</option>
+                    <option value="draft" {% if status_filter == 'draft' %}selected{% endif %}>📝 Черновик</option>
+                    <option value="published" {% if status_filter == 'published' %}selected{% endif %}>🟢 Опубликовано</option>
+                    <option value="archived" {% if status_filter == 'archived' %}selected{% endif %}>📦 Архив</option>
+                </select>
+            </div>
+            <button type="submit">Применить</button>
+        </form>
+    </div>
+
+    {% if not items %}
+        <div class="card text-center" style="padding: 3rem;">
+            <div style="font-size: 3rem; margin-bottom: 0.75rem; opacity: 0.4;">📄</div>
+            <h3 style="margin: 0 0 0.5rem 0;">Страниц слов пока нет</h3>
+            <p style="color: var(--text-muted); margin-bottom: 1rem;">
+                Добавьте слова в очередь генерации и запустите батч.
+            </p>
+            <a href="/admin/word-pages/queue" role="button">
+                <i data-lucide="plus" class="icon-sm" aria-hidden="true"></i>
+                Перейти к очереди
+            </a>
+        </div>
+    {% else %}
+        <!-- Сводка (через namespace, т.к. вложенные атрибуты в фильтрах не работают) -->
+        {% set ns = namespace(published_count=0, total_views=0) %}
+        {% for item in items %}
+            {% if item.page.status == 'published' %}
+                {% set ns.published_count = ns.published_count + 1 %}
+            {% endif %}
+            {% set ns.total_views = ns.total_views + item.page.view_count %}
+        {% endfor %}
+
+        <div class="grid grid-3" style="gap: 0.75rem; margin-bottom: 1rem;">
+            <div class="stat-card stat-card--compact">
+                <div class="stat-card__body">
+                    <div class="stat-card__value" style="font-size: 1.5rem;">{{ items | length }}</div>
+                    <div class="stat-card__label">Всего страниц</div>
+                </div>
+            </div>
+            <div class="stat-card stat-card--compact">
+                <div class="stat-card__body">
+                    <div class="stat-card__value" style="font-size: 1.5rem; color: var(--text-success-strong);">
+                        {{ ns.published_count }}
+                    </div>
+                    <div class="stat-card__label">Опубликовано</div>
+                </div>
+            </div>
+            <div class="stat-card stat-card--compact">
+                <div class="stat-card__body">
+                    <div class="stat-card__value" style="font-size: 1.5rem; color: var(--text-warning-strong);">
+                        {{ ns.total_views }}
+                    </div>
+                    <div class="stat-card__label">Всего просмотров</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Таблица страниц -->
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Слово</th>
+                        <th>Slug</th>
+                        <th>Статус</th>
+                        <th style="text-align: right;">Просмотры</th>
+                        <th>Сгенерировано</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                        {% set page = item.page %}
+                        {% set word = item.word %}
+                        <tr>
+                            <td>
+                                <strong>{{ word.lemma }}</strong>
+                                <span style="color: var(--text-muted); font-size: 0.75rem;">({{ word.pos }})</span>
+                                {% if word.level %}
+                                    <span class="badge badge-active" style="margin-left: 0.25rem;">{{ word.level }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <code style="font-size: 0.75rem;">{{ page.slug }}</code>
+                            </td>
+                            <td>
+                                {% if page.status == 'published' %}
+                                    <span class="badge badge-mastered">🟢 Опубликовано</span>
+                                {% elif page.status == 'draft' %}
+                                    <span class="badge badge-active">📝 Черновик</span>
+                                {% elif page.status == 'archived' %}
+                                    <span class="badge badge-ignored">📦 Архив</span>
+                                {% endif %}
+                            </td>
+                            <td style="text-align: right;">{{ page.view_count }}</td>
+                            <td style="font-size: 0.8125rem; color: var(--text-muted);">
+                                {% if page.generated_at %}
+                                    {{ page.generated_at.strftime('%d.%m.%Y %H:%M') }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div style="display: flex; gap: 0.25rem; flex-wrap: wrap;">
+                                    {# Предпросмотр / Просмотр публичной страницы #}
+                                    {% if page.status == 'published' %}
+                                        <a href="/word/{{ page.slug }}" target="_blank" class="secondary btn--sm" title="Просмотр публичной страницы">
+                                            <i data-lucide="eye" class="icon-xs" aria-hidden="true"></i>
+                                        </a>
+                                    {% else %}
+                                        <a href="/word/{{ page.slug }}?preview=1" target="_blank" class="secondary btn--sm" title="Предпросмотр">
+                                            <i data-lucide="eye" class="icon-xs" aria-hidden="true"></i>
+                                        </a>
+                                    {% endif %}
+
+                                    {# Перегенерация #}
+                                    <form method="POST" action="/admin/word-pages/{{ page.id }}/regenerate" style="display: inline;">
+                                        <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                        <button type="submit" class="secondary btn--sm" title="Перегенерировать"
+                                                onclick="return confirm('Перегенерировать контент для {{ word.lemma }}? Статус не изменится.');">
+                                            <i data-lucide="refresh-cw" class="icon-xs" aria-hidden="true"></i>
+                                        </button>
+                                    </form>
+
+                                    {# Публикация / Архивация #}
+                                    {% if page.status == 'draft' or page.status == 'archived' %}
+                                        <form method="POST" action="/admin/word-pages/{{ page.id }}/publish" style="display: inline;">
+                                            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                            <button type="submit" class="btn--sm btn--success" title="Опубликовать">
+                                                <i data-lucide="upload" class="icon-xs" aria-hidden="true"></i>
+                                            </button>
+                                        </form>
+                                    {% elif page.status == 'published' %}
+                                        <form method="POST" action="/admin/word-pages/{{ page.id }}/archive" style="display: inline;">
+                                            <input type="hidden" name="csrf_token" value="{{ request.state.csrf_token }}">
+                                            <button type="submit" class="secondary btn--sm" title="Архивировать"
+                                                    onclick="return confirm('Архивировать страницу {{ page.slug }}?');">
+                                                <i data-lucide="archive" class="icon-xs" aria-hidden="true"></i>
+                                            </button>
+                                        </form>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p style="color: var(--text-muted); font-size: 0.75rem; margin-top: 0.75rem;">
+            💡 <strong>Перегенерация</strong> обновляет контент «на лету» — статус страницы не меняется.
+            <strong>Публикация</strong> делает страницу доступной по адресу <code>/word/{slug}</code>.
+        </p>
+    {% endif %}
+</div>
+{% endblock %}
